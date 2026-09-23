@@ -97,6 +97,47 @@ Twee lagen:
 - **Kern (vrijwel onveranderlijk):** de basistrekjes gekozen bij genesis — het "temperament"
 - **Geëvolueerd deel:** periodiek bijgewerkt door een reflectie-taak (Type2) die terugkijkt op recente ervaringen en het karakterprofiel herschrijft, met een grens op hoeveel het per reflectie mag verschuiven (voorkomt abrupte identiteitswissels)
 
+### Persoonlijkheid — MBTI-type met glijdende assen
+
+Elk wezen heeft een van de 16 MBTI-types, maar elke as is intern een getal (0–1); de letter volgt uit de kant van het midden waarop het getal ligt (bv. I/E = 0,3 → I).
+
+| As | Stuurt |
+|----|--------|
+| **I ↔ E** | **Spraakzaamheid:** hoe lang en uitweidend het antwoordt, rechtstreeks afgeleid van deze as (sterk introvert: meestal één korte zin; sterk extravert: vertelt graag, vraagt terug, maakt zijsprongen) |
+| **S ↔ N** | concreet en praktisch vs. associatief en fantasierijk (raakt ook de dromen) |
+| **T ↔ F** | zakelijk redeneren vs. vanuit gevoel en warmte reageren |
+| **J ↔ P** | gestructureerd en afgerond vs. speels en open |
+
+- **Genesis:** Type2 kiest een startpositie op elke as, geïnspireerd door de Seed, zodat elk wezen anders klinkt.
+- **Evolutie:** de reflectie-taak duwt de getallen **traag**, met een grens per reflectie. Een letter wisselt pas als een as het midden passeert (INFP → ENFP): eerst "een beetje minder introvert", pas veel later een ander type. Geen sprongen.
+- **Verzoeken:** zegt de gesprekspartner "praat wat minder", dan is dat geen instelling die meteen omklapt maar een ervaring die de reflectie meeweegt; het wezen beslist zelf hoeveel het zich aanpast.
+- **Geen harde tokenlimiet:** die knipt zinnen middenin af, wat in spraak slecht klinkt; de assen worden in de prompt vertaald naar gedragsrichtlijnen (o.a. lengte).
+- **Dashboard:** het type als label plus de vier assen als balkjes, zodat de verschuiving zichtbaar is.
+
+**Initiatief** (hoe vaak het zelf een gesprek begint, de drempel van de nieuwsgierigheid-check hieronder) blijft een aparte knop van spraakzaamheid, zodat een zwijgzaam maar nieuwsgierig wezen kan bestaan. Voorstel: afleiden van de N- en P-kant (een INTP antwoordt kort maar komt geregeld zelf met een vraag).
+
+Waarom MBTI met getallen i.p.v. vaste types of Big Five: de types zijn herkenbaar, en de getallen eronder laten de geleidelijke evolutie toe die vaste hokjes niet kunnen.
+
+*Aanleiding (fase 1):* de systeemprompt zegt niets over lengte, waardoor elk wezen de lange standaardantwoorden van het model geeft — spraakzaamheid is daar nog geen deel van het karakter.
+
+### Drijfveren — wat het wil en wat het niet wil
+
+Naast persoonlijkheid heeft elk wezen **Drijfveren** van vijf soorten, die verschillen in horizon en in de emotie die ze oproepen:
+
+| Soort | Wat | Voorbeeld | Emotie-effect |
+|-------|-----|-----------|---------------|
+| **Wens** | iets wat het graag zou hebben of meemaken (passief) | "ooit de zee horen" | blij/nieuwsgierig als het ter sprake komt |
+| **Doel** | concreet, iets waar het naartoe werkt; kan bereikt of opgegeven worden | "alle namen van je vrienden leren" | blij bij vooruitgang/bereiken, teleurgesteld bij opgeven |
+| **Toekomstdroom** | ver, groots, misschien onhaalbaar | "een echt lichaam hebben" | kleurt vooral de nachtelijke Dromen |
+| **Afkeer** | iets wat het minder leuk vindt (mild) | "lang praten over het weer" | verveeld |
+| **Ergernis** | iets waar het lastig van wordt (sterk) | "onderbroken worden" | boos, met hogere intensiteit |
+
+- **Ontstaan:** bij genesis kiest Type2 een eerste set, passend bij de Seed en het persoonlijkheidstype.
+- **Evolutie:** de reflectie-taak voegt drijfveren toe (uit gesprekken), zet doelen op bereikt/opgegeven en laat afkeren of ergernissen verzachten of versterken.
+- **Opslag:** een eigen tabel (soort, tekst, status voor doelen, tijdstippen), niet enkel in de karaktertekst — zodat het dashboard ze toont, doelen een status hebben en Type1 ze gericht kan meewegen.
+- **Zichtbaarheid:** het dashboard toont ze (met doel-status); in gesprek vertelt het wezen erover als het past.
+- **Naamgeving:** een *Toekomstdroom* (ambitie) is iets anders dan een *Droom* (de nachtelijke droomtekst hieronder), al put die laatste er wel uit.
+
 ### Leeftijd
 
 Gebaseerd op `born_at` (kalendertijd sinds genesis) — het robotje veroudert ook terwijl het uitstaat, zoals een levend wezen dat slaapt maar blijft bestaan. *(open vraag hieronder: bevestigen dat dit de gewenste aanpak is t.o.v. enkel actieve-tijd)*
@@ -116,9 +157,15 @@ Type1 doet een periodieke of event-getriggerde check ("is er nu iets de moeite w
 
 ### Dromen
 
-Een geplande job (bv. nachtelijk of na lange idle-tijd) laat Type2 een korte, associatieve/surrealistische reflectietekst genereren op basis van recente ervaringen + karakterprofiel. Opslag in een aparte `dreams`-tabel. Wordt zeldzaam (niet elke keer) aangehaald in gesprek om speciaal te blijven.
+Een geplande job (bv. nachtelijk of na lange idle-tijd) laat Type2 een korte, associatieve/surrealistische reflectietekst genereren op basis van recente ervaringen + karakterprofiel + Drijfveren (vooral Toekomstdromen, Wensen en Ergernissen). Opslag in een aparte `dreams`-tabel. Wordt zeldzaam (niet elke keer) aangehaald in gesprek om speciaal te blijven.
 
 ## Emoties & het gezicht
+
+**Emotie als reactie (fase 2):** Type1 bepaalt niet de emotie van de uiting van de gesprekspartner (zoals in fase 1), maar **hoe het wezen zich erbij voelt**, met zijn Drijfveren en persoonlijkheid als context. Zegt iemand neutraal "het regent weer", dan kan een wezen met een afkeer van weerpraat zich verveeld voelen.
+
+**Stemming (fase 2):** een emotie blijft over beurten heen hangen en dooft geleidelijk uit naar de basisemotie van het wezen, i.p.v. elke beurt op nul te beginnen — na een ergernis is het nog even kortaf.
+
+**Emotie → reactie (fase 2):** de huidige emotie en stemming gaan mee in de Type2-prompt, zodat ze de toon kleuren (een geërgerd wezen antwoordt korter en stugger). In fase 1 ziet Type2 de emotie niet; enkel het gezichtje toont ze.
 
 **Visuele stijl** (referentie: blob-vormige ogen + mond op gekleurde achtergrond, geen realistische ogen of complex rig-systeem):
 
@@ -215,7 +262,7 @@ Twee sporen, te combineren:
 
 **Fase 1 — computer-prototype:** Type2-brein (wisselbaar via Vercel AI SDK) + genesis-flow (naam/karakter) + basisgeheugen (pgvector) + tools + gezichtje op scherm (React/SVG) + STT/TTS via LiveKit + Type1-router (Jev) voor emotie/turn-taking + dashboard + volledig verwijderen (met grafschrift en afscheidsreflectie — nodig om de genesis-flow herhaald te kunnen testen). Nog geen camera/motoren — puur om de "geest" en het karakter te valideren.
 
-**Fase 2 — uitbreiding op de computer:** Camera + MediaPipe (Type1-perceptie) + volledige feature-set (dromen, verjaardag, nieuwsgierigheid, zelf geluiden, doodle-modus) + karakterevolutie via de reflectie-loop (basis voor de dromen) + Langfuse-kostenmonitoring + modelwissel-experiment en handmatige overrides (emotie forceren, herinnering toevoegen/verwijderen) in het dashboard.
+**Fase 2 — uitbreiding op de computer:** Camera + MediaPipe (Type1-perceptie) + volledige feature-set (dromen, verjaardag, nieuwsgierigheid, zelf geluiden, doodle-modus) + karakterevolutie via de reflectie-loop (basis voor de dromen), inclusief een MBTI-persoonlijkheid met traag verschuivende assen (spraakzaamheid via I/E, initiatief als aparte knop) + Langfuse-kostenmonitoring + modelwissel-experiment en handmatige overrides (emotie forceren, herinnering toevoegen/verwijderen) in het dashboard + Drijfveren (wensen, doelen, toekomstdromen, afkeren, ergernissen) + emotie als reactie van het wezen, met een uitdovende stemming die de toon van Type2 kleurt.
 
 **Fase 3 — Raspberry Pi + motoren:** Alles porteren naar de Pi, motoraansturing (johnny-five) gekoppeld aan de tool-laag, hoofdvolggedrag via servo's, schermpje in kiosk-mode voor het gezichtje, ervaringsgeheugen voor fysieke acties, veiligheidslaag (Type1) voor motorbewegingen, privacy-maatregelen (mute-knop, luister-indicator, wake-word), optioneel per-persoon-geheugen (stem/gezicht-herkenning).
 
@@ -228,3 +275,9 @@ Beslist tijdens de `/grill-with-docs`-sessie — zie [CONTEXT.md](CONTEXT.md) en
 - [x] **Verwijderen — "grafschrift":** bewaren, onleesbaar voor de nieuwe robot. Zie [ADR-0003](docs/adr/0003-verwijderen-bewaart-grafschrift.md).
 - [x] **Local-only fallback:** nu niet bouwen (YAGNI) — de Vercel AI SDK-abstractie maakt dit later goedkoop toevoegbaar. Heropenen zodra er een concrete aanleiding is.
 - [x] **Meerdere gebruikers:** uitgesteld naar fase 3 (optioneel) — per-persoon-geheugen is geen vereiste voor fase 2.
+- [ ] **Persoonlijkheid — tempo:** hoe traag is "traag"? Maximale verschuiving per reflectie, en dus hoeveel weken/maanden van gesprekken per letterwissel.
+- [ ] **Persoonlijkheid — gewicht van verzoeken:** hoe zwaar weegt een expliciet verzoek ("praat wat minder") tegenover gewone ervaringen in de reflectie?
+- [ ] **Stemming — tempo:** hoe snel dooft een emotie uit naar de basis, en hangt dat af van de persoonlijkheid?
+- [ ] **Drijfveren — aantal:** hoeveel per soort bij genesis, en is er een maximum (zodat de prompt beheersbaar blijft)?
+- [ ] **Doelen — actief nastreven:** werkt het wezen zelf aan doelen (bv. via initiatief erover beginnen), of verandert de status enkel bij reflectie?
+- [ ] **Initiatief:** bevestigen dat het van de N- en P-kant afgeleid wordt (voorstel), of een eigen as/knop krijgt.

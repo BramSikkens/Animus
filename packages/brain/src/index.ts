@@ -18,7 +18,7 @@ import { z } from "zod";
 import type { Db } from "@animus/db";
 import { epitaphs, identity, memories } from "@animus/db/schema";
 import { formatAge } from "./age.js";
-import { EMOTIONS, type Emotion } from "./emotion.js";
+import { EMOTIONS, isEmotion, type Emotion } from "./emotion.js";
 import { createTools } from "./tools.js";
 
 export { EMOTIONS, type Emotion };
@@ -125,9 +125,7 @@ async function classify(type1: Experimental_EvaluationModel, text: string): Prom
     },
   });
 
-  const emotion: Emotion = (EMOTIONS as readonly string[]).includes(answers.emotion.choice)
-    ? (answers.emotion.choice as Emotion)
-    : "neutraal";
+  const emotion: Emotion = isEmotion(answers.emotion.choice) ? answers.emotion.choice : "neutraal";
   const intensity = Math.min(1, Math.max(0, answers.intensity.score));
   const intent = answers.intent.choice === "complex" ? "complex" : "simpel";
 

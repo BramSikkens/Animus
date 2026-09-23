@@ -97,14 +97,26 @@ Twee lagen:
 - **Kern (vrijwel onveranderlijk):** de basistrekjes gekozen bij genesis — het "temperament"
 - **Geëvolueerd deel:** periodiek bijgewerkt door een reflectie-taak (Type2) die terugkijkt op recente ervaringen en het karakterprofiel herschrijft, met een grens op hoeveel het per reflectie mag verschuiven (voorkomt abrupte identiteitswissels)
 
-### Spraakzaamheid en initiatief
+### Persoonlijkheid — MBTI-type met glijdende assen
 
-Twee aparte temperament-knoppen, bewust niet samengevoegd tot één introvert-extravert-as (een zwijgzaam maar nieuwsgierig wezen moet kunnen):
+Elk wezen heeft een van de 16 MBTI-types, maar elke as is intern een getal (0–1); de letter volgt uit de kant van het midden waarop het getal ligt (bv. I/E = 0,3 → I).
 
-- **Spraakzaamheid:** hoe lang en uitweidend het antwoordt (weinig zeggen vs. graag vertellen)
-- **Initiatief:** hoe vaak het zelf een gesprek begint (stuurt de drempel van de nieuwsgierigheid-check hieronder)
+| As | Stuurt |
+|----|--------|
+| **I ↔ E** | **Spraakzaamheid:** hoe lang en uitweidend het antwoordt, rechtstreeks afgeleid van deze as (sterk introvert: meestal één korte zin; sterk extravert: vertelt graag, vraagt terug, maakt zijsprongen) |
+| **S ↔ N** | concreet en praktisch vs. associatief en fantasierijk (raakt ook de dromen) |
+| **T ↔ F** | zakelijk redeneren vs. vanuit gevoel en warmte reageren |
+| **J ↔ P** | gestructureerd en afgerond vs. speels en open |
 
-Beide krijgen bij genesis een startwaarde die Type2 zelf kiest, zodat elk wezen anders klinkt. Ze evolueren via de reflectie-taak, met dezelfde grens per reflectie. Vraagt de gesprekspartner "praat wat minder", dan is dat geen instelling die meteen omklapt maar een ervaring: de reflectie weegt die mee, en het wezen beslist zelf hoeveel het zich aanpast. Geen harde tokenlimiet: die knipt zinnen middenin af, wat in spraak slecht klinkt; de knop wordt in de prompt vertaald naar een lengterichtlijn.
+- **Genesis:** Type2 kiest een startpositie op elke as, geïnspireerd door de Seed, zodat elk wezen anders klinkt.
+- **Evolutie:** de reflectie-taak duwt de getallen **traag**, met een grens per reflectie. Een letter wisselt pas als een as het midden passeert (INFP → ENFP): eerst "een beetje minder introvert", pas veel later een ander type. Geen sprongen.
+- **Verzoeken:** zegt de gesprekspartner "praat wat minder", dan is dat geen instelling die meteen omklapt maar een ervaring die de reflectie meeweegt; het wezen beslist zelf hoeveel het zich aanpast.
+- **Geen harde tokenlimiet:** die knipt zinnen middenin af, wat in spraak slecht klinkt; de assen worden in de prompt vertaald naar gedragsrichtlijnen (o.a. lengte).
+- **Dashboard:** het type als label plus de vier assen als balkjes, zodat de verschuiving zichtbaar is.
+
+**Initiatief** (hoe vaak het zelf een gesprek begint, de drempel van de nieuwsgierigheid-check hieronder) blijft een aparte knop van spraakzaamheid, zodat een zwijgzaam maar nieuwsgierig wezen kan bestaan. Voorstel: afleiden van de N- en P-kant (een INTP antwoordt kort maar komt geregeld zelf met een vraag).
+
+Waarom MBTI met getallen i.p.v. vaste types of Big Five: de types zijn herkenbaar, en de getallen eronder laten de geleidelijke evolutie toe die vaste hokjes niet kunnen.
 
 *Aanleiding (fase 1):* de systeemprompt zegt niets over lengte, waardoor elk wezen de lange standaardantwoorden van het model geeft — spraakzaamheid is daar nog geen deel van het karakter.
 
@@ -226,7 +238,7 @@ Twee sporen, te combineren:
 
 **Fase 1 — computer-prototype:** Type2-brein (wisselbaar via Vercel AI SDK) + genesis-flow (naam/karakter) + basisgeheugen (pgvector) + tools + gezichtje op scherm (React/SVG) + STT/TTS via LiveKit + Type1-router (Jev) voor emotie/turn-taking + dashboard + volledig verwijderen (met grafschrift en afscheidsreflectie — nodig om de genesis-flow herhaald te kunnen testen). Nog geen camera/motoren — puur om de "geest" en het karakter te valideren.
 
-**Fase 2 — uitbreiding op de computer:** Camera + MediaPipe (Type1-perceptie) + volledige feature-set (dromen, verjaardag, nieuwsgierigheid, zelf geluiden, doodle-modus) + karakterevolutie via de reflectie-loop (basis voor de dromen), inclusief spraakzaamheid en initiatief als evoluerende temperament-knoppen + Langfuse-kostenmonitoring + modelwissel-experiment en handmatige overrides (emotie forceren, herinnering toevoegen/verwijderen) in het dashboard.
+**Fase 2 — uitbreiding op de computer:** Camera + MediaPipe (Type1-perceptie) + volledige feature-set (dromen, verjaardag, nieuwsgierigheid, zelf geluiden, doodle-modus) + karakterevolutie via de reflectie-loop (basis voor de dromen), inclusief een MBTI-persoonlijkheid met traag verschuivende assen (spraakzaamheid via I/E, initiatief als aparte knop) + Langfuse-kostenmonitoring + modelwissel-experiment en handmatige overrides (emotie forceren, herinnering toevoegen/verwijderen) in het dashboard.
 
 **Fase 3 — Raspberry Pi + motoren:** Alles porteren naar de Pi, motoraansturing (johnny-five) gekoppeld aan de tool-laag, hoofdvolggedrag via servo's, schermpje in kiosk-mode voor het gezichtje, ervaringsgeheugen voor fysieke acties, veiligheidslaag (Type1) voor motorbewegingen, privacy-maatregelen (mute-knop, luister-indicator, wake-word), optioneel per-persoon-geheugen (stem/gezicht-herkenning).
 
@@ -239,3 +251,6 @@ Beslist tijdens de `/grill-with-docs`-sessie — zie [CONTEXT.md](CONTEXT.md) en
 - [x] **Verwijderen — "grafschrift":** bewaren, onleesbaar voor de nieuwe robot. Zie [ADR-0003](docs/adr/0003-verwijderen-bewaart-grafschrift.md).
 - [x] **Local-only fallback:** nu niet bouwen (YAGNI) — de Vercel AI SDK-abstractie maakt dit later goedkoop toevoegbaar. Heropenen zodra er een concrete aanleiding is.
 - [x] **Meerdere gebruikers:** uitgesteld naar fase 3 (optioneel) — per-persoon-geheugen is geen vereiste voor fase 2.
+- [ ] **Persoonlijkheid — tempo:** hoe traag is "traag"? Maximale verschuiving per reflectie, en dus hoeveel weken/maanden van gesprekken per letterwissel.
+- [ ] **Persoonlijkheid — gewicht van verzoeken:** hoe zwaar weegt een expliciet verzoek ("praat wat minder") tegenover gewone ervaringen in de reflectie?
+- [ ] **Initiatief:** bevestigen dat het van de N- en P-kant afgeleid wordt (voorstel), of een eigen as/knop krijgt.

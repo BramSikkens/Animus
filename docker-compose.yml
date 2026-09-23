@@ -1,0 +1,16 @@
+name: animus
+
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_USER: animus
+      POSTGRES_PASSWORD: animus
+      POSTGRES_DB: animus
+    volumes:
+      - animus_db_data:/var/lib/postgresql/data
+
+volumes:
+  animus_db_data:

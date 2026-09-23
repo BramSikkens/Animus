@@ -6,6 +6,7 @@ import { createDb, migrate } from "@animus/db";
 import {
   cli,
   defineAgent,
+  llm,
   ServerOptions,
   voice,
   type ChatContext,
@@ -54,13 +55,26 @@ function speechProviders(): { stt: deepgram.STT | openai.STT; tts: deepgram.TTS 
   };
 }
 
+// LiveKit genereert enkel een antwoord als er een LLM gezet is (agent_activity.userTurnCompleted:
+// `if (this.llm === undefined) return`), ook al vervangt llmNode het LLM-pad volledig. Zonder
+// deze placeholder blijft de agent stil na elke beurt. chat() wordt nooit aangeroepen.
+class BrainPlaceholderLLM extends llm.LLM {
+  label(): string {
+    return "animus-brain";
+  }
+
+  chat(): never {
+    throw new Error("BrainPlaceholderLLM.chat() mag niet aangeroepen worden: llmNode draait het brein.");
+  }
+}
+
 class AnimusAgent extends voice.Agent {
   readonly #brain: Brain;
 
   constructor(brain: Brain) {
     // instructions is verplicht op voice.Agent, maar onbenut: llmNode hieronder draait i.p.v. het
     // ingebouwde LLM-pad de brein-kern.
-    super({ instructions: "Animus" });
+    super({ instructions: "Animus", llm: new BrainPlaceholderLLM() });
     this.#brain = brain;
   }
 

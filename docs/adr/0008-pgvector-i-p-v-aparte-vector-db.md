@@ -1,0 +1,3 @@
+# pgvector i.p.v. een aparte vector-database
+
+Voor het lang-termijngeheugen (embeddings + RAG) gebruiken we PostgreSQL met de pgvector-extensie, in plaats van een gespecialiseerde vector-database (Pinecone, Weaviate, e.d.). We hebben al PostgreSQL draaien op de bestaande Hetzner/Coolify-infrastructuur; pgvector hergebruikt dat, dus geen nieuwe service om te provisionen, monitoren en betalen. Op de schaal van dit project (één gebruiker, een groeiend maar niet massaal geheugen) wegen de extra features van een dedicated vector-DB (bv. gedistribueerde schaal, geavanceerde indexering) niet op tegen de operationele eenvoud van alles in dezelfde database — inclusief eenvoudige joins tussen geheugens, identiteit en ervaringen.

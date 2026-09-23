@@ -1,0 +1,3 @@
+# Eigen lichte state machine i.p.v. LangGraph.js
+
+De orchestratie tussen Type1-check → Type2 (indien nodig) → actie bouwen we als een eigen, lichte state machine in plaats van LangGraph.js te gebruiken. Voor de schaal van dit project (één router, twee brein-lagen, een beperkte set tools) is een eigen state machine makkelijker te doorgronden en te debuggen dan de generieke graph-abstractie van LangGraph.js, die overhead toevoegt zonder dat de complexiteit hier vandaag om vraagt. LangGraph.js blijft expliciet een latere optie mocht de orchestratielogica (meer parallelle takken, cycli, subgraphs) te complex worden voor de eigen implementatie.

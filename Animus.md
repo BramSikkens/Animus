@@ -198,10 +198,10 @@ Twee sporen, te combineren:
 | TTS | ElevenLabs (premium) + Deepgram Aura (goedkoop, alledaags) |
 | Database | PostgreSQL + pgvector |
 | ORM | Drizzle |
-| Embeddings | Voyage AI of OpenAI `text-embedding-3-small` |
-| Achtergrondtaken | BullMQ + Redis |
+| Embeddings | OpenAI `text-embedding-3-small` |
+| Achtergrondtaken | Fase 1/2: simpele node-cron-taak; BullMQ + Redis pas vanaf fase 3 (retries/backoff/meerdere workers) |
 | Gezichtje | React + SVG + Framer Motion (+ Flubber voor vorm-morphing) |
-| Realtime signaal brein→gezicht | WebSocket of LiveKit data channel |
+| Realtime signaal brein→gezicht | LiveKit data channel |
 | Dashboard | Next.js (zelfde DB) |
 | Kostenmonitoring | Langfuse (zelf gehost) |
 | Vision — Type1 | MediaPipe (JS/WASM) |
@@ -213,16 +213,18 @@ Twee sporen, te combineren:
 
 ## Roadmap
 
-**Fase 1 — computer-prototype:** Type2-brein (wisselbaar via Vercel AI SDK) + genesis-flow (naam/karakter) + basisgeheugen (pgvector) + tools + gezichtje op scherm (React/SVG) + STT/TTS via LiveKit + Type1-router (Jev) voor emotie/turn-taking + dashboard. Nog geen camera/motoren — puur om de "geest" en het karakter te valideren.
+**Fase 1 — computer-prototype:** Type2-brein (wisselbaar via Vercel AI SDK) + genesis-flow (naam/karakter) + basisgeheugen (pgvector) + tools + gezichtje op scherm (React/SVG) + STT/TTS via LiveKit + Type1-router (Jev) voor emotie/turn-taking + dashboard + volledig verwijderen (met grafschrift en afscheidsreflectie — nodig om de genesis-flow herhaald te kunnen testen). Nog geen camera/motoren — puur om de "geest" en het karakter te valideren.
 
-**Fase 2 — uitbreiding op de computer:** Camera + MediaPipe (Type1-perceptie) + volledige feature-set (dromen, verjaardag, nieuwsgierigheid, zelf geluiden, doodle-modus) + Langfuse-kostenmonitoring + modelwissel-experiment in het dashboard.
+**Fase 2 — uitbreiding op de computer:** Camera + MediaPipe (Type1-perceptie) + volledige feature-set (dromen, verjaardag, nieuwsgierigheid, zelf geluiden, doodle-modus) + karakterevolutie via de reflectie-loop (basis voor de dromen) + Langfuse-kostenmonitoring + modelwissel-experiment en handmatige overrides (emotie forceren, herinnering toevoegen/verwijderen) in het dashboard.
 
-**Fase 3 — Raspberry Pi + motoren:** Alles porteren naar de Pi, motoraansturing (johnny-five) gekoppeld aan de tool-laag, hoofdvolggedrag via servo's, schermpje in kiosk-mode voor het gezichtje, ervaringsgeheugen voor fysieke acties, veiligheidslaag (Type1) voor motorbewegingen, privacy-maatregelen (mute-knop, luister-indicator, wake-word).
+**Fase 3 — Raspberry Pi + motoren:** Alles porteren naar de Pi, motoraansturing (johnny-five) gekoppeld aan de tool-laag, hoofdvolggedrag via servo's, schermpje in kiosk-mode voor het gezichtje, ervaringsgeheugen voor fysieke acties, veiligheidslaag (Type1) voor motorbewegingen, privacy-maatregelen (mute-knop, luister-indicator, wake-word), optioneel per-persoon-geheugen (stem/gezicht-herkenning).
 
 ## Open vragen & nog te beslissen punten
 
-- [ ] **Leeftijd:** doorlopen tijdens uitgeschakelde periodes (kalendertijd), of enkel actieve/aan-tijd? Voorstel in dit document: kalendertijd.
-- [ ] **Wenkbrauwen:** volledig weglaten (oog + mond + achtergrondkleur, zoals het referentiebeeld) of toch behouden voor extra nuance bij bv. verrassing/boosheid?
-- [ ] **Verwijderen — "grafschrift":** bij volledige verwijdering, een klein archief (naam, leeftijd, laatste woorden) bewaren dat de nieuwe robot nooit kan lezen, puur voor jou als eigenaar? Of moet verwijderen echt alles wissen zonder sporen?
-- [ ] **Local-only fallback:** momenteel is alles API-gebaseerd (geen lokale modellen vereist) — blijft dat zo, of moet er op termijn een lokaal model (via Ollama) als noodoptie inzitten?
-- [ ] **Meerdere gebruikers:** wordt het per-persoon-geheugen (aparte band per gebruiker, stem/gezicht-herkenning) effectief meegenomen in fase 2, of blijft het bij één primaire gebruiker?
+Beslist tijdens de `/grill-with-docs`-sessie — zie [CONTEXT.md](CONTEXT.md) en `docs/adr/` voor de vastgelegde redenen:
+
+- [x] **Leeftijd:** kalendertijd sinds `born_at`. Zie [ADR-0002](docs/adr/0002-leeftijd-kalendertijd.md).
+- [x] **Wenkbrauwen:** toch behouden, maar enkel voor een subset van emoties (verrast, boos, bang) — de rest blijft neutraal-recht. Zie **Emotiekeyframe** in [CONTEXT.md](CONTEXT.md).
+- [x] **Verwijderen — "grafschrift":** bewaren, onleesbaar voor de nieuwe robot. Zie [ADR-0003](docs/adr/0003-verwijderen-bewaart-grafschrift.md).
+- [x] **Local-only fallback:** nu niet bouwen (YAGNI) — de Vercel AI SDK-abstractie maakt dit later goedkoop toevoegbaar. Heropenen zodra er een concrete aanleiding is.
+- [x] **Meerdere gebruikers:** uitgesteld naar fase 3 (optioneel) — per-persoon-geheugen is geen vereiste voor fase 2.

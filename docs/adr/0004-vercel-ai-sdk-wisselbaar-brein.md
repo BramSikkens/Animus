@@ -1,0 +1,3 @@
+# Vercel AI SDK als wisselbaar-brein-abstractie
+
+Een kernvereiste van Animus is een Type2-brein dat los staat van de rest van het systeem: Claude, Gemini, OpenAI of een lokaal model via Ollama moeten onderling inwisselbaar zijn zonder de rest van de architectuur te raken. We kiezen de Vercel AI SDK (`ai` + providerpakketten) als deze abstractielaag: één interface voor gesprek, tool-gebruik, streaming en multimodale input, waarbij de provider via een parameter wisselt. Alternatief was elke provider-SDK los te integreren of een eigen abstractie te bouwen; de Vercel AI SDK levert dit kant-en-klaar, inclusief providers die al voor dit project relevant zijn (Anthropic, OpenAI, Google, Ollama), en sluit aan bij de bestaande Next.js-ervaring.

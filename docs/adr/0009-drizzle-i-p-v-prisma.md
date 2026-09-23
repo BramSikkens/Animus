@@ -1,0 +1,3 @@
+# Drizzle i.p.v. Prisma
+
+Als ORM kiezen we Drizzle in plaats van Prisma. Het lang-termijngeheugen en ervaringsgeheugen draaien beide op pgvector, en Drizzle heeft daar native ondersteuning voor (een `vector`-kolomtype met ingebouwde afstandsoperators), terwijl Prisma dit enkel als preview-feature (`postgresqlExtensions`) aanbiedt en meer raw SQL vereist voor de similarity-query's. Prisma is de populairdere default in de Node/Next.js-wereld, dus dit verdient uitleg voor wie het later tegenkomt: de pgvector-integratie is hier geen bijzaak maar een kernvereiste, en weegt zwaarder dan Prisma's bekendere DX. Bijkomend: Payload's Postgres-adapter (`@payloadcms/db-postgres`, uit bestaande projectervaring) draait zelf al op Drizzle.

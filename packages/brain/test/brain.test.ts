@@ -2834,6 +2834,100 @@ describe("createBrain", () => {
       expect(await driveTexts(vero.id)).toHaveLength(0);
     });
 
+    describe("reflect() bij stilte (de Dynimo blijft wakker)", () => {
+      it("geeft false zonder modelcall als niemand wakker is", async () => {
+        const vero = await insertDynimo({ awakeSince: null });
+        await addMemory(vero.id, "iets", 1);
+        const heavy = heavyReturning(reflection());
+
+        expect(await brainWith(heavy).reflect()).toBe(false);
+        expect(heavy.doGenerateCalls).toHaveLength(0);
+      });
+
+      it("geeft false zonder call en zonder onStart als er geen nieuwe Herinneringen zijn", async () => {
+        await insertDynimo();
+        const heavy = heavyReturning(reflection());
+        let started = 0;
+
+        expect(await brainWith(heavy).reflect({ onStart: () => started++ })).toBe(false);
+        expect(heavy.doGenerateCalls).toHaveLength(0);
+        expect(started).toBe(0);
+      });
+
+      it("roept onStart precies één keer vóór de call aan, past de Reflectie toe en laat de Dynimo wakker", async () => {
+        const vero = await insertDynimo({ awakeSince: bornAt });
+        await addMemory(vero.id, "iets", 1, 0.9);
+        const order: string[] = [];
+        const heavy = new MockLanguageModelV4({
+          doGenerate: async () => {
+            order.push("call");
+            return generateResult(JSON.stringify(reflection({ axisShifts: { ie: 0.3, sn: 0, tf: 0, jp: 0 } })));
+          },
+        });
+
+        const result = await brainWith(heavy).reflect({ onStart: () => order.push("onStart") });
+
+        expect(result).toBe(true);
+        expect(order).toEqual(["onStart", "call"]);
+        const row = await rowOf(vero.id);
+        expect(row.evolvedCharacter).toBe("Wat rustiger geworden.");
+        expect(row.axisIe).toBeCloseTo(0.52, 5);
+        expect(row.awakeSince).toEqual(bornAt);
+        expect([row.wakeMoodEmotion, row.wakeMoodIntensity]).toEqual([null, null]); // blijft wakker: geen Ontwaakstemming
+      });
+
+      it("geeft false zonder throw en schrijft niets bij een falende call of ongeldige output", async () => {
+        const vero = await insertDynimo();
+        await addMemory(vero.id, "iets", 1);
+        const failing = new MockLanguageModelV4({
+          doGenerate: async () => {
+            throw new Error("model plat");
+          },
+        });
+        expect(await brainWith(failing).reflect()).toBe(false);
+        expect(await brainWith(heavyReturning(reflection({ evolvedCharacter: "" }))).reflect()).toBe(false);
+
+        const row = await rowOf(vero.id);
+        expect([row.evolvedCharacter, row.lastReflectedAt]).toEqual(["", null]);
+        expect(row.awakeSince).toEqual(bornAt);
+      });
+
+      it("blokkeert een hear() tijdens de Reflectie niet, en de Reflectie rondt daarna af; nieuwe Herinnering volgt bij de volgende", async () => {
+        const vero = await insertDynimo();
+        await addMemory(vero.id, "eerste", 1);
+        let release!: () => void;
+        const gate = new Promise<void>((resolve) => (release = resolve));
+        let entered!: () => void;
+        const enteredCall = new Promise<void>((resolve) => (entered = resolve));
+        let calls = 0;
+        const heavy = new MockLanguageModelV4({
+          doGenerate: async () => {
+            calls++;
+            if (calls === 1) {
+              entered();
+              await gate;
+            }
+            return generateResult(JSON.stringify(reflection()));
+          },
+        });
+        const light = textModel(["Gewoon een antwoord."]);
+        const brain = brainWith(heavy, { light, now: () => new Date(bornAt.getTime() + 10 * MIN) });
+
+        const reflecting = brain.reflect();
+        await enteredCall;
+        const answer = await collectText(brain.hear("Nog wakker?")); // loopt terwijl de Reflectie vastzit
+        expect(answer).toBe("Gewoon een antwoord.");
+        release();
+        expect(await reflecting).toBe(true);
+        expect((await rowOf(vero.id)).evolvedCharacter).toBe("Wat rustiger geworden.");
+        expect((await rowOf(vero.id)).awakeSince).toEqual(bornAt);
+
+        expect(await brain.reflect()).toBe(true);
+        expect(JSON.stringify(heavy.doGenerateCalls[1]?.prompt)).toContain("Nog wakker?");
+        expect(JSON.stringify(heavy.doGenerateCalls[1]?.prompt)).not.toContain("eerste");
+      });
+    });
+
     it("verwerkt maximaal 100 Herinneringen per Reflectie, oudste eerst", async () => {
       const vero = await insertDynimo();
       for (let i = 1; i <= 105; i++) await addMemory(vero.id, `herinnering-${String(i).padStart(3, "0")}`, i);

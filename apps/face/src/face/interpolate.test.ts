@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { frameFor, frameForDisplay } from "./interpolate.js";
-import { KEYFRAMES, NEUTRAL, SLEEP } from "./keyframes.js";
+import { KEYFRAMES, NEUTRAL, REFLECT, SLEEP } from "./keyframes.js";
 
 describe("frameFor", () => {
   it("neutraal geeft precies het neutrale gezicht, ongeacht intensiteit", () => {
@@ -67,5 +67,22 @@ describe("frameForDisplay", () => {
     const brightness = (hex: string) =>
       parseInt(hex.slice(1, 3), 16) + parseInt(hex.slice(3, 5), 16) + parseInt(hex.slice(5, 7), 16);
     expect(brightness(SLEEP.background)).toBeLessThan(brightness(NEUTRAL.background));
+  });
+});
+
+describe("reflecterend", () => {
+  it("toont het reflectieframe, ongeacht emotie en intensiteit", () => {
+    expect(frameForDisplay("reflecterend", "blij", 1)).toEqual(REFLECT);
+    expect(frameForDisplay("reflecterend", "boos", 0)).toEqual(REFLECT);
+  });
+
+  it("heeft half gesloten ogen met de blik omhoog, een rustige vlakke mond en een eigen achtergrond", () => {
+    expect(REFLECT.eyes.left.open).toBeGreaterThan(SLEEP.eyes.left.open);
+    expect(REFLECT.eyes.left.open).toBeLessThan(NEUTRAL.eyes.left.open);
+    expect(REFLECT.eyes.left.pupilY).toBeLessThan(0); // blik omhoog
+    expect(REFLECT.mouth.curve).toBe(0);
+    expect(REFLECT.mouth.open).toBe(0);
+    expect(REFLECT.background).not.toBe(SLEEP.background);
+    expect(REFLECT.background).not.toBe(NEUTRAL.background);
   });
 });

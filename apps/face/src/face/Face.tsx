@@ -109,7 +109,9 @@ export function Face({ display, emotion, intensity }: FaceProps) {
         animate={{ backgroundColor: frame.background }}
         transition={TRANSITION}
       />
-      <svg className="face-svg" viewBox="0 0 200 200" role="img" aria-label={display === "slapend" ? "Animus slaapt" : `Animus voelt zich ${emotion}`}>
+      <svg className="face-svg" viewBox="0 0 200 200" role="img" aria-label={
+          display === "slapend" ? "Animus slaapt" : display === "reflecterend" ? "Animus denkt na" : `Animus voelt zich ${emotion}`
+        }>
         <Eye cx={EYE_X.left} eye={frame.eyes.left} background={frame.background} />
         <Eye cx={EYE_X.right} eye={frame.eyes.right} background={frame.background} />
         <Brow cx={EYE_X.left} side="left" brow={frame.brow} />

@@ -100,3 +100,12 @@ export const SLEEP: Keyframe = {
   mouth: { width: 30, curve: 0, open: 0 },
   background: "#22222b",
 };
+
+/** Weergavetoestand "reflecterend": ogen half gesloten met de blik omhoog/opzij, rustige vlakke mond, blauwig gedempt. */
+const EYE_THINKING: Eye = { open: 0.45, scale: 1, pupilX: 3, pupilY: -4 };
+
+export const REFLECT: Keyframe = {
+  eyes: { left: EYE_THINKING, right: EYE_THINKING },
+  mouth: { width: 30, curve: 0, open: 0 },
+  background: "#2b3247",
+};

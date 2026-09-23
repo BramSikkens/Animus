@@ -57,6 +57,11 @@ export type Brain = {
    * per Dynimo. Idempotent; een fout bij één Dynimo laat die rij ongemoeid. Geeft het aantal bijgewerkte rijen.
    */
   backfill(): Promise<number>;
+  /**
+   * Reflectie van de wakkere Dynimo (bij stilte); hij blijft wakker. `onStart` draait vlak vóór de Type2-call en
+   * niet als er niets te reflecteren valt. Geeft true bij een toegepaste Reflectie, anders false; gooit nooit.
+   */
+  reflect(hooks?: { onStart?: () => void }): Promise<boolean>;
   /** Praat met de Wakker Dynimo (elke beurt uit de database gelezen). Niemand wakker: geen events. */
   hear(text: string): AsyncIterable<BrainEvent>;
 };
@@ -331,23 +336,25 @@ export function createBrain(deps: {
   async function reflectAll(ids: number[]): Promise<void> {
     for (const id of ids) {
       try {
-        await reflect(id);
+        await reflectDynimo(id);
       } catch (error) {
         console.warn(`Reflectie faalde voor Dynimo ${id}:`, error instanceof Error ? error.message : error);
       }
     }
   }
 
-  async function reflect(id: number): Promise<void> {
+  // Geeft true als er een Reflectie is toegepast. `onStart` draait synchroon vlak vóór de Type2-call, en dus niet
+  // als er niets te reflecteren valt.
+  async function reflectDynimo(id: number, onStart?: () => void): Promise<boolean> {
     const [row] = await deps.db.select().from(dynimos).where(eq(dynimos.id, id));
-    if (!row) return;
+    if (!row) return false;
     const fresh = await deps.db
       .select()
       .from(memories)
       .where(row.lastReflectedAt ? and(eq(memories.dynimoId, id), gt(memories.createdAt, row.lastReflectedAt)) : eq(memories.dynimoId, id))
       .orderBy(asc(memories.createdAt), asc(memories.id))
       .limit(REFLECTION_MEMORY_LIMIT);
-    if (fresh.length === 0) return;
+    if (fresh.length === 0) return false;
     if (fresh.length === REFLECTION_MEMORY_LIMIT) {
       // De batchgrens mag niet midden in een timestamp vallen: `last_reflected_at` + strikt `>` zou de rest verliezen.
       const last = fresh[fresh.length - 1]!;
@@ -362,6 +369,7 @@ export function createBrain(deps: {
     const driveRows = (await loadDrives(id)).filter(isActiveDrive);
     const axes = rowAxes(row);
 
+    onStart?.();
     const { output } = await generateText({
       model: deps.type2.heavy,
       instructions: REFLECTION_INSTRUCTIONS,
@@ -380,10 +388,10 @@ ${fresh.map((memory) => `- (indruk ${memory.impression}) ${memory.text}`).join("
     });
 
     const processedUntil = fresh[fresh.length - 1]!.createdAt; // ook na de uitbreiding: dezelfde timestamp
-    await deps.db.transaction(async (tx) => {
+    return deps.db.transaction(async (tx) => {
       const [locked] = await tx.select().from(dynimos).where(eq(dynimos.id, id)).for("update");
       // Een andere instantie was ons voor (of de Dynimo is gedood): niets schrijven.
-      if (!locked || locked.lastReflectedAt?.getTime() !== row.lastReflectedAt?.getTime()) return;
+      if (!locked || locked.lastReflectedAt?.getTime() !== row.lastReflectedAt?.getTime()) return false;
 
       const at = now();
       const lockedAxes = rowAxes(locked);
@@ -453,7 +461,19 @@ ${fresh.map((memory) => `- (indruk ${memory.impression}) ${memory.text}`).join("
           .returning();
         activeById.set(inserted!.id, inserted!);
       }
+      return true;
     });
+  }
+
+  // Reflectie van de wakkere Dynimo bij stilte: hij blijft wakker (geen wissel, geen notify). Gooit nooit.
+  async function reflect(hooks: { onStart?: () => void } = {}): Promise<boolean> {
+    try {
+      const [awake] = await deps.db.select({ id: dynimos.id }).from(dynimos).where(isNotNull(dynimos.awakeSince));
+      return awake ? await reflectDynimo(awake.id, hooks.onStart) : false;
+    } catch (error) {
+      console.warn("Reflectie bij stilte faalde:", error instanceof Error ? error.message : error);
+      return false;
+    }
   }
 
   // Een andere Wakker-generatie (andere Dynimo of nieuwe awake_since) is een nieuwe sessie.
@@ -814,5 +834,5 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     return epitaph;
   }
 
-  return { bringToLife, wake, sleep, kill, list, backfill, hear };
+  return { bringToLife, wake, sleep, kill, list, backfill, reflect, hear };
 }

@@ -24,6 +24,8 @@ import * as openai from "@livekit/agents-plugin-openai";
 import * as silero from "@livekit/agents-plugin-silero";
 import { RoomEvent } from "@livekit/rtc-node";
 import { readState, watchDynimos } from "./dynimo-watch.js";
+import { createReflectionDisplay } from "./reflection-display.js";
+import { createSilenceTimer, parseSilenceMinutes } from "./silence-timer.js";
 import { textStream } from "./text-stream.js";
 
 try {
@@ -75,13 +77,15 @@ class BrainPlaceholderLLM extends llm.LLM {
 class AnimusAgent extends voice.Agent {
   readonly #brain: Brain;
   readonly #room: JobContext["room"];
+  readonly #onUtterance: () => void;
 
-  constructor(brain: Brain, room: JobContext["room"]) {
+  constructor(brain: Brain, room: JobContext["room"], onUtterance: () => void) {
     // instructions is verplicht op voice.Agent, maar onbenut: llmNode hieronder draait i.p.v. het
     // ingebouwde LLM-pad de brein-kern.
     super({ instructions: "Animus", llm: new BrainPlaceholderLLM() });
     this.#brain = brain;
     this.#room = room;
+    this.#onUtterance = onUtterance;
   }
 
   override async llmNode(chatCtx: ChatContext, _toolCtx: ToolContext): Promise<ReadableStream<string> | null> {
@@ -89,6 +93,7 @@ class AnimusAgent extends voice.Agent {
       item.type === "message" && item.role === "user";
     const text = chatCtx.items.filter(isUserMessage).at(-1)?.textContent;
     if (!text) return null;
+    this.#onUtterance();
     // tool-*-events uit brain.hear() worden hier genegeerd (ticket #7).
     return textStream(this.#brain.hear(text), {
       onMood: (emotion, intensity) => {
@@ -144,10 +149,6 @@ export default defineAgent<AgentUserData>({
       },
     });
 
-    await session.start({ agent: new AnimusAgent(brain, ctx.room), room: ctx.room });
-
-    // Volgt de wakkere Dynimo (dashboard-acties komen binnen via Postgres NOTIFY): een wissel breekt het
-    // lopende antwoord af (zoals barge-in; de brain-stream sluit via textStream) en zet het gezichtje om.
     const publish = (topic: string, message: DisplayMessage | EmotionMessage): void => {
       const participant = ctx.room.localParticipant;
       if (!participant) return;
@@ -157,20 +158,57 @@ export default defineAgent<AgentUserData>({
           console.error(`Publiceren op "${topic}" faalde:`, error instanceof Error ? error.message : error);
         });
     };
+    // `watcher` en `publishState` bestaan pas verderop en worden hier enkel lui gebruikt (nooit tijdens de opbouw).
+    let watcher!: Awaited<ReturnType<typeof watchDynimos>>;
+    const reflectionDisplay = createReflectionDisplay({
+      getCurrentKey: () => watcher.current().key,
+      publishDisplay: (display) => publish(DISPLAY_TOPIC, { state: display }),
+      publishState: () => void publishState(),
+    });
     // Weergavetoestand plus, bij wakker, de HUIDIGE Stemming (vers gelezen), zodat het gezichtje na wekken direct klopt.
     const publishState = async (): Promise<void> => {
       try {
         const state = await readState(brain);
-        publish(DISPLAY_TOPIC, { state: state.display });
+        publish(DISPLAY_TOPIC, { state: reflectionDisplay.displayFor(state.key, state.display) });
         if (state.mood) publish(EMOTION_TOPIC, state.mood);
       } catch (error) {
         console.error("Toestand publiceren faalde:", error instanceof Error ? error.message : error);
       }
     };
-    const watcher = await watchDynimos({
+
+    // Reflectie bij stilte: na REFLECT_SILENCE_MINUTES zonder uiting reflecteert de wakkere Dynimo (hij blijft
+    // wakker). Het gezichtje toont dan "reflecterend"; een uiting zet het meteen terug en de Reflectie loopt door.
+    const silenceConfig = parseSilenceMinutes(process.env.REFLECT_SILENCE_MINUTES);
+    if (silenceConfig.warning) console.warn(silenceConfig.warning);
+    const silence = createSilenceTimer({
+      thresholdMs: silenceConfig.ms,
+      onSilence: () => {
+        const key = watcher.current().key;
+        void brain
+          .reflect({ onStart: () => reflectionDisplay.onStart(key) })
+          .then(() => reflectionDisplay.onFinish(key));
+      },
+    });
+    ctx.addShutdownCallback(async () => silence.dispose());
+
+    await session.start({
+      agent: new AnimusAgent(brain, ctx.room, () => {
+        silence.reset();
+        reflectionDisplay.onUtterance();
+      }),
+      room: ctx.room,
+    });
+
+    // Volgt de wakkere Dynimo (dashboard-acties komen binnen via Postgres NOTIFY): een wissel breekt het
+    // lopende antwoord af (zoals barge-in; de brain-stream sluit via textStream) en zet het gezichtje om.
+    watcher = await watchDynimos({
       databaseUrl,
       brain,
       onChange: () => {
+        // Een wissel beëindigt het reflecterende gezicht; een lopende Reflectie mag doorlopen maar publiceert
+        // dan niets meer (sleutel-guard in reflectionDisplay).
+        reflectionDisplay.onSwitch();
+        silence.reset();
         // interrupt gooit/weigert als er niets te onderbreken valt; dat is geen fout.
         try {
           session.interrupt({ force: true }).await.catch(() => {});
@@ -182,6 +220,7 @@ export default defineAgent<AgentUserData>({
     });
     ctx.addShutdownCallback(() => watcher.close());
     void publishState();
+    silence.arm();
     // Een later ladend gezichtje kent de toestand nog niet. ParticipantConnected vuurt vóórdat het gezichtje
     // zijn data-channel-subscriber gemount heeft, dus nog eens na een korte vertraging.
     // ponytail: een echte oplossing (state-sync via participant attributes of een request-bericht) pas nodig

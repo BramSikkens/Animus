@@ -51,6 +51,32 @@ export const memories = pgTable(
   (table) => [index("memories_embedding_idx").using("hnsw", table.embedding.op("vector_cosine_ops"))],
 );
 
+// Drijfveren van een Dynimo (CONTEXT.md). Rijen worden niet hard verwijderd: Doelen gaan naar bereikt/opgegeven
+// en sterktes veranderen (#27); "Drijfveren ontbreken" = nul rijen. status enkel voor doelen, strength enkel voor afkeer/ergernis.
+export const drives = pgTable(
+  "drives",
+  {
+    id: serial("id").primaryKey(),
+    dynimoId: integer("dynimo_id")
+      .notNull()
+      .references(() => dynimos.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(),
+    text: text("text").notNull(),
+    status: text("status"),
+    strength: real("strength"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    index("drives_dynimo_id_idx").on(table.dynimoId),
+    check("drives_kind_check", sql`${table.kind} in ('wens', 'doel', 'toekomstdroom', 'afkeer', 'ergernis')`),
+    check("drives_status_check", sql`${table.status} in ('actief', 'bereikt', 'opgegeven')`),
+    check("drives_status_only_goal", sql`(${table.kind} = 'doel') = (${table.status} is not null)`),
+    check("drives_strength_only_aversion", sql`(${table.kind} in ('afkeer', 'ergernis')) = (${table.strength} is not null)`),
+    check("drives_strength_range", sql`${table.strength} between 0 and 1`),
+  ],
+);
+
 // Grafschrift van een verwijderd wezen (ADR-0003). Bewust géén relatie met identity/memories,
 // en het brein leest deze tabel nooit — enkel het dashboard. Leeftijd = deleted_at − born_at (ADR-0002).
 export const epitaphs = pgTable("epitaphs", {

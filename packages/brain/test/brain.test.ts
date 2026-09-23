@@ -2,7 +2,7 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { MockEmbeddingModelV4, MockLanguageModelV4, Experimental_EvaluationMockModelV4 } from "ai/test";
 import { simulateReadableStream } from "ai";
 import { eq, isNotNull } from "drizzle-orm";
-import { EMBEDDING_DIMENSIONS, dynimos, epitaphs, memories } from "@animus/db/schema";
+import { EMBEDDING_DIMENSIONS, drives, dynimos, epitaphs, memories } from "@animus/db/schema";
 import postgres from "postgres";
 import { createBrain, STATE_CHANNEL, type BrainEvent } from "../src/index.js";
 import { createTestDb, databaseUrl, TEST_DB_NAME, truncateAll } from "./db.js";
@@ -26,15 +26,24 @@ const STOP: { unified: "stop"; raw: undefined } = { unified: "stop", raw: undefi
 
 const MID_AXES = { ie: 0.5, sn: 0.5, tf: 0.5, jp: 0.5 };
 
+const MID_DRIVES = {
+  wens: [{ text: "Een zachte wens" }],
+  doel: [{ text: "Een concreet streven" }],
+  toekomstdroom: [{ text: "Een verre droom" }],
+  afkeer: [{ text: "Een diepe weerzin", strength: 0.6 }],
+  ergernis: [{ text: "Een kleine ergernis", strength: 0.3 }],
+};
+
 function genesisModel(result: {
   name: string;
   coreCharacter: string;
   birthStory: string;
   axes?: { ie: number; sn: number; tf: number; jp: number };
+  drives?: typeof MID_DRIVES;
 }) {
   return new MockLanguageModelV4({
     doGenerate: async () => ({
-      content: [{ type: "text" as const, text: JSON.stringify({ axes: MID_AXES, ...result }) }],
+      content: [{ type: "text" as const, text: JSON.stringify({ axes: MID_AXES, drives: MID_DRIVES, ...result }) }],
       finishReason: STOP,
       usage: NULL_USAGE,
       warnings: [],
@@ -50,7 +59,7 @@ function generateResult(text: string) {
 function lifecycleModel(name: string, farewell: string) {
   return new MockLanguageModelV4({
     doGenerate: [
-      generateResult(JSON.stringify({ name, coreCharacter: "Speels.", birthStory: "Geboren uit ochtendnevel.", axes: MID_AXES })),
+      generateResult(JSON.stringify({ name, coreCharacter: "Speels.", birthStory: "Geboren uit ochtendnevel.", axes: MID_AXES, drives: MID_DRIVES })),
       generateResult(farewell),
     ],
   });
@@ -744,9 +753,9 @@ describe("createBrain", () => {
     const bornAt = new Date("2026-01-01T12:00:00.000Z");
     const heavy = new MockLanguageModelV4({
       doGenerate: [
-        generateResult(JSON.stringify({ name: "Nova", coreCharacter: "Speels.", birthStory: "Ochtendnevel.", axes: MID_AXES })),
+        generateResult(JSON.stringify({ name: "Nova", coreCharacter: "Speels.", birthStory: "Ochtendnevel.", axes: MID_AXES, drives: MID_DRIVES })),
         generateResult("Vaarwel, lieve Mimi-kenner."),
-        generateResult(JSON.stringify({ name: "Lumen", coreCharacter: "Rustig.", birthStory: "Maanlicht.", axes: MID_AXES })),
+        generateResult(JSON.stringify({ name: "Lumen", coreCharacter: "Rustig.", birthStory: "Maanlicht.", axes: MID_AXES, drives: MID_DRIVES })),
       ],
     });
     const light = new MockLanguageModelV4({ doStream: [textStream("Hoi."), textStream("Hallo, ik ben Lumen.")] });
@@ -862,9 +871,9 @@ describe("createBrain", () => {
     const bornAt = new Date("2026-01-01T12:00:00.000Z");
     const heavy = new MockLanguageModelV4({
       doGenerate: [
-        generateResult(JSON.stringify({ name: "Nova", coreCharacter: "x", birthStory: "y", axes: MID_AXES })),
+        generateResult(JSON.stringify({ name: "Nova", coreCharacter: "x", birthStory: "y", axes: MID_AXES, drives: MID_DRIVES })),
         generateResult("Vaarwel."),
-        generateResult(JSON.stringify({ name: "Lumen", coreCharacter: "Rustig.", birthStory: "Maanlicht.", axes: MID_AXES })),
+        generateResult(JSON.stringify({ name: "Lumen", coreCharacter: "Rustig.", birthStory: "Maanlicht.", axes: MID_AXES, drives: MID_DRIVES })),
       ],
     });
     const deleter = createBrain({
@@ -942,8 +951,8 @@ describe("createBrain", () => {
     function genesisTwice(first: string, second: string) {
       return new MockLanguageModelV4({
         doGenerate: [
-          generateResult(JSON.stringify({ name: first, coreCharacter: "x", birthStory: "y", axes: MID_AXES })),
-          generateResult(JSON.stringify({ name: second, coreCharacter: "x", birthStory: "y", axes: MID_AXES })),
+          generateResult(JSON.stringify({ name: first, coreCharacter: "x", birthStory: "y", axes: MID_AXES, drives: MID_DRIVES })),
+          generateResult(JSON.stringify({ name: second, coreCharacter: "x", birthStory: "y", axes: MID_AXES, drives: MID_DRIVES })),
         ],
       });
     }
@@ -1151,8 +1160,8 @@ describe("createBrain", () => {
     function twoDynimosBrain() {
       const heavy = new MockLanguageModelV4({
         doGenerate: [
-          generateResult(JSON.stringify({ name: "Nova", coreCharacter: "x", birthStory: "y", axes: MID_AXES })),
-          generateResult(JSON.stringify({ name: "Lumen", coreCharacter: "x", birthStory: "y", axes: MID_AXES })),
+          generateResult(JSON.stringify({ name: "Nova", coreCharacter: "x", birthStory: "y", axes: MID_AXES, drives: MID_DRIVES })),
+          generateResult(JSON.stringify({ name: "Lumen", coreCharacter: "x", birthStory: "y", axes: MID_AXES, drives: MID_DRIVES })),
           generateResult("Vaarwel."),
         ],
       });
@@ -1279,7 +1288,7 @@ describe("createBrain", () => {
           light: unusedModel(),
           heavy: new MockLanguageModelV4({
             doGenerate: [
-              generateResult(JSON.stringify({ name: "Nova", coreCharacter: "x", birthStory: "y", axes: MID_AXES })),
+              generateResult(JSON.stringify({ name: "Nova", coreCharacter: "x", birthStory: "y", axes: MID_AXES, drives: MID_DRIVES })),
               generateResult("Vaarwel."),
             ],
           }),
@@ -1441,11 +1450,19 @@ describe("createBrain", () => {
     }
 
     // Een fase-1-achtige rij: geen assen.
-    async function insertLegacy(name: string, extra: Partial<typeof dynimos.$inferInsert> = {}) {
+    async function insertLegacy(
+      name: string,
+      extra: Partial<typeof dynimos.$inferInsert> = {},
+      options: { withDrive?: boolean } = {},
+    ) {
       const [row] = await db
         .insert(dynimos)
         .values({ name, coreCharacter: `Kern van ${name}.`, birthStory: "Geboren.", seed: "z", bornAt, ...extra })
         .returning();
+      // Standaard mét Drijfveer, zodat alleen de assen-stap iets te doen heeft.
+      if (options.withDrive ?? true) {
+        await db.insert(drives).values({ dynimoId: row!.id, kind: "wens", text: "Een wens", createdAt: bornAt, updatedAt: bornAt });
+      }
       return row!;
     }
 
@@ -1568,6 +1585,312 @@ describe("createBrain", () => {
       await collectText(talker.hear("Nog een keer."));
 
       expect(contentsByRole(light.doStreamCalls[1]?.prompt, "system").join(" ")).toContain("Persoonlijkheid: INFJ");
+    });
+  });
+
+  describe("Drijfveren", () => {
+    const bornAt = new Date("2026-01-01T12:00:00.000Z");
+    const DRIVES_RESULT = {
+      drives: {
+        wens: [{ text: "Sterren tellen" }],
+        doel: [{ text: "Een lied leren" }, { text: "Een vriend maken" }],
+        toekomstdroom: [{ text: "Een vuurtoren zijn" }],
+        afkeer: [{ text: "Stilstaand water", strength: 0.9 }],
+        ergernis: [{ text: "Tikkende klokken", strength: 0.2 }],
+      },
+    };
+
+    function brainWith(heavy: MockLanguageModelV4, light: MockLanguageModelV4 = unusedModel()) {
+      return createBrain({
+        db,
+        embedder: embedModel(),
+        type1: type1Model(),
+        type2: { light, heavy },
+        now: () => bornAt,
+        random: () => 0,
+      });
+    }
+
+    async function insertDynimo(name = "Vero", awake = true) {
+      const [row] = await db
+        .insert(dynimos)
+        .values({
+          name,
+          coreCharacter: `Kern van ${name}.`,
+          birthStory: "Geboren.",
+          seed: "z",
+          bornAt,
+          awakeSince: awake ? bornAt : null,
+        })
+        .returning();
+      return row!;
+    }
+
+    async function insertDrive(
+      dynimoId: number,
+      kind: "wens" | "doel" | "toekomstdroom" | "afkeer" | "ergernis",
+      text: string,
+      extra: { status?: "actief" | "bereikt" | "opgegeven"; strength?: number } = {},
+    ) {
+      await db.insert(drives).values({
+        dynimoId,
+        kind,
+        text,
+        status: kind === "doel" ? (extra.status ?? "actief") : null,
+        strength: kind === "afkeer" || kind === "ergernis" ? (extra.strength ?? 0.5) : null,
+        createdAt: bornAt,
+        updatedAt: bornAt,
+      });
+    }
+
+    async function systemOfFirstTurn(light: MockLanguageModelV4, index = 0) {
+      return contentsByRole(light.doStreamCalls[index]?.prompt, "system").join(" ");
+    }
+
+    it("bewaart de Drijfveren uit de genesis-call, met Doelen actief en sterkte bij Afkeer en Ergernis", async () => {
+      const brain = brainWith(
+        new MockLanguageModelV4({
+          doGenerate: [
+            generateResult(JSON.stringify({ name: "Nova", coreCharacter: "x", birthStory: "y", axes: MID_AXES, ...DRIVES_RESULT })),
+          ],
+        }),
+      );
+
+      const nova = await brain.bringToLife();
+
+      const rows = await db.select().from(drives).orderBy(drives.id);
+      expect(rows.every((row) => row.dynimoId === nova.id)).toBe(true);
+      expect(rows.map((row) => `${row.kind}:${row.text}`)).toEqual([
+        "wens:Sterren tellen",
+        "doel:Een lied leren",
+        "doel:Een vriend maken",
+        "toekomstdroom:Een vuurtoren zijn",
+        "afkeer:Stilstaand water",
+        "ergernis:Tikkende klokken",
+      ]);
+      expect(rows.filter((row) => row.kind === "doel").every((row) => row.status === "actief")).toBe(true);
+      expect(rows.find((row) => row.kind === "afkeer")?.strength).toBeCloseTo(0.9);
+      expect(rows.find((row) => row.kind === "wens")?.strength).toBeNull();
+    });
+
+    it.each([
+      ["een soort zonder items", { ...DRIVES_RESULT.drives, wens: [] }],
+      ["drie items in een soort", { ...DRIVES_RESULT.drives, wens: [{ text: "a" }, { text: "b" }, { text: "c" }] }],
+      ["een sterkte buiten 0..1", { ...DRIVES_RESULT.drives, afkeer: [{ text: "Kou", strength: 1.5 }] }],
+      ["een lege tekst", { ...DRIVES_RESULT.drives, wens: [{ text: "" }] }],
+    ])("faalt bringToLife() zonder Dynimo of Drijfveren bij %s", async (_label, badDrives) => {
+      const brain = brainWith(
+        new MockLanguageModelV4({
+          doGenerate: [
+            generateResult(JSON.stringify({ name: "Nova", coreCharacter: "x", birthStory: "y", axes: MID_AXES, drives: badDrives })),
+          ],
+        }),
+      );
+
+      await expect(brain.bringToLife()).rejects.toThrow();
+      expect(await db.select().from(dynimos)).toHaveLength(0);
+      expect(await db.select().from(drives)).toHaveLength(0);
+    });
+
+    it("zet actieve Drijfveren in het stabiele deel, maar bereikte en opgegeven Doelen niet", async () => {
+      const vero = await insertDynimo();
+      await insertDrive(vero.id, "wens", "Een lentewens");
+      await insertDrive(vero.id, "doel", "Lopend doel");
+      await insertDrive(vero.id, "doel", "Afgerond doel", { status: "bereikt" });
+      await insertDrive(vero.id, "doel", "Losgelaten doel", { status: "opgegeven" });
+      await insertDrive(vero.id, "afkeer", "Harde kou", { strength: 0.9 });
+      const light = textModel(["Hoi."]);
+
+      await collectText(brainWith(unusedModel(), light).hear("Hallo!"));
+
+      const system = await systemOfFirstTurn(light);
+      expect(system).toContain("Een lentewens");
+      expect(system).toContain("Lopend doel");
+      expect(system).toContain("Harde kou (sterk)");
+      expect(system).not.toContain("Afgerond doel");
+      expect(system).not.toContain("Losgelaten doel");
+    });
+
+    it("laat geen Drijfvereblok zien voor een Dynimo zonder Drijfveren", async () => {
+      await insertDynimo();
+      const light = textModel(["Hoi."]);
+      await collectText(brainWith(unusedModel(), light).hear("Hallo!"));
+      expect(await systemOfFirstTurn(light)).not.toContain("Wat je wilt en niet wilt");
+    });
+
+    it("toont de Drijfveren van een andere Dynimo niet", async () => {
+      const vero = await insertDynimo("Vero");
+      const other = await insertDynimo("Mira", false);
+      await insertDrive(vero.id, "wens", "Veros wens");
+      await insertDrive(other.id, "wens", "Mira's geheime wens");
+      const light = textModel(["Hoi."]);
+
+      await collectText(brainWith(unusedModel(), light).hear("Hallo!"));
+
+      const system = await systemOfFirstTurn(light);
+      expect(system).toContain("Veros wens");
+      expect(system).not.toContain("Mira's geheime wens");
+    });
+
+    it("werkt een wijziging door een ander proces meteen door, zonder herstart", async () => {
+      const vero = await insertDynimo();
+      const light = new MockLanguageModelV4({ doStream: [textStream("Hoi."), textStream("Hallo.")] });
+      const talker = brainWith(unusedModel(), light);
+      await collectText(talker.hear("Eerste."));
+      expect(await systemOfFirstTurn(light, 0)).not.toContain("Nieuwe wens");
+
+      await insertDrive(vero.id, "wens", "Nieuwe wens");
+      await collectText(talker.hear("Tweede."));
+
+      expect(await systemOfFirstTurn(light, 1)).toContain("Nieuwe wens");
+    });
+
+    it("geeft de Drijfveren mee aan de Afscheidsreflectie", async () => {
+      const vero = await insertDynimo();
+      await insertDrive(vero.id, "toekomstdroom", "Een vuurtoren zijn");
+      const heavy = new MockLanguageModelV4({ doGenerate: [generateResult("Vaarwel.")] });
+
+      await brainWith(heavy).kill(vero.id, "Vero");
+
+      expect(JSON.stringify(heavy.doGenerateCalls[0]?.prompt)).toContain("Een vuurtoren zijn");
+    });
+
+    it("wist bij kill() enkel de Drijfveren van het gedoode wezen", async () => {
+      const vero = await insertDynimo("Vero");
+      const mira = await insertDynimo("Mira", false);
+      await insertDrive(vero.id, "wens", "Veros wens");
+      await insertDrive(mira.id, "wens", "Mira's wens");
+      const heavy = new MockLanguageModelV4({ doGenerate: [generateResult("Vaarwel.")] });
+
+      await brainWith(heavy).kill(vero.id, "Vero");
+
+      expect((await db.select().from(drives)).map((row) => row.text)).toEqual(["Mira's wens"]);
+    });
+
+    describe("backfill", () => {
+      async function withoutDrives(name = "Lumi") {
+        const row = await insertDynimo(name, false);
+        await db.update(dynimos).set({ axisIe: 0.5, axisSn: 0.5, axisTf: 0.5, axisJp: 0.5 }).where(eq(dynimos.id, row.id));
+        return row;
+      }
+
+      it("vult Drijfveren aan voor een Dynimo zonder Drijfveren", async () => {
+        const lumi = await withoutDrives();
+        const heavy = new MockLanguageModelV4({ doGenerate: [generateResult(JSON.stringify(DRIVES_RESULT))] });
+
+        expect(await brainWith(heavy).backfill()).toBe(1);
+
+        const rows = await db.select().from(drives).where(eq(drives.dynimoId, lumi.id));
+        expect(rows).toHaveLength(6);
+        expect(rows.filter((row) => row.kind === "doel").every((row) => row.status === "actief")).toBe(true);
+      });
+
+      it("geeft Kernkarakter, Persoonlijkheid en Herinneringen mee aan de backfillcall", async () => {
+        const lumi = await withoutDrives();
+        await db.update(dynimos).set({ axisIe: 0.1, axisSn: 0.1, axisTf: 0.1, axisJp: 0.1 }).where(eq(dynimos.id, lumi.id));
+        await db
+          .insert(memories)
+          .values({ dynimoId: lumi.id, text: "Gesprekspartner: kat Mimi", embedding: fakeVector("kat"), createdAt: bornAt });
+        const heavy = new MockLanguageModelV4({ doGenerate: [generateResult(JSON.stringify(DRIVES_RESULT))] });
+
+        await brainWith(heavy).backfill();
+
+        const prompt = JSON.stringify(heavy.doGenerateCalls[0]?.prompt);
+        expect(prompt).toContain("Kern van Lumi.");
+        expect(prompt).toContain("kat Mimi");
+        expect(prompt).toContain("ISTJ");
+      });
+
+      it("doet bij een tweede backfill() geen Type2-call meer", async () => {
+        await withoutDrives();
+        const heavy = new MockLanguageModelV4({ doGenerate: [generateResult(JSON.stringify(DRIVES_RESULT))] });
+        const brain = brainWith(heavy);
+
+        await brain.backfill();
+        expect(await brain.backfill()).toBe(0);
+
+        expect(heavy.doGenerateCalls).toHaveLength(1);
+      });
+
+      it("slaat een Dynimo met bestaande Drijfveren over", async () => {
+        const lumi = await withoutDrives();
+        await insertDrive(lumi.id, "wens", "Bestaande wens");
+        const heavy = unusedModel();
+
+        expect(await brainWith(heavy).backfill()).toBe(0);
+        expect(heavy.doGenerateCalls).toHaveLength(0);
+      });
+
+      it("schrijft niets bij een fout of ongeldige output, en gaat door met de volgende Dynimo", async () => {
+        const first = await withoutDrives("Eerste");
+        const second = await withoutDrives("Tweede");
+        const heavy = new MockLanguageModelV4({
+          doGenerate: [
+            generateResult(JSON.stringify({ drives: { ...DRIVES_RESULT.drives, wens: [] } })),
+            generateResult(JSON.stringify(DRIVES_RESULT)),
+          ],
+        });
+
+        expect(await brainWith(heavy).backfill()).toBe(1);
+
+        const rows = await db.select().from(drives);
+        expect(rows.some((row) => row.dynimoId === first.id)).toBe(false);
+        expect(rows.filter((row) => row.dynimoId === second.id)).toHaveLength(6);
+      });
+
+      it("vult in één run zowel assen als Drijfveren aan, en de Drijfveren-prompt bevat de net bepaalde assen", async () => {
+        const lumi = await insertDynimo("Lumi", false);
+        const heavy = new MockLanguageModelV4({
+          doGenerate: [
+            generateResult(JSON.stringify({ axes: { ie: 0.2, sn: 0.8, tf: 0.7, jp: 0.3 } })),
+            generateResult(JSON.stringify(DRIVES_RESULT)),
+          ],
+        });
+
+        expect(await brainWith(heavy).backfill()).toBe(1);
+
+        expect(heavy.doGenerateCalls).toHaveLength(2);
+        expect(JSON.stringify(heavy.doGenerateCalls[1]?.prompt)).toContain("INFJ");
+        const [row] = await db.select().from(dynimos).where(eq(dynimos.id, lumi.id));
+        expect(row?.axisIe).toBeCloseTo(0.2);
+        expect(await db.select().from(drives).where(eq(drives.dynimoId, lumi.id))).toHaveLength(6);
+      });
+
+      it("gebruikt in de Drijfveren-prompt de assen die een andere instantie tussen de stappen zette", async () => {
+        const lumi = await insertDynimo("Lumi", false);
+        let calls = 0;
+        const heavy = new MockLanguageModelV4({
+          doGenerate: async () => {
+            calls++;
+            if (calls === 1) {
+              // Een andere instantie was ons voor met de assen; onze eigen assen-update raakt dan niets.
+              await db.update(dynimos).set({ axisIe: 0.9, axisSn: 0.9, axisTf: 0.9, axisJp: 0.9 }).where(eq(dynimos.id, lumi.id));
+              return generateResult(JSON.stringify({ axes: { ie: 0.2, sn: 0.8, tf: 0.7, jp: 0.3 } }));
+            }
+            return generateResult(JSON.stringify(DRIVES_RESULT));
+          },
+        });
+
+        await brainWith(heavy).backfill();
+
+        expect(JSON.stringify(heavy.doGenerateCalls[1]?.prompt)).toContain("ENFP");
+        expect(await db.select().from(drives).where(eq(drives.dynimoId, lumi.id))).toHaveLength(6);
+      });
+
+      it("maakt maar één set Drijfveren bij twee gelijktijdige backfills", async () => {
+        const lumi = await withoutDrives();
+        const model = () =>
+          new MockLanguageModelV4({
+            doGenerate: async () => {
+              await new Promise((resolve) => setTimeout(resolve, 50));
+              return generateResult(JSON.stringify(DRIVES_RESULT));
+            },
+          });
+
+        await Promise.all([brainWith(model()).backfill(), brainWith(model()).backfill()]);
+
+        expect(await db.select().from(drives).where(eq(drives.dynimoId, lumi.id))).toHaveLength(6);
+      });
     });
   });
 });

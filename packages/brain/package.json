@@ -8,7 +8,8 @@
     "./config": "./src/config.ts",
     "./emotion": "./src/emotion.ts",
     "./display": "./src/display.ts",
-    "./personality": "./src/personality.ts"
+    "./personality": "./src/personality.ts",
+    "./drives": "./src/drives.ts"
   },
   "scripts": {
     "test": "vitest run",

@@ -1,7 +1,8 @@
 import { desc, eq } from "drizzle-orm";
 import { formatAge } from "@animus/brain/age";
+import { DRIVE_KINDS, DRIVE_LABELS, type DriveKind } from "@animus/brain/drives";
 import { AXES, AXIS_LETTERS, mbtiType, rowAxes } from "@animus/brain/personality";
-import { dynimos, epitaphs, memories } from "@animus/db/schema";
+import { drives, dynimos, epitaphs, memories } from "@animus/db/schema";
 import { db } from "../lib/db";
 import { ActionForm } from "./action-form";
 import { bringToLife, kill, sleep, wake } from "./actions";
@@ -15,10 +16,14 @@ const RECENT_MEMORIES_LIMIT = 20;
 const UNDEFINED_TABLE = "42P01";
 
 async function loadDashboard() {
-  const [dynimoRows, epitaphRows] = await Promise.all([
+  const [dynimoRows, epitaphRows, driveRows] = await Promise.all([
     db.select().from(dynimos).orderBy(dynimos.id),
     db.select().from(epitaphs).orderBy(desc(epitaphs.deletedAt)),
+    db.select().from(drives).orderBy(drives.id),
   ]);
+  // Eén query voor alle Drijfveren; groeperen per Dynimo in code (geen N+1).
+  const drivesByDynimo = new Map<number, typeof driveRows>();
+  for (const drive of driveRows) drivesByDynimo.set(drive.dynimoId, [...(drivesByDynimo.get(drive.dynimoId) ?? []), drive]);
   const recentMemories = await Promise.all(
     dynimoRows.map((dynimo) =>
       db
@@ -29,7 +34,7 @@ async function loadDashboard() {
         .limit(RECENT_MEMORIES_LIMIT),
     ),
   );
-  return { dynimoRows, recentMemories, epitaphRows };
+  return { dynimoRows, recentMemories, epitaphRows, drivesByDynimo };
 }
 
 export default async function DashboardPage() {
@@ -49,7 +54,7 @@ export default async function DashboardPage() {
       </main>
     );
   }
-  const { dynimoRows, recentMemories, epitaphRows } = data;
+  const { dynimoRows, recentMemories, epitaphRows, drivesByDynimo } = data;
 
   return (
     <main>
@@ -92,6 +97,41 @@ export default async function DashboardPage() {
                   ) : (
                     <p>Persoonlijkheid: nog niet bepaald</p>
                   )}
+                  <div className="drives">
+                    <p>Drijfveren:</p>
+                    {DRIVE_KINDS.map((kind: DriveKind) => {
+                      const ofKind = (drivesByDynimo.get(dynimo.id) ?? []).filter((drive) => drive.kind === kind);
+                      return (
+                        <div key={kind}>
+                          <h4>{DRIVE_LABELS[kind]}</h4>
+                          {ofKind.length ? (
+                            <ul>
+                              {ofKind.map((drive) => (
+                                <li key={drive.id}>
+                                  {drive.text}
+                                  {drive.status && <em> — {drive.status}</em>}
+                                  {drive.strength !== null && (
+                                    <>
+                                      <span
+                                        className="bar"
+                                        role="img"
+                                        aria-label={`sterkte ${Math.round(drive.strength * 100)}%`}
+                                      >
+                                        <span className="bar-fill" style={{ width: `${Math.round(drive.strength * 100)}%` }} />
+                                      </span>
+                                      {Math.round(drive.strength * 100)}%
+                                    </>
+                                  )}
+                                </li>
+                              ))}
+                            </ul>
+                          ) : (
+                            <p>nog geen</p>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
                   {awake ? (
                     <ActionForm action={sleep} label="Laten slapen" pendingLabel="Bezig…" />
                   ) : (

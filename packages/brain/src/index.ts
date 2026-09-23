@@ -14,8 +14,9 @@ import {
 import { and, cosineDistance, desc, eq, isNotNull, isNull, notInArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { Db } from "@animus/db";
-import { dynimos, epitaphs, memories } from "@animus/db/schema";
+import { drives, dynimos, epitaphs, memories } from "@animus/db/schema";
 import { formatAge } from "./age.js";
+import { DRIVE_DESCRIPTIONS, DRIVE_KINDS, drivesPromptBlock, type DriveRow } from "./drives.js";
 import { AXIS_DESCRIPTIONS, axisGuidelines, mbtiType, rowAxes } from "./personality.js";
 import { EMOTIONS, isEmotion, type Emotion } from "./emotion.js";
 import { SEEDS } from "./seeds.js";
@@ -71,16 +72,49 @@ const axesSchema = z.object({
   jp: z.number().min(0).max(1),
 });
 
+const driveItem = z.object({ text: z.string().min(1) });
+const strengthItem = driveItem.extend({ strength: z.number().min(0).max(1) });
+
+// Per soort 1 tot 2 Drijfveren; Afkeer en Ergernis met een sterkte.
+const drivesSchema = z.object({
+  wens: z.array(driveItem).min(1).max(2),
+  doel: z.array(driveItem).min(1).max(2),
+  toekomstdroom: z.array(driveItem).min(1).max(2),
+  afkeer: z.array(strengthItem).min(1).max(2),
+  ergernis: z.array(strengthItem).min(1).max(2),
+});
+type DrivesOutput = z.infer<typeof drivesSchema>;
+
+function driveRowsFor(dynimoId: number, output: DrivesOutput, at: Date): (typeof drives.$inferInsert)[] {
+  return DRIVE_KINDS.flatMap((kind) =>
+    output[kind].map((item) => ({
+      dynimoId,
+      kind,
+      text: item.text,
+      status: kind === "doel" ? "actief" : null,
+      strength: "strength" in item ? item.strength : null,
+      createdAt: at,
+      updatedAt: at,
+    })),
+  );
+}
+
 const genesisSchema = z.object({
   name: z.string().min(1),
   coreCharacter: z.string().min(1),
   birthStory: z.string().min(1),
   axes: axesSchema,
+  drives: drivesSchema,
 });
 
 const BACKFILL_INSTRUCTIONS = `Hieronder staat een bestaand wezen: zijn kern-karakter, geboorteverhaal, geëvolueerde karakter en recente herinneringen.
 Bepaal zijn positie op vier persoonlijkheidsassen, elk een getal van 0 tot 1, op basis van wie hij/zij blijkt te zijn:
 ${AXIS_DESCRIPTIONS}`;
+
+const DRIVES_BACKFILL_INSTRUCTIONS = `Hieronder staat een bestaand wezen: zijn kern-karakter, geboorteverhaal, geëvolueerde karakter, persoonlijkheid en recente herinneringen.
+Bepaal zijn Drijfveren, passend bij wie hij/zij blijkt te zijn: per soort 1 of 2 items.
+${DRIVE_DESCRIPTIONS}
+Doelen starten actief.`;
 
 const BACKFILL_MEMORY_LIMIT = 20;
 
@@ -90,20 +124,24 @@ Kies een naam, beschrijf je kern-karakter in een paar zinnen, en schrijf een kor
 Bepaal ook je startpositie op vier persoonlijkheidsassen, elk een getal van 0 tot 1, geïnspireerd door de Seed:
 ${AXIS_DESCRIPTIONS}
 Wees niet allemaal in het midden: kies een eigen, uitgesproken positie.
+Kies ook je Drijfveren: per soort 1 of 2 items, passend bij de Seed én bij de persoonlijkheid die je koos:
+${DRIVE_DESCRIPTIONS}
+Doelen starten actief.
 Antwoord in het Nederlands.`;
 
 function pickSeed(random: () => number): string {
   return SEEDS[Math.floor(random() * SEEDS.length)]!;
 }
 
-function buildStableSystemPrompt(identityRecord: Dynimo): string {
+function buildStableSystemPrompt(identityRecord: Dynimo, driveRows: readonly DriveRow[]): string {
   const axes = rowAxes(identityRecord);
   const personality = axes
     ? `\nPersoonlijkheid: ${mbtiType(axes)}${axisGuidelines(axes).map((line) => `\n- ${line}`).join("")}`
     : "";
+  const driveBlock = drivesPromptBlock(driveRows);
   return `Je bent ${identityRecord.name}.
 Je kern-karakter: ${identityRecord.coreCharacter}
-Je geboorteverhaal: ${identityRecord.birthStory}${personality}
+Je geboorteverhaal: ${identityRecord.birthStory}${personality}${driveBlock ? `\n${driveBlock}` : ""}
 Antwoord in karakter en in het Nederlands.`;
 }
 
@@ -176,7 +214,7 @@ export function createBrain(deps: {
   // Herinneringen uit deze sessie staan al in het werkgeheugen; niet dubbel ophalen.
   const sessionMemoryIds: number[] = [];
 
-  async function genesis(): Promise<typeof dynimos.$inferInsert> {
+  async function genesis(): Promise<{ dynimo: typeof dynimos.$inferInsert; drives: DrivesOutput }> {
     const seed = pickSeed(random);
     const result = await generateText({
       model: deps.type2.heavy,
@@ -185,16 +223,25 @@ export function createBrain(deps: {
       output: Output.object({ schema: genesisSchema }),
     });
     return {
-      name: result.output.name,
-      coreCharacter: result.output.coreCharacter,
-      birthStory: result.output.birthStory,
-      axisIe: result.output.axes.ie,
-      axisSn: result.output.axes.sn,
-      axisTf: result.output.axes.tf,
-      axisJp: result.output.axes.jp,
-      seed,
-      bornAt: now(),
+      dynimo: {
+        name: result.output.name,
+        coreCharacter: result.output.coreCharacter,
+        birthStory: result.output.birthStory,
+        axisIe: result.output.axes.ie,
+        axisSn: result.output.axes.sn,
+        axisTf: result.output.axes.tf,
+        axisJp: result.output.axes.jp,
+        seed,
+        bornAt: now(),
+      },
+      drives: result.output.drives,
     };
+  }
+
+  // Drijfveren van één Dynimo in vaste volgorde (byte-stabiel prompt zolang niets verandert).
+  async function loadDrives(dynimoId: number): Promise<DriveRow[]> {
+    const rows = await deps.db.select().from(drives).where(eq(drives.dynimoId, dynimoId)).orderBy(drives.id);
+    return rows as DriveRow[];
   }
 
   // Wissel van Wakker/Slapend onder de advisory lock: de partial unique index blijft dan nooit in de weg.
@@ -225,13 +272,14 @@ export function createBrain(deps: {
   }
 
   async function bringToLife(): Promise<Dynimo> {
-    const values = await genesis();
+    const born = await genesis();
     const row = await withWakeLock(async (tx) => {
       await sleepAll(tx);
       const [inserted] = await tx
         .insert(dynimos)
-        .values({ ...values, awakeSince: now() })
+        .values({ ...born.dynimo, awakeSince: now() })
         .returning();
+      await tx.insert(drives).values(driveRowsFor(inserted!.id, born.drives, now()));
       await notifyStateChange(tx, String(inserted!.id));
       return inserted!;
     });
@@ -262,27 +310,36 @@ export function createBrain(deps: {
     return deps.db.select().from(dynimos).orderBy(dynimos.id);
   }
 
-  // Elke stap vult één soort ontbrekende eigenschap aan; #25/#26 voegen hier drijfveren en Basisemotie toe.
+  async function recentMemoryTexts(dynimoId: number): Promise<string[]> {
+    const rows = await deps.db
+      .select({ text: memories.text })
+      .from(memories)
+      .where(eq(memories.dynimoId, dynimoId))
+      .orderBy(desc(memories.createdAt))
+      .limit(BACKFILL_MEMORY_LIMIT);
+    return rows.map((row) => row.text);
+  }
+
+  function backfillPrompt(row: Dynimo, recent: string[]): string {
+    const axes = rowAxes(row);
+    return `Naam: ${row.name}
+Kern-karakter: ${row.coreCharacter}
+Geboorteverhaal: ${row.birthStory}
+Geëvolueerd karakter: ${row.evolvedCharacter || "(nog niet)"}${axes ? `\nPersoonlijkheid: ${mbtiType(axes)}` : ""}
+Recente herinneringen:
+${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
+  }
+
+  // Elke stap vult één soort ontbrekende eigenschap aan; #26 voegt hier de Basisemotie toe.
   // `fill` geeft terug of de rij daadwerkelijk bijgewerkt is.
-  const backfillSteps: { isMissing(row: Dynimo): boolean; fill(row: Dynimo): Promise<boolean> }[] = [
+  const backfillSteps: { isMissing(row: Dynimo): Promise<boolean>; fill(row: Dynimo): Promise<boolean> }[] = [
     {
-      isMissing: (row) => rowAxes(row) === null,
+      isMissing: async (row) => rowAxes(row) === null,
       fill: async (row) => {
-        const recent = await deps.db
-          .select({ text: memories.text })
-          .from(memories)
-          .where(eq(memories.dynimoId, row.id))
-          .orderBy(desc(memories.createdAt))
-          .limit(BACKFILL_MEMORY_LIMIT);
         const { output } = await generateText({
           model: deps.type2.heavy,
           instructions: BACKFILL_INSTRUCTIONS,
-          prompt: `Naam: ${row.name}
-Kern-karakter: ${row.coreCharacter}
-Geboorteverhaal: ${row.birthStory}
-Geëvolueerd karakter: ${row.evolvedCharacter || "(nog niet)"}
-Recente herinneringen:
-${recent.map((memory) => `- ${memory.text}`).join("\n") || "(nog geen)"}`,
+          prompt: backfillPrompt(row, await recentMemoryTexts(row.id)),
           output: Output.object({ schema: z.object({ axes: axesSchema }) }),
         });
         // Race-veilig: enkel schrijven als een andere instantie er niet al assen op gezet heeft.
@@ -294,18 +351,42 @@ ${recent.map((memory) => `- ${memory.text}`).join("\n") || "(nog geen)"}`,
         return updated.length > 0;
       },
     },
+    {
+      isMissing: async (row) =>
+        (await deps.db.select({ id: drives.id }).from(drives).where(eq(drives.dynimoId, row.id)).limit(1)).length === 0,
+      fill: async (row) => {
+        const { output } = await generateText({
+          model: deps.type2.heavy,
+          instructions: DRIVES_BACKFILL_INSTRUCTIONS,
+          prompt: backfillPrompt(row, await recentMemoryTexts(row.id)),
+          output: Output.object({ schema: z.object({ drives: drivesSchema }) }),
+        });
+        // Race-veilig: de Dynimo-rij locken en opnieuw controleren dat er nog geen Drijfveren zijn.
+        return deps.db.transaction(async (tx) => {
+          const [locked] = await tx.select({ id: dynimos.id }).from(dynimos).where(eq(dynimos.id, row.id)).for("update");
+          if (!locked) return false;
+          const existing = await tx.select({ id: drives.id }).from(drives).where(eq(drives.dynimoId, row.id)).limit(1);
+          if (existing.length > 0) return false;
+          await tx.insert(drives).values(driveRowsFor(row.id, output.drives, now()));
+          return true;
+        });
+      },
+    },
   ];
 
   async function backfill(): Promise<number> {
     let updatedRows = 0;
-    for (const row of await list()) {
+    for (const listed of await list()) {
       let changed = false;
       for (const step of backfillSteps) {
-        if (!step.isMissing(row)) continue;
         try {
+          // Vers lezen vóór elke stap: latere stappen (Drijfveren) gebruiken wat eerdere stappen of een
+          // andere instantie (assen) net aanvulden.
+          const [row] = await deps.db.select().from(dynimos).where(eq(dynimos.id, listed.id));
+          if (!row || !(await step.isMissing(row))) continue;
           changed = (await step.fill(row)) || changed;
         } catch (error) {
-          console.warn(`Backfill faalde voor ${row.name}:`, error instanceof Error ? error.message : error);
+          console.warn(`Backfill faalde voor ${listed.name}:`, error instanceof Error ? error.message : error);
         }
       }
       if (changed) updatedRows++;
@@ -362,6 +443,7 @@ ${recent.map((memory) => `- ${memory.text}`).join("\n") || "(nog geen)"}`,
       return;
     }
     const being = adopt(awake);
+    const driveRows = await loadDrives(awake.id);
     // Type1 is een reflex: faalt hij, dan antwoordt Type2 toch, met een neutrale emotie.
     const { emotion, intensity, intent } = await classify(deps.type1, text).catch((error: unknown): Type1Result => {
       console.warn("Type1 faalde, val terug op neutraal/simpel:", error instanceof Error ? error.message : error);
@@ -386,7 +468,7 @@ ${recent.map((memory) => `- ${memory.text}`).join("\n") || "(nog geen)"}`,
 
     const stable: SystemModelMessage = {
       role: "system",
-      content: buildStableSystemPrompt(awake),
+      content: buildStableSystemPrompt(awake, driveRows),
       providerOptions: { anthropic: { cacheControl: { type: "ephemeral" } } },
     };
 
@@ -457,7 +539,7 @@ ${recent.map((memory) => `- ${memory.text}`).join("\n") || "(nog geen)"}`,
     const { text: farewellReflection } = await generateText({
       model: deps.type2.heavy,
       instructions: [
-        { role: "system", content: buildStableSystemPrompt(being) },
+        { role: "system", content: buildStableSystemPrompt(being, await loadDrives(id)) },
         ageMessage(being),
       ],
       prompt: FAREWELL_PROMPT,

@@ -58,3 +58,13 @@ Pas op: secundaire "docs"-sites (jevapi.org, community-repo's) bevatten verzonne
 - `vector('embedding', { dimensions: 1536 })`; HNSW: `index('…').using('hnsw', t.embedding.op('vector_cosine_ops'))`.
 - `CREATE EXTENSION IF NOT EXISTS vector;` handmatig in een (custom) migratie, vóór de vectorkolom.
 - Sorteer op `cosineDistance(col, vec)` ascending, niet op `1 - cosineDistance` desc — anders geen index.
+
+## Aanvulling #7 (2026-09-23): spraakpipeline
+
+- **Lokale LiveKit** (geverifieerd op macOS/Docker Desktop): `livekit/livekit-server:v1.13.7` met `--dev --bind 0.0.0.0 --node-ip 127.0.0.1`, poorten 7880/tcp, 7881/tcp, 7882/udp (UDP-mux). Dev-keys `devkey`/`secret`. Zonder `--node-ip` adverteert de server het interne VM-IP (livekit/livekit#3747). Officieel aanbevolen voor lokaal is `brew install livekit`.
+- **Turn detector**: `turnHandling.turnDetection` (top-level `turnDetection` is deprecated); `MultilingualModel` ondersteunt Nederlands, heeft de STT-taal nodig (`language: "nl"`) en vraagt eerst `livekit-agents download-files`. De tekstgebaseerde detector logt dat hij deprecated is t.g.v. een audio-EOT-detector (`@livekit/local-inference`).
+- **preemptiveGeneration** staat standaard aan en draait `llmNode` speculatief; uitgezet omdat `hear()` onomkeerbare side effects heeft.
+- **Barge-in**: LiveKit cancelt de `llmNode`-stream; de brein-kern bewaart een onderbroken beurt met het al gezegde deel.
+- **Deepgram**: nova-3 ondersteunt `nl` (sinds aug. 2025); Aura-2 heeft Nederlandse stemmen (`aura-2-beatrix-nl`, `-daphne-nl`, `-cornelia-nl`, `-sander-nl`, `-hestia-nl`, `-lars-nl`, `-roman-nl`, `-rhea-nl`, `-leda-nl`; via docs-samenvatting, niet elk id live getest). TTS streamt (websocket, flush per zin). Bron: https://developers.deepgram.com/docs/tts-models
+- **OpenAI-plugin**: STT `gpt-4o-transcribe` vraagt `useRealtime: false`; TTS heeft geen streaming-API — LiveKit wikkelt ze in een `TTSStreamAdapter` (per zin).
+- **Data channel (agent-kant)**: `getJobContext().room.localParticipant?.publishData(bytes, { reliable, topic })` (`@livekit/rtc-node` 0.13.x, snake_case `destination_identities`). Browser: `useDataChannel(topic, onMessage)` met `payload: Uint8Array`.

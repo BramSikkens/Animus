@@ -8,7 +8,10 @@
     "repl": "pnpm --filter @animus/brain run repl",
     "verwijder": "pnpm --filter @animus/brain run verwijder",
     "dashboard": "pnpm --filter @animus/dashboard dev",
-    "db:migrate": "pnpm --filter @animus/db run db:migrate"
+    "db:migrate": "pnpm --filter @animus/db run db:migrate",
+    "agent": "pnpm --filter @animus/agent start",
+    "agent:download": "pnpm --filter @animus/agent download-files",
+    "face": "pnpm --filter @animus/face dev"
   },
   "packageManager": "pnpm@10.33.0",
   "devDependencies": {

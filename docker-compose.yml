@@ -12,5 +12,13 @@ services:
     volumes:
       - animus_db_data:/var/lib/postgresql/data
 
+  livekit:
+    image: livekit/livekit-server:v1.13.7
+    command: --dev --bind 0.0.0.0 --node-ip 127.0.0.1
+    ports:
+      - "7880:7880"
+      - "7881:7881"
+      - "7882:7882/udp"
+
 volumes:
   animus_db_data:

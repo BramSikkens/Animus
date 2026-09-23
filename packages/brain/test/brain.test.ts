@@ -97,6 +97,39 @@ function type1Model(
   return Object.assign(model, { doEvaluateCalls });
 }
 
+const TOOL_CALLS: { unified: "tool-calls"; raw: undefined } = { unified: "tool-calls", raw: undefined };
+
+function toolCallStream(toolName: string, input: object) {
+  return {
+    stream: simulateReadableStream({
+      chunks: [
+        { type: "stream-start" as const, warnings: [] },
+        { type: "tool-call" as const, toolCallId: "call-1", toolName, input: JSON.stringify(input) },
+        { type: "finish" as const, usage: NULL_USAGE, finishReason: TOOL_CALLS },
+      ],
+    }),
+  };
+}
+
+function textStream(text: string) {
+  return {
+    stream: simulateReadableStream({
+      chunks: [
+        { type: "stream-start" as const, warnings: [] },
+        { type: "text-start" as const, id: "1" },
+        { type: "text-delta" as const, id: "1", delta: text },
+        { type: "text-end" as const, id: "1" },
+        { type: "finish" as const, usage: NULL_USAGE, finishReason: STOP },
+      ],
+    }),
+  };
+}
+
+// Eerste stream: Type2 roept een tool aan; tweede stream: het antwoord na het tool-resultaat.
+function toolThenTextModel(toolName: string, input: object, answer: string) {
+  return new MockLanguageModelV4({ doStream: [toolCallStream(toolName, input), textStream(answer)] });
+}
+
 function contentsByRole(prompt: unknown, role: "system" | "user"): string[] {
   return (prompt as Array<{ role: string; content: unknown }>)
     .filter((message) => message.role === role)
@@ -106,9 +139,7 @@ function contentsByRole(prompt: unknown, role: "system" | "user"): string[] {
 async function collectText(events: AsyncIterable<BrainEvent>): Promise<string> {
   let full = "";
   for await (const event of events) {
-    if (event.type === "emotion") continue;
-    expect(event.type).toBe("text");
-    full += event.delta;
+    if (event.type === "text") full += event.delta;
   }
   return full;
 }
@@ -508,4 +539,107 @@ describe("createBrain", () => {
     const system = contentsByRole(light.doStreamCalls[1]?.prompt, "system").join(" ");
     expect(system).not.toContain("Mijn kat heet Mimi.");
   });
+
+  it("laat Type2 de datum/tijd-tool aanroepen en geeft het resultaat terug aan Type2", async () => {
+    const bornAt = new Date("2026-01-01T12:00:00.000Z");
+    const light = toolThenTextModel("current_datetime", {}, "Het is donderdag.");
+    const brain = createBrain({
+      db,
+      embedder: embedModel(),
+      type1: type1Model(),
+      type2: { light, heavy: genesisModel({ name: "Nova", coreCharacter: "x", birthStory: "y" }) },
+      now: () => bornAt,
+      random: () => 0,
+    });
+    await brain.boot();
+
+    const events: BrainEvent[] = [];
+    for await (const event of brain.hear("Welke dag is het vandaag?")) events.push(event);
+
+    expect(events).toContainEqual(expect.objectContaining({ type: "tool-call", toolName: "current_datetime" }));
+    const result = events.find((e) => e.type === "tool-result");
+    expect(JSON.stringify(result)).toContain("1 januari 2026");
+    expect(JSON.stringify(light.doStreamCalls[1]?.prompt)).toContain("1 januari 2026");
+    expect(events.filter((e) => e.type === "text").map((e) => e.delta).join("")).toBe("Het is donderdag.");
+  });
+
+  it("laat Type2 de onthoud-tool aanroepen, die een herinnering met embedding wegschrijft", async () => {
+    const bornAt = new Date("2026-01-01T12:00:00.000Z");
+    const light = toolThenTextModel("remember", { text: "Bram drinkt zijn koffie zwart." }, "Onthouden!");
+    const brain = createBrain({
+      db,
+      embedder: embedModel(),
+      type1: type1Model(),
+      type2: { light, heavy: genesisModel({ name: "Nova", coreCharacter: "x", birthStory: "y" }) },
+      now: () => bornAt,
+      random: () => 0,
+    });
+    await brain.boot();
+    await collectText(brain.hear("Onthoud dat ik mijn koffie zwart drink."));
+
+    const rows = await db.select().from(memories);
+    const remembered = rows.find((row) => row.text === "Bram drinkt zijn koffie zwart.");
+    expect(remembered?.embedding).toHaveLength(EMBEDDING_DIMENSIONS);
+    expect(remembered?.createdAt).toEqual(bornAt);
+  });
+
+  it("houdt de tool-stappen van een beurt in het werkgeheugen voor de volgende beurt", async () => {
+    const bornAt = new Date("2026-01-01T12:00:00.000Z");
+    const light = new MockLanguageModelV4({
+      doStream: [toolCallStream("current_datetime", {}), textStream("Het is donderdag."), textStream("Vrijdag.")],
+    });
+    const brain = createBrain({
+      db,
+      embedder: embedModel(),
+      type1: type1Model(),
+      type2: { light, heavy: genesisModel({ name: "Nova", coreCharacter: "x", birthStory: "y" }) },
+      now: () => bornAt,
+      random: () => 0,
+    });
+    await brain.boot();
+    await collectText(brain.hear("Welke dag is het?"));
+    await collectText(brain.hear("En morgen?"));
+
+    const secondTurn = light.doStreamCalls[2]?.prompt as Array<{ role: string }>;
+    expect(secondTurn.some((message) => message.role === "tool")).toBe(true);
+  });
+
+  it("levert ook een tool-result-gebeurtenis met de fout als een tool faalt", async () => {
+    const bornAt = new Date("2026-01-01T12:00:00.000Z");
+    const light = toolThenTextModel("remember", { text: "" }, "Oei, dat lukte niet.");
+    const brain = createBrain({
+      db,
+      embedder: embedModel(),
+      type1: type1Model(),
+      type2: { light, heavy: genesisModel({ name: "Nova", coreCharacter: "x", birthStory: "y" }) },
+      now: () => bornAt,
+      random: () => 0,
+    });
+    await brain.boot();
+
+    const events: BrainEvent[] = [];
+    for await (const event of brain.hear("Onthoud dit.")) events.push(event);
+
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: "tool-result", toolName: "remember", output: { error: expect.any(String) } }),
+    );
+  });
+
+  it("slaat een beurt zonder antwoordtekst niet op als herinnering", async () => {
+    const bornAt = new Date("2026-01-01T12:00:00.000Z");
+    const light = new MockLanguageModelV4({ doStream: [toolCallStream("current_datetime", {}), textStream("")] });
+    const brain = createBrain({
+      db,
+      embedder: embedModel(),
+      type1: type1Model(),
+      type2: { light, heavy: genesisModel({ name: "Nova", coreCharacter: "x", birthStory: "y" }) },
+      now: () => bornAt,
+      random: () => 0,
+    });
+    await brain.boot();
+    await collectText(brain.hear("Welke dag is het?"));
+
+    expect(await db.select().from(memories)).toHaveLength(0);
+  });
 });
+

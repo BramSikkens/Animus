@@ -14,6 +14,10 @@ _Avoid_: reflex-brein, System One (in proza toegestaan, niet als term)
 Het langzame, redenerende LLM-brein (wisselbaar via de Vercel AI SDK) voor gesprek, planning, tool-gebruik en oordeel over nieuwe situaties.
 _Avoid_: praat-brein, System Two
 
+**Intent**:
+De Type1-classificatie van een uiting als *simpel* (begroeting, kort praatje, eenvoudige vraag) of *complex* (uitleg, redenering, planning, oordeel). Bepaalt of Type2-licht of Type2-zwaar antwoordt.
+_Avoid_: complexiteit, moeilijkheidsgraad
+
 ### Identiteit
 
 **Seed**:
@@ -35,7 +39,7 @@ _Avoid_: laatste reflectie (dat suggereert hergebruik van een bestaande)
 ### Expressie
 
 **Emotie**:
-Een vaste, eindige categorie uit de set {blij, boos, verrast, kalm, verveeld, nieuwsgierig, bang, neutraal}, met een intensiteit, die Type1 continu aflevert.
+Een vaste, eindige categorie uit de set {blij, boos, verrast, kalm, verveeld, nieuwsgierig, bang, neutraal}, met een intensiteit (0–1), die Type1 per uiting aflevert.
 _Avoid_: sentiment, stemming (als los begrip)
 
 **Emotiekeyframe**:

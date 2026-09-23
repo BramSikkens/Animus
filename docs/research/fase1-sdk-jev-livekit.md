@@ -4,6 +4,16 @@ Stand 2026-09-23. Geverifieerd door de npm-tarballs te lezen (`.d.ts`/bron); web
 
 ## Jev (TypeSafe "System One Model") — Type1
 
+**Gekozen route: Vercel AI Gateway via de AI SDK** (zie ADR-0005). Rechtstreekse TypeSafe-sleutel is niet beschikbaar.
+
+- Model-id `typesafe-ai/jev` (hardcoded in `@ai-sdk/gateway@4.0.90`, `GatewayEvaluationModelId`); auth `AI_GATEWAY_API_KEY`. Bronnen: https://vercel.com/docs/ai-gateway/modalities/evaluation, https://vercel.com/changelog/typesafe-ai-jev-now-available-on-ai-gateway
+- `experimental_evaluate({ model, state, questions })` uit `ai@7`; vraagtypen `choice` (criteria = map), `score` (criteria = array; score = geïnterpoleerde index, bij 2 criteria dus 0–1), `boolean` (→ `probability`).
+- Mock: `Experimental_EvaluationMockModelV4` uit `ai/test`; interface `Experimental_EvaluationModelV4` (`doEvaluate`).
+- **OpenRouter biedt Jev niet aan** — geverifieerd via `GET https://openrouter.ai/api/v1/models` (geen typesafe/jev) en 404 op `/api/v1/models/typesafe/jev-1.13`. Webpagina's die het tegendeel beweren zijn verzonnen (de OpenRouter-SPA geeft 200 op elke URL).
+- Cloudflare Workers AI (`typesafe/jev`) staat in hun docs, niet live geverifieerd. Requesty/LiteLLM onbevestigd; AWS Bedrock niet.
+
+### Rechtstreekse TypeSafe-API (niet gebruikt)
+
 - npm: `@typesafe-ai/sdk@0.6.0` (pre-1.0, Node ≥20). Repo: https://github.com/typesafe-ai/typesafe-sdk-js
 - Endpoint `POST https://api.typesafe.ai/v1/systemone`, auth `Authorization: Bearer <TYPESAFE_API_KEY>`.
 - Env: `TYPESAFE_API_KEY` (verplicht), `TYPESAFE_BASE_URL`, `TYPESAFE_DEFAULT_MODEL` (default `jev-latest`), `TYPESAFE_LOG_LEVEL`.

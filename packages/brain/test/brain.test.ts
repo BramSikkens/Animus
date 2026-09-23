@@ -1,8 +1,8 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { MockLanguageModelV4 } from "ai/test";
+import { MockLanguageModelV4, Experimental_EvaluationMockModelV4 } from "ai/test";
 import { simulateReadableStream } from "ai";
 import { identity } from "@animus/db/schema";
-import { createBrain } from "../src/index.js";
+import { createBrain, type BrainEvent } from "../src/index.js";
 import { createTestDb, truncateAll } from "./db.js";
 
 const db = createTestDb();
@@ -60,15 +60,38 @@ function textModel(chunks: string[]) {
   });
 }
 
+// Default: neutraal/0.5/simpel. Registreert calls zelf (de mock houdt ze niet bij), t.b.v. test 5.
+function type1Model(
+  overrides: Partial<{ emotion: string; intensity: number; intent: "simpel" | "complex" }> = {},
+): Experimental_EvaluationMockModelV4 & { doEvaluateCalls: unknown[] } {
+  const { emotion = "neutraal", intensity = 0.5, intent = "simpel" } = overrides;
+  const doEvaluateCalls: unknown[] = [];
+  const model = new Experimental_EvaluationMockModelV4({
+    doEvaluate: async (options) => {
+      doEvaluateCalls.push(options);
+      return {
+        answers: {
+          emotion: { type: "choice", choice: emotion },
+          intensity: { type: "score", score: intensity },
+          intent: { type: "choice", choice: intent },
+        },
+        warnings: [],
+      };
+    },
+  });
+  return Object.assign(model, { doEvaluateCalls });
+}
+
 function contentsByRole(prompt: unknown, role: "system" | "user"): string[] {
   return (prompt as Array<{ role: string; content: unknown }>)
     .filter((message) => message.role === role)
     .map((message) => (typeof message.content === "string" ? message.content : JSON.stringify(message.content)));
 }
 
-async function collectText(events: AsyncIterable<{ type: string; delta: string }>): Promise<string> {
+async function collectText(events: AsyncIterable<BrainEvent>): Promise<string> {
   let full = "";
   for await (const event of events) {
+    if (event.type === "emotion") continue;
     expect(event.type).toBe("text");
     full += event.delta;
   }
@@ -85,6 +108,7 @@ describe("createBrain", () => {
     });
     const brain = createBrain({
       db,
+      type1: type1Model(),
       type2: { light: unusedModel(), heavy },
       now: () => bornAt,
       random: () => 0,
@@ -115,6 +139,7 @@ describe("createBrain", () => {
     });
     const firstBrain = createBrain({
       db,
+      type1: type1Model(),
       type2: { light: unusedModel(), heavy: firstHeavy },
       now: () => bornAt,
       random: () => 0,
@@ -124,6 +149,7 @@ describe("createBrain", () => {
     const secondHeavy = unusedModel();
     const secondBrain = createBrain({
       db,
+      type1: type1Model(),
       type2: { light: unusedModel(), heavy: secondHeavy },
       now: () => bornAt,
       random: () => 0,
@@ -140,6 +166,7 @@ describe("createBrain", () => {
     let clock = bornAt;
     const brain = createBrain({
       db,
+      type1: type1Model(),
       type2: { light: unusedModel(), heavy: genesisModel({ name: "Nova", coreCharacter: "x", birthStory: "y" }) },
       now: () => clock,
       random: () => 0,
@@ -150,6 +177,7 @@ describe("createBrain", () => {
     const light = textModel(["Hoi."]);
     const brainWithLight = createBrain({
       db,
+      type1: type1Model(),
       type2: { light, heavy: unusedModel() },
       now: () => clock,
       random: () => 0,
@@ -166,6 +194,7 @@ describe("createBrain", () => {
     const light = textModel(["Hallo", " daar!"]);
     const brain = createBrain({
       db,
+      type1: type1Model(),
       type2: { light, heavy: genesisModel({ name: "Nova", coreCharacter: "Speels en oplettend.", birthStory: "y" }) },
       now: () => bornAt,
       random: () => 0,
@@ -185,6 +214,7 @@ describe("createBrain", () => {
     const light = textModel(["Leuk je te ontmoeten.", "Je heet Bram."]);
     const brain = createBrain({
       db,
+      type1: type1Model(),
       type2: { light, heavy: genesisModel({ name: "Nova", coreCharacter: "x", birthStory: "y" }) },
       now: () => bornAt,
       random: () => 0,
@@ -211,6 +241,7 @@ describe("createBrain", () => {
     });
     const brain = createBrain({
       db,
+      type1: type1Model(),
       type2: { light, heavy: genesisModel({ name: "Nova", coreCharacter: "x", birthStory: "y" }) },
       now: () => bornAt,
       random: () => 0,
@@ -221,5 +252,138 @@ describe("createBrain", () => {
 
     const userTexts = contentsByRole(light.doStreamCalls[1]?.prompt, "user");
     expect(userTexts.some((c) => c.includes("Mislukt"))).toBe(false);
+  });
+
+  it("levert een emotion-event met de Type1-emotie en -intensiteit, vóór de eerste tekst", async () => {
+    const bornAt = new Date("2026-01-01T00:00:00.000Z");
+    const light = textModel(["Hoi."]);
+    const brain = createBrain({
+      db,
+      type1: type1Model({ emotion: "blij", intensity: 0.8 }),
+      type2: { light, heavy: genesisModel({ name: "Nova", coreCharacter: "x", birthStory: "y" }) },
+      now: () => bornAt,
+      random: () => 0,
+    });
+    await brain.boot();
+
+    const events: BrainEvent[] = [];
+    for await (const event of brain.hear("Hoi!")) events.push(event);
+
+    expect(events[0]).toEqual({ type: "emotion", emotion: "blij", intensity: 0.8 });
+    const emotionIndex = events.findIndex((e) => e.type === "emotion");
+    const firstTextIndex = events.findIndex((e) => e.type === "text");
+    expect(emotionIndex).toBeLessThan(firstTextIndex);
+  });
+
+  it("routeert intent 'complex' naar het zware Type2-model, zonder het lichte aan te roepen", async () => {
+    const bornAt = new Date("2026-01-01T00:00:00.000Z");
+    const genesisBrain = createBrain({
+      db,
+      type1: type1Model(),
+      type2: { light: unusedModel(), heavy: genesisModel({ name: "Nova", coreCharacter: "x", birthStory: "y" }) },
+      now: () => bornAt,
+      random: () => 0,
+    });
+    await genesisBrain.boot();
+
+    const heavy = textModel(["Zwaar antwoord."]);
+    const brain = createBrain({
+      db,
+      type1: type1Model({ intent: "complex" }),
+      type2: { light: unusedModel(), heavy },
+      now: () => bornAt,
+      random: () => 0,
+    });
+    await brain.boot();
+    const text = await collectText(brain.hear("Leg iets ingewikkelds uit."));
+
+    expect(text).toBe("Zwaar antwoord.");
+    expect(heavy.doStreamCalls).toHaveLength(1);
+  });
+
+  it("routeert intent 'simpel' naar het lichte Type2-model, zonder het zware aan te roepen", async () => {
+    const bornAt = new Date("2026-01-01T00:00:00.000Z");
+    const genesisBrain = createBrain({
+      db,
+      type1: type1Model(),
+      type2: { light: unusedModel(), heavy: genesisModel({ name: "Nova", coreCharacter: "x", birthStory: "y" }) },
+      now: () => bornAt,
+      random: () => 0,
+    });
+    await genesisBrain.boot();
+
+    const light = textModel(["Hoi!"]);
+    const brain = createBrain({
+      db,
+      type1: type1Model({ intent: "simpel" }),
+      type2: { light, heavy: unusedModel() },
+      now: () => bornAt,
+      random: () => 0,
+    });
+    await brain.boot();
+    const text = await collectText(brain.hear("Hoi!"));
+
+    expect(text).toBe("Hoi!");
+    expect(light.doStreamCalls).toHaveLength(1);
+  });
+
+  it("bewaart de laatst gekende emotie en intensiteit op de identity-rij", async () => {
+    const bornAt = new Date("2026-01-01T00:00:00.000Z");
+    const light = textModel(["Hoi."]);
+    const brain = createBrain({
+      db,
+      type1: type1Model({ emotion: "nieuwsgierig", intensity: 0.65 }),
+      type2: { light, heavy: genesisModel({ name: "Nova", coreCharacter: "x", birthStory: "y" }) },
+      now: () => bornAt,
+      random: () => 0,
+    });
+    await brain.boot();
+    await collectText(brain.hear("Vertel eens iets nieuws."));
+
+    const rows = await db.select().from(identity);
+    expect(rows[0]?.lastEmotion).toBe("nieuwsgierig");
+    expect(rows[0]?.lastIntensity).toBeCloseTo(0.65);
+  });
+
+  it("geeft de uiting als state aan Type1 mee", async () => {
+    const bornAt = new Date("2026-01-01T00:00:00.000Z");
+    const light = textModel(["Hoi."]);
+    const type1 = type1Model();
+    const brain = createBrain({
+      db,
+      type1,
+      type2: { light, heavy: genesisModel({ name: "Nova", coreCharacter: "x", birthStory: "y" }) },
+      now: () => bornAt,
+      random: () => 0,
+    });
+    await brain.boot();
+    await collectText(brain.hear("Wat een mooie dag!"));
+
+    expect(type1.doEvaluateCalls).toHaveLength(1);
+    expect((type1.doEvaluateCalls[0] as { state: unknown }).state).toBe("Wat een mooie dag!");
+  });
+
+  it("antwoordt toch via het lichte model met een neutrale emotie als Type1 faalt", async () => {
+    const bornAt = new Date("2026-01-01T00:00:00.000Z");
+    const light = textModel(["Hoi."]);
+    const brokenType1 = new Experimental_EvaluationMockModelV4({
+      doEvaluate: async () => {
+        throw new Error("Jev plat");
+      },
+    });
+    const brain = createBrain({
+      db,
+      type1: brokenType1,
+      type2: { light, heavy: genesisModel({ name: "Nova", coreCharacter: "x", birthStory: "y" }) },
+      now: () => bornAt,
+      random: () => 0,
+    });
+    await brain.boot();
+
+    const events: BrainEvent[] = [];
+    for await (const event of brain.hear("Hoi!")) events.push(event);
+
+    expect(events[0]).toEqual({ type: "emotion", emotion: "neutraal", intensity: 0 });
+    expect(events.filter((e) => e.type === "text").map((e) => e.delta).join("")).toBe("Hoi.");
   });
 });

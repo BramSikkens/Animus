@@ -1,0 +1,93 @@
+{
+  "id": "c90fe3dd-5168-4dca-84fe-0573cc4c0797",
+  "prevId": "07ff0680-28fd-421b-bd1c-688ec8efb266",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.identity": {
+      "name": "identity",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "default": 1
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "core_character": {
+          "name": "core_character",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "evolved_character": {
+          "name": "evolved_character",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "birth_story": {
+          "name": "birth_story",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "seed": {
+          "name": "seed",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "born_at": {
+          "name": "born_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "last_emotion": {
+          "name": "last_emotion",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_intensity": {
+          "name": "last_intensity",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "identity_singleton": {
+          "name": "identity_singleton",
+          "value": "\"identity\".\"id\" = 1"
+        }
+      },
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {},
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}

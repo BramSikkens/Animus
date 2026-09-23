@@ -13,10 +13,10 @@ import {
   type ModelMessage,
   type SystemModelMessage,
 } from "ai";
-import { cosineDistance, eq, notInArray } from "drizzle-orm";
+import { and, cosineDistance, eq, notInArray } from "drizzle-orm";
 import { z } from "zod";
 import type { Db } from "@animus/db";
-import { epitaphs, identity, memories } from "@animus/db/schema";
+import { dynimos, epitaphs, memories } from "@animus/db/schema";
 import { formatAge } from "./age.js";
 import { EMOTIONS, isEmotion, type Emotion } from "./emotion.js";
 import { createTools } from "./tools.js";
@@ -30,7 +30,7 @@ export type BrainEvent =
   | { type: "tool-call"; toolName: string; input: unknown }
   | { type: "tool-result"; toolName: string; output: unknown };
 
-export type Identity = Omit<typeof identity.$inferSelect, "id">;
+export type Identity = Omit<typeof dynimos.$inferSelect, "id">;
 
 export type Epitaph = typeof epitaphs.$inferSelect;
 
@@ -77,7 +77,7 @@ Je geboorteverhaal: ${identityRecord.birthStory}
 Antwoord in karakter en in het Nederlands.`;
 }
 
-function toIdentity({ id: _id, ...rest }: typeof identity.$inferSelect): Identity {
+function toIdentity({ id: _id, ...rest }: typeof dynimos.$inferSelect): Identity {
   return rest;
 }
 
@@ -143,12 +143,13 @@ export function createBrain(deps: {
   const now = deps.now ?? (() => new Date());
   const random = deps.random ?? Math.random;
   let bootedIdentity: Identity | undefined;
+  let bootedId: number | undefined;
   const tools = createTools({ now, remember });
   const workingMemory: ModelMessage[] = [];
   // Herinneringen uit deze sessie staan al in het werkgeheugen; niet dubbel ophalen.
   const sessionMemoryIds: number[] = [];
 
-  async function genesis(): Promise<Identity> {
+  async function genesis(): Promise<typeof dynimos.$inferSelect> {
     const seed = pickSeed(random);
     const result = await generateText({
       model: deps.type2.heavy,
@@ -156,24 +157,24 @@ export function createBrain(deps: {
       prompt: seed,
       output: Output.object({ schema: genesisSchema }),
     });
-    await deps.db
-      .insert(identity)
+    const [row] = await deps.db
+      .insert(dynimos)
       .values({
-        id: 1,
         name: result.output.name,
         coreCharacter: result.output.coreCharacter,
         birthStory: result.output.birthStory,
         seed,
         bornAt: now(),
       })
-      .onConflictDoNothing();
-    const rows = await deps.db.select().from(identity).limit(1);
-    return toIdentity(rows[0]!);
+      .returning();
+    return row!;
   }
 
   async function boot(): Promise<Identity> {
-    const existing = await deps.db.select().from(identity).limit(1);
-    bootedIdentity = existing[0] ? toIdentity(existing[0]) : await genesis();
+    const existing = await deps.db.select().from(dynimos).orderBy(dynimos.id).limit(1);
+    const row = existing[0] ?? (await genesis());
+    bootedId = row.id;
+    bootedIdentity = toIdentity(row);
     return bootedIdentity;
   }
 
@@ -186,10 +187,13 @@ export function createBrain(deps: {
   async function recall(utterance: string): Promise<string[]> {
     try {
       const { embedding } = await embed({ model: deps.embedder, value: utterance });
+      const scope = sessionMemoryIds.length
+        ? and(eq(memories.dynimoId, bootedId!), notInArray(memories.id, sessionMemoryIds))
+        : eq(memories.dynimoId, bootedId!);
       const rows = await deps.db
         .select({ text: memories.text })
         .from(memories)
-        .where(sessionMemoryIds.length ? notInArray(memories.id, sessionMemoryIds) : undefined)
+        .where(scope)
         .orderBy(cosineDistance(memories.embedding, embedding))
         .limit(RECALL_LIMIT);
       return rows.map((row) => row.text);
@@ -204,7 +208,7 @@ export function createBrain(deps: {
       const { embedding } = await embed({ model: deps.embedder, value: memoryText });
       const [row] = await deps.db
         .insert(memories)
-        .values({ text: memoryText, embedding, createdAt: now() })
+        .values({ dynimoId: bootedId!, text: memoryText, embedding, createdAt: now() })
         .returning({ id: memories.id });
       sessionMemoryIds.push(row!.id);
       return true;
@@ -225,10 +229,10 @@ export function createBrain(deps: {
     });
 
     const updated = await deps.db
-      .update(identity)
+      .update(dynimos)
       .set({ lastEmotion: emotion, lastIntensity: intensity })
-      .where(eq(identity.id, 1))
-      .returning({ id: identity.id });
+      .where(eq(dynimos.id, bootedId!))
+      .returning({ id: dynimos.id });
     // Een andere instantie (bv. de verwijder-CLI) kan het wezen intussen gewist hebben.
     if (updated.length === 0) {
       forgetBeing();
@@ -296,6 +300,7 @@ export function createBrain(deps: {
   // Alles wat deze instantie over het wezen weet; na verwijdering mag niets doorsijpelen naar een nieuw wezen.
   function forgetBeing(): void {
     bootedIdentity = undefined;
+    bootedId = undefined;
     workingMemory.length = 0;
     sessionMemoryIds.length = 0;
   }
@@ -303,6 +308,7 @@ export function createBrain(deps: {
   async function deleteBeing(confirmedName: string): Promise<Epitaph | null> {
     if (!bootedIdentity || confirmedName !== bootedIdentity.name) return null;
     const being = bootedIdentity;
+    const id = bootedId!;
 
     // (1) Aparte, finale Type2-call: de laatste woorden, niet een bestaande reflectie.
     // Faalt die, dan wordt er bewust niets verwijderd: geen Grafschrift zonder laatste woorden.
@@ -318,9 +324,9 @@ export function createBrain(deps: {
     // (2) Grafschrift + (3) hard verwijderen, samen of helemaal niet.
     const epitaph = await deps.db.transaction(async (tx) => {
       // Eerst de identiteit claimen: was een andere instantie ons voor, dan schrijven we niets.
-      const deleted = await tx.delete(identity).where(eq(identity.id, 1)).returning({ id: identity.id });
+      // De FK (ON DELETE CASCADE) ruimt de memories van deze dynimo hierbij meteen zelf op.
+      const deleted = await tx.delete(dynimos).where(eq(dynimos.id, id)).returning({ id: dynimos.id });
       if (deleted.length === 0) return null;
-      await tx.delete(memories);
       const [row] = await tx
         .insert(epitaphs)
         .values({ name: being.name, bornAt: being.bornAt, deletedAt: now(), farewellReflection })

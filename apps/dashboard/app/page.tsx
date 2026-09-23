@@ -1,6 +1,6 @@
 import { desc } from "drizzle-orm";
 import { formatAge } from "@animus/brain/age";
-import { epitaphs, identity, memories } from "@animus/db/schema";
+import { dynimos, epitaphs, memories } from "@animus/db/schema";
 import { db } from "../lib/db";
 import { formatDate, formatDateTime } from "../lib/format";
 
@@ -13,7 +13,7 @@ const UNDEFINED_TABLE = "42P01";
 
 async function loadDashboard() {
   const [beingRows, recentMemories, epitaphRows] = await Promise.all([
-    db.select().from(identity).limit(1),
+    db.select().from(dynimos).orderBy(dynimos.id).limit(1),
     db
       .select({ id: memories.id, text: memories.text, createdAt: memories.createdAt })
       .from(memories)

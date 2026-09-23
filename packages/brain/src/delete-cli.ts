@@ -1,7 +1,7 @@
 import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 import { createDb, migrate } from "@animus/db";
-import { identity } from "@animus/db/schema";
+import { dynimos } from "@animus/db/schema";
 import { createBrain } from "./index.js";
 import { EMBEDDING_MODEL, loadType2Config, TYPE1_MODEL } from "./config.js";
 
@@ -16,7 +16,7 @@ async function main(): Promise<void> {
   await migrate(db);
   try {
     // Eerst zelf kijken: boot() zou op een lege database net een nieuw wezen laten geboren worden.
-    const [being] = await db.select({ name: identity.name }).from(identity);
+    const [being] = await db.select({ name: dynimos.name }).from(dynimos).orderBy(dynimos.id).limit(1);
     if (!being) {
       console.log("Er is geen wezen om te verwijderen.");
       return;

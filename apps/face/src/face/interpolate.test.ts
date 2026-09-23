@@ -3,12 +3,18 @@ import { frameFor } from "./interpolate.js";
 import { KEYFRAMES, NEUTRAL } from "./keyframes.js";
 
 describe("frameFor", () => {
-  it("intensiteit 0 geeft precies neutraal", () => {
-    const frame = frameFor("blij", 0);
+  it("neutraal geeft precies het neutrale gezicht, ongeacht intensiteit", () => {
+    const frame = frameFor("neutraal", 0.8);
     expect(frame.background).toBe(NEUTRAL.background);
     expect(frame.mouth).toEqual(NEUTRAL.mouth);
     expect(frame.eyes).toEqual(NEUTRAL.eyes);
     expect(frame.brow).toEqual({ angle: 0, raise: 0 });
+  });
+
+  it("intensiteit 0 toont de emotie toch op minimum-zichtbaarheid (35% richting doel)", () => {
+    // Type1 scoort gewone gesprekszinnen laag (0.02-0.2); zonder ondergrens bleef het gezicht neutraal.
+    const expectedCurve = NEUTRAL.mouth.curve * 0.65 + KEYFRAMES.blij.mouth.curve * 0.35;
+    expect(frameFor("blij", 0).mouth.curve).toBeCloseTo(expectedCurve);
   });
 
   it("intensiteit 1 geeft precies het doel-keyframe", () => {
@@ -19,13 +25,14 @@ describe("frameFor", () => {
     expect(frame.brow).toEqual(KEYFRAMES.boos.brow);
   });
 
-  it("0.5 ligt midden tussen neutraal en doel, voor een getal en voor de achtergrondkleur", () => {
+  it("intensiteit 0.5 geeft t = 0.35 + 0.65 * 0.5, voor een getal en voor de achtergrondkleur", () => {
+    const t = 0.35 + 0.65 * 0.5;
     const frame = frameFor("blij", 0.5);
-    const expectedCurve = (NEUTRAL.mouth.curve + KEYFRAMES.blij.mouth.curve) / 2;
+    const expectedCurve = NEUTRAL.mouth.curve * (1 - t) + KEYFRAMES.blij.mouth.curve * t;
     expect(frame.mouth.curve).toBeCloseTo(expectedCurve);
 
-    // Achtergrond: NEUTRAL #555555, blij #b8873f -> per kanaal middenin.
-    const mid = (a: number, b: number) => Math.round((a + b) / 2);
+    // Achtergrond: NEUTRAL #555555, blij #b8873f -> per kanaal op t.
+    const mid = (a: number, b: number) => Math.round(a * (1 - t) + b * t);
     const r = mid(0x55, 0xb8);
     const g = mid(0x55, 0x87);
     const b = mid(0x55, 0x3f);

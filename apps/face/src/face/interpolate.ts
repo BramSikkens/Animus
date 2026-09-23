@@ -27,9 +27,15 @@ function lerpEye(a: Keyframe["eyes"]["left"], b: Keyframe["eyes"]["left"], t: nu
 
 const BROW_NEUTRAL = { angle: 0, raise: 0 };
 
-/** Mengt tussen `NEUTRAL` (intensiteit 0) en `KEYFRAMES[emotion]` (intensiteit 1). Clamt naar [0, 1]. */
+// Type1 scoort gewone gesprekszinnen laag (0.02-0.2); zonder ondergrens bleef het gezicht zo goed als neutraal.
+const MIN_VISIBILITY = 0.35;
+
+/**
+ * Mengt tussen `NEUTRAL` en `KEYFRAMES[emotion]`: intensiteit 0 geeft MIN_VISIBILITY richting het doel,
+ * intensiteit 1 het volle keyframe. Clamt naar [0, 1].
+ */
 export function frameFor(emotion: Emotion, intensity: number): Keyframe {
-  const t = clamp01(intensity);
+  const t = MIN_VISIBILITY + (1 - MIN_VISIBILITY) * clamp01(intensity);
   const target: Keyframe = KEYFRAMES[emotion];
   const targetBrow = target.brow ?? BROW_NEUTRAL;
   return {

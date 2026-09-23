@@ -6,7 +6,9 @@
     "test": "turbo run test",
     "typecheck": "turbo run typecheck",
     "repl": "pnpm --filter @animus/brain run repl",
-    "verwijder": "pnpm --filter @animus/brain run verwijder"
+    "verwijder": "pnpm --filter @animus/brain run verwijder",
+    "dashboard": "pnpm --filter @animus/dashboard dev",
+    "db:migrate": "pnpm --filter @animus/db run db:migrate"
   },
   "packageManager": "pnpm@10.33.0",
   "devDependencies": {

@@ -1,0 +1,27 @@
+{
+  "name": "@animus/brain",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "repl": "tsx src/repl.ts"
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "4.0.61",
+    "@ai-sdk/openai": "4.0.73",
+    "@animus/db": "workspace:*",
+    "ai": "7.0.112",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.2",
+    "postgres": "3.4.9",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3",
+    "vitest": "5.0.1"
+  }
+}

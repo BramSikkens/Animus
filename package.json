@@ -1,0 +1,15 @@
+{
+  "name": "animus",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "turbo run test",
+    "typecheck": "turbo run typecheck",
+    "repl": "pnpm --filter @animus/brain run repl"
+  },
+  "packageManager": "pnpm@10.33.0",
+  "devDependencies": {
+    "turbo": "2.11.3",
+    "typescript": "5.9.3"
+  }
+}

@@ -1,0 +1,121 @@
+:root {
+  --bg: #ffffff;
+  --fg: #111111;
+  --muted: #666666;
+  --border: #dddddd;
+  --bar-bg: #eeeeee;
+  --bar-fill: #111111;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #111111;
+    --fg: #eeeeee;
+    --muted: #999999;
+    --border: #333333;
+    --bar-bg: #333333;
+    --bar-fill: #eeeeee;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  line-height: 1.5;
+}
+
+main {
+  max-width: 40rem;
+  margin: 0 auto;
+  padding: 1.5rem 1rem 3rem;
+}
+
+h1 {
+  font-size: 1.5rem;
+  margin: 0 0 1.5rem;
+}
+
+h2 {
+  font-size: 1.1rem;
+  margin: 0 0 0.75rem;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.25rem;
+}
+
+section {
+  margin-bottom: 2rem;
+}
+
+dl {
+  margin: 0;
+}
+
+dt {
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin-top: 0.75rem;
+}
+
+dt:first-child {
+  margin-top: 0;
+}
+
+dd {
+  margin: 0.15rem 0 0;
+}
+
+ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+li {
+  padding: 0.75rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+li:last-child {
+  border-bottom: none;
+}
+
+li time {
+  display: block;
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin-bottom: 0.25rem;
+}
+
+li h3 {
+  font-size: 1rem;
+  margin: 0 0 0.25rem;
+}
+
+.bar {
+  display: inline-block;
+  width: 8rem;
+  height: 0.6rem;
+  margin: 0 0.5rem;
+  background: var(--bar-bg);
+  border-radius: 0.3rem;
+  overflow: hidden;
+  vertical-align: middle;
+}
+
+.bar-fill {
+  display: block;
+  height: 100%;
+  background: var(--bar-fill);
+}
+
+@media (max-width: 30rem) {
+  main {
+    padding: 1rem 0.75rem 2rem;
+  }
+}

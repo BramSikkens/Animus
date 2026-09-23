@@ -17,10 +17,12 @@ import { cosineDistance, eq, notInArray } from "drizzle-orm";
 import { z } from "zod";
 import type { Db } from "@animus/db";
 import { epitaphs, identity, memories } from "@animus/db/schema";
+import { formatAge } from "./age.js";
 import { EMOTIONS, type Emotion } from "./emotion.js";
 import { createTools } from "./tools.js";
 
 export { EMOTIONS, type Emotion };
+export { formatAge };
 
 export type BrainEvent =
   | { type: "emotion"; emotion: Emotion; intensity: number }
@@ -66,16 +68,6 @@ function loadSeeds(): string[] {
 function pickSeed(random: () => number): string {
   const seeds = loadSeeds();
   return seeds[Math.floor(random() * seeds.length)]!;
-}
-
-export function formatAge(ms: number): string {
-  const totalHours = Math.floor(ms / (1000 * 60 * 60));
-  const days = Math.floor(totalHours / 24);
-  const hours = totalHours % 24;
-  if (days === 0) {
-    return `${hours} uur`;
-  }
-  return `${days} ${days === 1 ? "dag" : "dagen"} en ${hours} uur`;
 }
 
 function buildStableSystemPrompt(identityRecord: Identity): string {

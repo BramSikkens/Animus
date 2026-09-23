@@ -4,7 +4,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./age": "./src/age.ts"
+    "./age": "./src/age.ts",
+    "./config": "./src/config.ts"
   },
   "scripts": {
     "test": "vitest run",

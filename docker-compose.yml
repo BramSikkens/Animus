@@ -1,16 +1,26 @@
 name: animus
 
+# Poorten enkel op 127.0.0.1: de dev-credentials (animus/animus, devkey/secret) zijn publiek bekend.
+
 services:
   db:
     image: pgvector/pgvector:pg17
     ports:
-      - "5433:5432"
+      - "127.0.0.1:5433:5432"
     environment:
       POSTGRES_USER: animus
       POSTGRES_PASSWORD: animus
       POSTGRES_DB: animus
     volumes:
       - animus_db_data:/var/lib/postgresql/data
+
+  livekit:
+    image: livekit/livekit-server:v1.13.7
+    command: --dev --bind 0.0.0.0 --node-ip 127.0.0.1
+    ports:
+      - "127.0.0.1:7880:7880"
+      - "127.0.0.1:7881:7881"
+      - "127.0.0.1:7882:7882/udp"
 
 volumes:
   animus_db_data:

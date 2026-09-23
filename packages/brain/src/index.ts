@@ -259,24 +259,40 @@ export function createBrain(deps: {
     });
 
     let full = "";
-    // fullStream i.p.v. textStream: die laatste slikt providerfouten stil in.
-    for await (const part of result.fullStream) {
-      if (part.type === "error") throw part.error;
-      if (part.type === "text-delta") {
-        full += part.text;
-        yield { type: "text", delta: part.text };
+    // "interrupted" tot het tegendeel bewezen is: stopt de consument vroegtijdig (barge-in), dan
+    // draait enkel de finally hieronder.
+    let outcome: "completed" | "failed" | "interrupted" = "interrupted";
+    const being = bootedIdentity;
+    try {
+      // fullStream i.p.v. textStream: die laatste slikt providerfouten stil in.
+      for await (const part of result.fullStream) {
+        if (part.type === "error") throw part.error;
+        if (part.type === "text-delta") {
+          full += part.text;
+          yield { type: "text", delta: part.text };
+        }
+        if (part.type === "tool-call") yield { type: "tool-call", toolName: part.toolName, input: part.input };
+        if (part.type === "tool-result") yield { type: "tool-result", toolName: part.toolName, output: part.output };
+        if (part.type === "tool-error") {
+          const message = part.error instanceof Error ? part.error.message : String(part.error);
+          yield { type: "tool-result", toolName: part.toolName, output: { error: message } };
+        }
       }
-      if (part.type === "tool-call") yield { type: "tool-call", toolName: part.toolName, input: part.input };
-      if (part.type === "tool-result") yield { type: "tool-result", toolName: part.toolName, output: part.output };
-      if (part.type === "tool-error") {
-        const message = part.error instanceof Error ? part.error.message : String(part.error);
-        yield { type: "tool-result", toolName: part.toolName, output: { error: message } };
+      outcome = "completed";
+    } catch (error) {
+      outcome = "failed";
+      throw error;
+    } finally {
+      // Een mislukte beurt komt nergens in; een onderbroken beurt wel, met wat al gezegd was.
+      if (outcome === "completed") {
+        workingMemory.push(userMessage, ...(await result.responseMessages));
+      } else if (outcome === "interrupted" && full) {
+        workingMemory.push(userMessage, { role: "assistant", content: full });
+      }
+      if (outcome !== "failed" && full.trim()) {
+        await remember(`Gesprekspartner: ${text}\n${being.name}: ${full}`);
       }
     }
-    // Enkel een geslaagde beurt komt in het werkgeheugen, mét eventuele tool-stappen.
-    workingMemory.push(userMessage, ...(await result.responseMessages));
-
-    if (full.trim()) await remember(`Gesprekspartner: ${text}\n${bootedIdentity.name}: ${full}`);
   }
 
   // Alles wat deze instantie over het wezen weet; na verwijdering mag niets doorsijpelen naar een nieuw wezen.

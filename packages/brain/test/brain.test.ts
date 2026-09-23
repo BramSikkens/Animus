@@ -826,5 +826,47 @@ describe("createBrain", () => {
 
     expect(JSON.stringify(light.doStreamCalls[1]?.prompt)).not.toContain("Mimi");
   });
+
+  it("onthoudt een onderbroken beurt (barge-in) met het deel dat al gezegd was", async () => {
+    const bornAt = new Date("2026-01-01T12:00:00.000Z");
+    const light = new MockLanguageModelV4({
+      doStream: [
+        {
+          stream: simulateReadableStream({
+            chunks: [
+              { type: "stream-start" as const, warnings: [] },
+              { type: "text-start" as const, id: "1" },
+              { type: "text-delta" as const, id: "1", delta: "Wat een mooie " },
+              { type: "text-delta" as const, id: "1", delta: "naam voor een kat." },
+              { type: "text-end" as const, id: "1" },
+              { type: "finish" as const, usage: NULL_USAGE, finishReason: STOP },
+            ],
+          }),
+        },
+        textStream("Mimi, natuurlijk."),
+      ],
+    });
+    const brain = createBrain({
+      db,
+      embedder: embedModel(),
+      type1: type1Model(),
+      type2: { light, heavy: genesisModel({ name: "Nova", coreCharacter: "x", birthStory: "y" }) },
+      now: () => bornAt,
+      random: () => 0,
+    });
+    await brain.boot();
+
+    // De gesprekspartner valt Animus in de rede na het eerste stukje tekst.
+    for await (const event of brain.hear("Mijn kat heet Mimi.")) {
+      if (event.type === "text") break;
+    }
+    await collectText(brain.hear("Hoe heet mijn kat?"));
+
+    const secondTurn = JSON.stringify(light.doStreamCalls[1]?.prompt);
+    expect(secondTurn).toContain("Mijn kat heet Mimi.");
+    expect(secondTurn).toContain("Wat een mooie ");
+    const rows = await db.select().from(memories);
+    expect(rows.some((row) => row.text.includes("Mijn kat heet Mimi."))).toBe(true);
+  });
 });
 

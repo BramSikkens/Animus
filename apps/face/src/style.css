@@ -1,0 +1,45 @@
+:root {
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #111;
+  color: #eee;
+  font-family: system-ui, sans-serif;
+}
+
+.screen {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  text-align: center;
+}
+
+button {
+  padding: 0.75rem 1.5rem;
+  font-size: 1rem;
+  border: 1px solid #eee;
+  border-radius: 999px;
+  background: transparent;
+  color: #eee;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #eee;
+  color: #111;
+}
+
+.status {
+  opacity: 0.7;
+}
+
+.error {
+  color: #f66;
+}

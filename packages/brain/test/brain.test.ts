@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-import { MockLanguageModelV4, Experimental_EvaluationMockModelV4 } from "ai/test";
+import { MockEmbeddingModelV4, MockLanguageModelV4, Experimental_EvaluationMockModelV4 } from "ai/test";
 import { simulateReadableStream } from "ai";
-import { identity } from "@animus/db/schema";
+import { EMBEDDING_DIMENSIONS, identity, memories } from "@animus/db/schema";
 import { createBrain, type BrainEvent } from "../src/index.js";
 import { createTestDb, truncateAll } from "./db.js";
 
@@ -60,6 +60,21 @@ function textModel(chunks: string[]) {
   });
 }
 
+// Deterministische fake-embedding: elk trefwoord krijgt zijn eigen as; tekst zonder trefwoord valt op de laatste as.
+const KEYWORDS = ["kat", "pizza"];
+function fakeVector(text: string): number[] {
+  const vector = new Array<number>(EMBEDDING_DIMENSIONS).fill(0);
+  const axis = KEYWORDS.findIndex((keyword) => text.toLowerCase().includes(keyword));
+  vector[axis === -1 ? EMBEDDING_DIMENSIONS - 1 : axis] = 1;
+  return vector;
+}
+
+function embedModel() {
+  return new MockEmbeddingModelV4({
+    doEmbed: async ({ values }) => ({ embeddings: values.map(fakeVector), warnings: [] }),
+  });
+}
+
 // Default: neutraal/0.5/simpel. Registreert calls zelf (de mock houdt ze niet bij), t.b.v. test 5.
 function type1Model(
   overrides: Partial<{ emotion: string; intensity: number; intent: "simpel" | "complex" }> = {},
@@ -108,6 +123,7 @@ describe("createBrain", () => {
     });
     const brain = createBrain({
       db,
+      embedder: embedModel(),
       type1: type1Model(),
       type2: { light: unusedModel(), heavy },
       now: () => bornAt,
@@ -139,6 +155,7 @@ describe("createBrain", () => {
     });
     const firstBrain = createBrain({
       db,
+      embedder: embedModel(),
       type1: type1Model(),
       type2: { light: unusedModel(), heavy: firstHeavy },
       now: () => bornAt,
@@ -149,6 +166,7 @@ describe("createBrain", () => {
     const secondHeavy = unusedModel();
     const secondBrain = createBrain({
       db,
+      embedder: embedModel(),
       type1: type1Model(),
       type2: { light: unusedModel(), heavy: secondHeavy },
       now: () => bornAt,
@@ -166,6 +184,7 @@ describe("createBrain", () => {
     let clock = bornAt;
     const brain = createBrain({
       db,
+      embedder: embedModel(),
       type1: type1Model(),
       type2: { light: unusedModel(), heavy: genesisModel({ name: "Nova", coreCharacter: "x", birthStory: "y" }) },
       now: () => clock,
@@ -177,6 +196,7 @@ describe("createBrain", () => {
     const light = textModel(["Hoi."]);
     const brainWithLight = createBrain({
       db,
+      embedder: embedModel(),
       type1: type1Model(),
       type2: { light, heavy: unusedModel() },
       now: () => clock,
@@ -194,6 +214,7 @@ describe("createBrain", () => {
     const light = textModel(["Hallo", " daar!"]);
     const brain = createBrain({
       db,
+      embedder: embedModel(),
       type1: type1Model(),
       type2: { light, heavy: genesisModel({ name: "Nova", coreCharacter: "Speels en oplettend.", birthStory: "y" }) },
       now: () => bornAt,
@@ -214,6 +235,7 @@ describe("createBrain", () => {
     const light = textModel(["Leuk je te ontmoeten.", "Je heet Bram."]);
     const brain = createBrain({
       db,
+      embedder: embedModel(),
       type1: type1Model(),
       type2: { light, heavy: genesisModel({ name: "Nova", coreCharacter: "x", birthStory: "y" }) },
       now: () => bornAt,
@@ -241,6 +263,7 @@ describe("createBrain", () => {
     });
     const brain = createBrain({
       db,
+      embedder: embedModel(),
       type1: type1Model(),
       type2: { light, heavy: genesisModel({ name: "Nova", coreCharacter: "x", birthStory: "y" }) },
       now: () => bornAt,
@@ -259,6 +282,7 @@ describe("createBrain", () => {
     const light = textModel(["Hoi."]);
     const brain = createBrain({
       db,
+      embedder: embedModel(),
       type1: type1Model({ emotion: "blij", intensity: 0.8 }),
       type2: { light, heavy: genesisModel({ name: "Nova", coreCharacter: "x", birthStory: "y" }) },
       now: () => bornAt,
@@ -279,6 +303,7 @@ describe("createBrain", () => {
     const bornAt = new Date("2026-01-01T00:00:00.000Z");
     const genesisBrain = createBrain({
       db,
+      embedder: embedModel(),
       type1: type1Model(),
       type2: { light: unusedModel(), heavy: genesisModel({ name: "Nova", coreCharacter: "x", birthStory: "y" }) },
       now: () => bornAt,
@@ -289,6 +314,7 @@ describe("createBrain", () => {
     const heavy = textModel(["Zwaar antwoord."]);
     const brain = createBrain({
       db,
+      embedder: embedModel(),
       type1: type1Model({ intent: "complex" }),
       type2: { light: unusedModel(), heavy },
       now: () => bornAt,
@@ -305,6 +331,7 @@ describe("createBrain", () => {
     const bornAt = new Date("2026-01-01T00:00:00.000Z");
     const genesisBrain = createBrain({
       db,
+      embedder: embedModel(),
       type1: type1Model(),
       type2: { light: unusedModel(), heavy: genesisModel({ name: "Nova", coreCharacter: "x", birthStory: "y" }) },
       now: () => bornAt,
@@ -315,6 +342,7 @@ describe("createBrain", () => {
     const light = textModel(["Hoi!"]);
     const brain = createBrain({
       db,
+      embedder: embedModel(),
       type1: type1Model({ intent: "simpel" }),
       type2: { light, heavy: unusedModel() },
       now: () => bornAt,
@@ -332,6 +360,7 @@ describe("createBrain", () => {
     const light = textModel(["Hoi."]);
     const brain = createBrain({
       db,
+      embedder: embedModel(),
       type1: type1Model({ emotion: "nieuwsgierig", intensity: 0.65 }),
       type2: { light, heavy: genesisModel({ name: "Nova", coreCharacter: "x", birthStory: "y" }) },
       now: () => bornAt,
@@ -351,6 +380,7 @@ describe("createBrain", () => {
     const type1 = type1Model();
     const brain = createBrain({
       db,
+      embedder: embedModel(),
       type1,
       type2: { light, heavy: genesisModel({ name: "Nova", coreCharacter: "x", birthStory: "y" }) },
       now: () => bornAt,
@@ -373,6 +403,7 @@ describe("createBrain", () => {
     });
     const brain = createBrain({
       db,
+      embedder: embedModel(),
       type1: brokenType1,
       type2: { light, heavy: genesisModel({ name: "Nova", coreCharacter: "x", birthStory: "y" }) },
       now: () => bornAt,
@@ -385,5 +416,96 @@ describe("createBrain", () => {
 
     expect(events[0]).toEqual({ type: "emotion", emotion: "neutraal", intensity: 0 });
     expect(events.filter((e) => e.type === "text").map((e) => e.delta).join("")).toBe("Hoi.");
+  });
+
+  it("bewaart na een beurt een geheugen met tekst, embedding en tijdstip", async () => {
+    const bornAt = new Date("2026-01-01T00:00:00.000Z");
+    const brain = createBrain({
+      db,
+      embedder: embedModel(),
+      type1: type1Model(),
+      type2: { light: textModel(["Wat een mooie naam!"]), heavy: genesisModel({ name: "Nova", coreCharacter: "x", birthStory: "y" }) },
+      now: () => bornAt,
+      random: () => 0,
+    });
+    await brain.boot();
+    await collectText(brain.hear("Mijn kat heet Mimi."));
+
+    const rows = await db.select().from(memories);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.text).toContain("Mijn kat heet Mimi.");
+    expect(rows[0]?.text).toContain("Wat een mooie naam!");
+    expect(rows[0]?.embedding).toEqual(fakeVector("kat"));
+    expect(rows[0]?.createdAt).toEqual(bornAt);
+  });
+
+  it("geeft na een herstart het meest relevante geheugen uit een vorige sessie eerst mee aan Type2", async () => {
+    const bornAt = new Date("2026-01-01T00:00:00.000Z");
+    const firstSession = createBrain({
+      db,
+      embedder: embedModel(),
+      type1: type1Model(),
+      type2: { light: textModel(["Genoteerd."]), heavy: genesisModel({ name: "Nova", coreCharacter: "x", birthStory: "y" }) },
+      now: () => bornAt,
+      random: () => 0,
+    });
+    await firstSession.boot();
+    await collectText(firstSession.hear("Ik hou van pizza."));
+    await collectText(firstSession.hear("Mijn kat heet Mimi."));
+
+    const light = textModel(["Mimi!"]);
+    const secondSession = createBrain({
+      db,
+      embedder: embedModel(),
+      type1: type1Model(),
+      type2: { light, heavy: unusedModel() },
+      now: () => bornAt,
+      random: () => 0,
+    });
+    await secondSession.boot();
+    await collectText(secondSession.hear("Hoe heet mijn kat?"));
+
+    const system = contentsByRole(light.doStreamCalls[0]?.prompt, "system").join(" ");
+    expect(system).toContain("Mijn kat heet Mimi.");
+    expect(system.indexOf("Mijn kat heet Mimi.")).toBeLessThan(system.indexOf("Ik hou van pizza."));
+  });
+
+  it("antwoordt toch als het embedden faalt, zonder herinneringen en zonder fout", async () => {
+    const bornAt = new Date("2026-01-01T00:00:00.000Z");
+    const brokenEmbed = new MockEmbeddingModelV4({
+      doEmbed: async () => {
+        throw new Error("embeddings plat");
+      },
+    });
+    const brain = createBrain({
+      db,
+      embedder: brokenEmbed,
+      type1: type1Model(),
+      type2: { light: textModel(["Hoi."]), heavy: genesisModel({ name: "Nova", coreCharacter: "x", birthStory: "y" }) },
+      now: () => bornAt,
+      random: () => 0,
+    });
+    await brain.boot();
+
+    expect(await collectText(brain.hear("Hoi!"))).toBe("Hoi.");
+  });
+
+  it("geeft beurten uit de huidige sessie niet nog eens als herinnering mee", async () => {
+    const bornAt = new Date("2026-01-01T00:00:00.000Z");
+    const light = textModel(["Genoteerd."]);
+    const brain = createBrain({
+      db,
+      embedder: embedModel(),
+      type1: type1Model(),
+      type2: { light, heavy: genesisModel({ name: "Nova", coreCharacter: "x", birthStory: "y" }) },
+      now: () => bornAt,
+      random: () => 0,
+    });
+    await brain.boot();
+    await collectText(brain.hear("Mijn kat heet Mimi."));
+    await collectText(brain.hear("Hoe heet mijn kat?"));
+
+    const system = contentsByRole(light.doStreamCalls[1]?.prompt, "system").join(" ");
+    expect(system).not.toContain("Mijn kat heet Mimi.");
   });
 });

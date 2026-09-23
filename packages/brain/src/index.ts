@@ -1,18 +1,21 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
+  embed,
   experimental_evaluate,
   generateText,
   streamText,
   Output,
+  type EmbeddingModel,
   type Experimental_EvaluationModel,
   type LanguageModel,
   type ModelMessage,
   type SystemModelMessage,
 } from "ai";
+import { cosineDistance, eq, notInArray } from "drizzle-orm";
 import { z } from "zod";
 import type { Db } from "@animus/db";
-import { identity } from "@animus/db/schema";
+import { identity, memories } from "@animus/db/schema";
 import { EMOTIONS, type Emotion } from "./emotion.js";
 
 export { EMOTIONS, type Emotion };
@@ -75,6 +78,18 @@ function toIdentity({ id: _id, ...rest }: typeof identity.$inferSelect): Identit
   return rest;
 }
 
+const RECALL_LIMIT = 5;
+
+// Na het cachepunt: de herinneringen verschillen per beurt.
+function recallPrompt(recalled: string[]): SystemModelMessage {
+  return {
+    role: "system",
+    content: recalled.length
+      ? `Herinneringen uit eerdere gesprekken (meest relevante eerst):\n${recalled.map((memory) => `- ${memory}`).join("\n")}`
+      : "Je hebt nog geen herinneringen uit eerdere gesprekken.",
+  };
+}
+
 type Type1Result = { emotion: Emotion; intensity: number; intent: "simpel" | "complex" };
 
 // Eén Type1-call per beurt: emotie + intensiteit + intent-routering, tegelijk over dezelfde uiting.
@@ -117,6 +132,7 @@ export function createBrain(deps: {
   db: Db;
   type1: Experimental_EvaluationModel;
   type2: Type2Models;
+  embedder: EmbeddingModel;
   now?: () => Date;
   random?: () => number;
 }): Brain {
@@ -124,6 +140,8 @@ export function createBrain(deps: {
   const random = deps.random ?? Math.random;
   let bootedIdentity: Identity | undefined;
   const workingMemory: ModelMessage[] = [];
+  // Herinneringen uit deze sessie staan al in het werkgeheugen; niet dubbel ophalen.
+  const sessionMemoryIds: number[] = [];
 
   async function genesis(): Promise<Identity> {
     const seed = pickSeed(random);
@@ -154,6 +172,36 @@ export function createBrain(deps: {
     return bootedIdentity;
   }
 
+  // Het geheugen is aanvullend: faalt het embedden, dan gaat het gesprek door zonder herinneringen.
+  async function recall(utterance: string): Promise<string[]> {
+    try {
+      const { embedding } = await embed({ model: deps.embedder, value: utterance });
+      const rows = await deps.db
+        .select({ text: memories.text })
+        .from(memories)
+        .where(sessionMemoryIds.length ? notInArray(memories.id, sessionMemoryIds) : undefined)
+        .orderBy(cosineDistance(memories.embedding, embedding))
+        .limit(RECALL_LIMIT);
+      return rows.map((row) => row.text);
+    } catch (error) {
+      console.warn("Herinneringen ophalen faalde:", error instanceof Error ? error.message : error);
+      return [];
+    }
+  }
+
+  async function remember(memoryText: string): Promise<void> {
+    try {
+      const { embedding } = await embed({ model: deps.embedder, value: memoryText });
+      const [row] = await deps.db
+        .insert(memories)
+        .values({ text: memoryText, embedding, createdAt: now() })
+        .returning({ id: memories.id });
+      sessionMemoryIds.push(row!.id);
+    } catch (error) {
+      console.warn("Herinnering opslaan faalde:", error instanceof Error ? error.message : error);
+    }
+  }
+
   async function* hear(text: string): AsyncIterable<BrainEvent> {
     if (!bootedIdentity) {
       throw new Error("hear() aangeroepen vóór boot(): er is nog geen identiteit geladen.");
@@ -164,11 +212,12 @@ export function createBrain(deps: {
       return { emotion: "neutraal", intensity: 0, intent: "simpel" };
     });
 
-    // ponytail: singleton-tabel (CHECK id = 1), dus geen where() nodig — drizzle-orm is geen
-    // dependency van dit package, zie packages/brain/package.json.
-    await deps.db.update(identity).set({ lastEmotion: emotion, lastIntensity: intensity });
+    await deps.db.update(identity).set({ lastEmotion: emotion, lastIntensity: intensity }).where(eq(identity.id, 1));
 
     yield { type: "emotion", emotion, intensity };
+
+    // ponytail: sequentieel na de emotie; parallel met Type1 als de latency ooit telt.
+    const recalled = await recall(text);
 
     const stable: SystemModelMessage = {
       role: "system",
@@ -183,7 +232,7 @@ export function createBrain(deps: {
     const userMessage: ModelMessage = { role: "user", content: text };
     const result = streamText({
       model: intent === "complex" ? deps.type2.heavy : deps.type2.light,
-      instructions: [stable, agePrompt],
+      instructions: [stable, agePrompt, recallPrompt(recalled)],
       messages: [...workingMemory, userMessage],
     });
 
@@ -198,6 +247,8 @@ export function createBrain(deps: {
     }
     // Enkel een geslaagde beurt komt in het werkgeheugen.
     workingMemory.push(userMessage, { role: "assistant", content: full });
+
+    await remember(`Gesprekspartner: ${text}\n${bootedIdentity.name}: ${full}`);
   }
 
   return { boot, hear };

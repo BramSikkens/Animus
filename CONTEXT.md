@@ -18,6 +18,24 @@ _Avoid_: praat-brein, System Two
 De Type1-classificatie van een uiting als *simpel* (begroeting, kort praatje, eenvoudige vraag) of *complex* (uitleg, redenering, planning, oordeel). Bepaalt of Type2-licht of Type2-zwaar antwoordt.
 _Avoid_: complexiteit, moeilijkheidsgraad
 
+### Geheugen
+
+**Gesprekspartner**:
+De persoon die met Animus praat. In Fase 1 is er één: de eigenaar.
+_Avoid_: gebruiker, user
+
+**Werkgeheugen**:
+De lopende conversatie van de huidige sessie, letterlijk meegegeven aan Type2. Verdwijnt bij herstart.
+_Avoid_: context, chatgeschiedenis
+
+**Herinnering**:
+Eén opgeslagen, afgeronde beurt (uiting van de Gesprekspartner + antwoord) met een embedding, of iets dat Animus expliciet moest onthouden. Blijft bewaard over herstarts heen; Type2 krijgt vóór elk antwoord de meest relevante herinneringen uit eerdere sessies mee.
+_Avoid_: memory (in proza), log
+
+**Langetermijngeheugen**:
+Het geheel van alle Herinneringen van één wezen (tabel `memories`). Wordt hard gewist bij verwijderen.
+_Avoid_: database, archief (dat is het Grafschrift)
+
 ### Identiteit
 
 **Seed**:

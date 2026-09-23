@@ -17,6 +17,7 @@ import type { Db } from "@animus/db";
 import { drives, dynimos, epitaphs, memories } from "@animus/db/schema";
 import { formatAge } from "./age.js";
 import { DRIVE_DESCRIPTIONS, DRIVE_KINDS, drivesPromptBlock, type DriveRow } from "./drives.js";
+import { applyEmotion, baseEmotionOf, moodOfRow, storedMoodOf, type Mood } from "./mood.js";
 import { AXIS_DESCRIPTIONS, axisGuidelines, mbtiType, rowAxes } from "./personality.js";
 import { EMOTIONS, isEmotion, type Emotion } from "./emotion.js";
 import { SEEDS } from "./seeds.js";
@@ -26,7 +27,8 @@ export { EMOTIONS, type Emotion };
 export { formatAge };
 
 export type BrainEvent =
-  | { type: "emotion"; emotion: Emotion; intensity: number }
+  /** De effectieve Stemming na verwerking van deze beurt; komt vóór de eerste tekst. */
+  | { type: "mood"; emotion: Emotion; intensity: number }
   | { type: "text"; delta: string }
   | { type: "tool-call"; toolName: string; input: unknown }
   | { type: "tool-result"; toolName: string; output: unknown };
@@ -105,7 +107,10 @@ const genesisSchema = z.object({
   birthStory: z.string().min(1),
   axes: axesSchema,
   drives: drivesSchema,
+  baseEmotion: z.enum(EMOTIONS),
 });
+
+const BASE_EMOTION_DESCRIPTION = `De Basisemotie is het temperament van het wezen: de emotie waar zijn stemming naartoe uitdooft als er niets gebeurt. Kies er één uit: ${EMOTIONS.join(", ")}.`;
 
 const BACKFILL_INSTRUCTIONS = `Hieronder staat een bestaand wezen: zijn kern-karakter, geboorteverhaal, geëvolueerde karakter en recente herinneringen.
 Bepaal zijn positie op vier persoonlijkheidsassen, elk een getal van 0 tot 1, op basis van wie hij/zij blijkt te zijn:
@@ -115,6 +120,9 @@ const DRIVES_BACKFILL_INSTRUCTIONS = `Hieronder staat een bestaand wezen: zijn k
 Bepaal zijn Drijfveren, passend bij wie hij/zij blijkt te zijn: per soort 1 of 2 items.
 ${DRIVE_DESCRIPTIONS}
 Doelen starten actief.`;
+
+const BASE_EMOTION_BACKFILL_INSTRUCTIONS = `Hieronder staat een bestaand wezen: zijn kern-karakter, geboorteverhaal, geëvolueerde karakter, persoonlijkheid, Drijfveren en recente herinneringen.
+Bepaal zijn Basisemotie. ${BASE_EMOTION_DESCRIPTION}`;
 
 const BACKFILL_MEMORY_LIMIT = 20;
 
@@ -127,17 +135,22 @@ Wees niet allemaal in het midden: kies een eigen, uitgesproken positie.
 Kies ook je Drijfveren: per soort 1 of 2 items, passend bij de Seed én bij de persoonlijkheid die je koos:
 ${DRIVE_DESCRIPTIONS}
 Doelen starten actief.
+${BASE_EMOTION_DESCRIPTION} Kies ze passend bij je persoonlijkheid en de Seed.
 Antwoord in het Nederlands.`;
 
 function pickSeed(random: () => number): string {
   return SEEDS[Math.floor(random() * SEEDS.length)]!;
 }
 
+// Leeg zolang de assen ontbreken (backfill).
+function personalityText(row: Dynimo): string {
+  const axes = rowAxes(row);
+  return axes ? `Persoonlijkheid: ${mbtiType(axes)}${axisGuidelines(axes).map((line) => `\n- ${line}`).join("")}` : "";
+}
+
 function buildStableSystemPrompt(identityRecord: Dynimo, driveRows: readonly DriveRow[]): string {
-  const axes = rowAxes(identityRecord);
-  const personality = axes
-    ? `\nPersoonlijkheid: ${mbtiType(axes)}${axisGuidelines(axes).map((line) => `\n- ${line}`).join("")}`
-    : "";
+  const personalityBlock = personalityText(identityRecord);
+  const personality = personalityBlock ? `\n${personalityBlock}` : "";
   const driveBlock = drivesPromptBlock(driveRows);
   return `Je bent ${identityRecord.name}.
 Je kern-karakter: ${identityRecord.coreCharacter}
@@ -162,20 +175,30 @@ function recallPrompt(recalled: string[]): SystemModelMessage {
 
 type Type1Result = { emotion: Emotion; intensity: number; intent: "simpel" | "complex" };
 
-// Eén Type1-call per beurt: emotie + intensiteit + intent-routering, tegelijk over dezelfde uiting.
-async function classify(type1: Experimental_EvaluationModel, text: string): Promise<Type1Result> {
+function moodMessage(mood: Mood): SystemModelMessage {
+  return {
+    role: "system",
+    content: `Je huidige stemming: ${mood.emotion} (intensiteit ${mood.intensity.toFixed(2)}). Laat die je toon kleuren (een geërgerde Dynimo antwoordt korter en stugger).`,
+  };
+}
+
+// Eén Type1-call per beurt: de Emotie van de Dynimo zelf (reactie, niet de emotie van de uiting) + intensiteit
+// + intent-routering. De context (persoonlijkheid, Drijfveren, Stemming) zit in de state naast de uiting.
+async function classify(type1: Experimental_EvaluationModel, text: string, context: string): Promise<Type1Result> {
   const { answers } = await experimental_evaluate({
     model: type1,
-    state: text,
+    state: `${context}\n\nUiting: ${text}`,
     questions: {
       emotion: {
         type: "choice",
-        instructions: "Welke emotie past het best bij deze uiting?",
+        instructions:
+          "Welke emotie voelt de Dynimo zelf bij deze uiting, gegeven zijn persoonlijkheid, Drijfveren en huidige stemming? (Niet de emotie van de uiting, maar de reactie van de Dynimo.)",
         criteria: Object.fromEntries(EMOTIONS.map((emotion) => [emotion, null])) as Record<Emotion, null>,
       },
       intensity: {
         type: "score",
-        instructions: "Hoe intens is de emotie in deze uiting?",
+        instructions:
+          "Hoe intens is die emotie van de Dynimo? Gebruik hoge waarden (boven 0.8) alleen voor echt sterke reacties; de meeste reacties zijn laag tot gemiddeld (0.1 tot 0.5).",
         criteria: ["laag", "hoog"],
       },
       intent: {
@@ -227,6 +250,7 @@ export function createBrain(deps: {
         name: result.output.name,
         coreCharacter: result.output.coreCharacter,
         birthStory: result.output.birthStory,
+        baseEmotion: result.output.baseEmotion,
         axisIe: result.output.axes.ie,
         axisSn: result.output.axes.sn,
         axisTf: result.output.axes.tf,
@@ -320,17 +344,18 @@ export function createBrain(deps: {
     return rows.map((row) => row.text);
   }
 
-  function backfillPrompt(row: Dynimo, recent: string[]): string {
+  function backfillPrompt(row: Dynimo, recent: string[], driveRows: readonly DriveRow[] = []): string {
     const axes = rowAxes(row);
+    const driveBlock = drivesPromptBlock(driveRows);
     return `Naam: ${row.name}
 Kern-karakter: ${row.coreCharacter}
 Geboorteverhaal: ${row.birthStory}
-Geëvolueerd karakter: ${row.evolvedCharacter || "(nog niet)"}${axes ? `\nPersoonlijkheid: ${mbtiType(axes)}` : ""}
+Geëvolueerd karakter: ${row.evolvedCharacter || "(nog niet)"}${axes ? `\nPersoonlijkheid: ${mbtiType(axes)}` : ""}${driveBlock ? `\n${driveBlock}` : ""}
 Recente herinneringen:
 ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
   }
 
-  // Elke stap vult één soort ontbrekende eigenschap aan; #26 voegt hier de Basisemotie toe.
+  // Elke stap vult één soort ontbrekende eigenschap aan.
   // `fill` geeft terug of de rij daadwerkelijk bijgewerkt is.
   const backfillSteps: { isMissing(row: Dynimo): Promise<boolean>; fill(row: Dynimo): Promise<boolean> }[] = [
     {
@@ -370,6 +395,24 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
           await tx.insert(drives).values(driveRowsFor(row.id, output.drives, now()));
           return true;
         });
+      },
+    },
+    {
+      isMissing: async (row) => row.baseEmotion === null,
+      fill: async (row) => {
+        const { output } = await generateText({
+          model: deps.type2.heavy,
+          instructions: BASE_EMOTION_BACKFILL_INSTRUCTIONS,
+          prompt: backfillPrompt(row, await recentMemoryTexts(row.id), await loadDrives(row.id)),
+          output: Output.object({ schema: z.object({ baseEmotion: z.enum(EMOTIONS) }) }),
+        });
+        // Race-veilig: enkel schrijven als een andere instantie er niet al een Basisemotie op gezet heeft.
+        const updated = await deps.db
+          .update(dynimos)
+          .set({ baseEmotion: output.baseEmotion })
+          .where(and(eq(dynimos.id, row.id), isNull(dynimos.baseEmotion)))
+          .returning({ id: dynimos.id });
+        return updated.length > 0;
       },
     },
   ];
@@ -444,24 +487,40 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     }
     const being = adopt(awake);
     const driveRows = await loadDrives(awake.id);
-    // Type1 is een reflex: faalt hij, dan antwoordt Type2 toch, met een neutrale emotie.
-    const { emotion, intensity, intent } = await classify(deps.type1, text).catch((error: unknown): Type1Result => {
+    const baseEmotion = baseEmotionOf(awake);
+    const stored = storedMoodOf(awake);
+    const before = moodOfRow(awake, now());
+    const context = [
+      personalityText(awake),
+      drivesPromptBlock(driveRows),
+      `Huidige stemming: ${before.emotion} (intensiteit ${before.intensity.toFixed(2)})`,
+    ]
+      .filter(Boolean)
+      .join("\n");
+    // Type1 is een reflex: faalt hij, dan antwoordt Type2 toch. Intensiteit 0 laat de Stemming ongemoeid: dat is
+    // bewust de invulling van "neutrale Emotie" (het mood-event toont dan de bestaande Stemming of Basisemotie).
+    const { emotion, intensity, intent } = await classify(deps.type1, text, context).catch((error: unknown): Type1Result => {
       console.warn("Type1 faalde, val terug op neutraal/simpel:", error instanceof Error ? error.message : error);
       return { emotion: "neutraal", intensity: 0, intent: "simpel" };
     });
 
-    const updated = await deps.db
-      .update(dynimos)
-      .set({ lastEmotion: emotion, lastIntensity: intensity })
-      .where(eq(dynimos.id, being.id))
-      .returning({ id: dynimos.id });
-    // Een andere instantie kan de Dynimo intussen gedood hebben: dan is niemand wakker.
-    if (updated.length === 0) {
-      forgetBeing();
-      return;
+    const { mood, next } = applyEmotion(stored, baseEmotion, emotion, intensity, now());
+    // ponytail: last-writer-wins zonder guard; volstaat bij één wakkere Dynimo. Guard op mood_at zodra er ooit
+    // meerdere schrijvers tegelijk zijn.
+    if (next !== stored && next) {
+      const updated = await deps.db
+        .update(dynimos)
+        .set({ moodEmotion: next.emotion, moodIntensity: next.intensity, moodAt: next.at })
+        .where(eq(dynimos.id, being.id))
+        .returning({ id: dynimos.id });
+      // Een andere instantie kan de Dynimo intussen gedood hebben: dan is niemand wakker.
+      if (updated.length === 0) {
+        forgetBeing();
+        return;
+      }
     }
 
-    yield { type: "emotion", emotion, intensity };
+    yield { type: "mood", emotion: mood.emotion, intensity: mood.intensity };
 
     // ponytail: sequentieel na de emotie; parallel met Type1 als de latency ooit telt.
     const recalled = await recall(text, being.id);
@@ -477,7 +536,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     const result = streamText({
       abortSignal: abort.signal,
       model: intent === "complex" ? deps.type2.heavy : deps.type2.light,
-      instructions: [stable, ageMessage(being), recallPrompt(recalled)],
+      instructions: [stable, ageMessage(being), moodMessage(mood), recallPrompt(recalled)],
       messages: [...workingMemory, userMessage],
       tools,
       // Genoeg stappen om een tool te gebruiken en daarna het resultaat te verwoorden.

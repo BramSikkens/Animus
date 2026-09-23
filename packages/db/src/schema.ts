@@ -12,8 +12,13 @@ export const dynimos = pgTable(
     birthStory: text("birth_story").notNull(),
     seed: text("seed").notNull(),
     bornAt: timestamp("born_at", { withTimezone: true }).notNull(),
-    lastEmotion: text("last_emotion"),
-    lastIntensity: real("last_intensity"),
+    // Basisemotie: het temperament waar de Stemming naartoe uitdooft. NULL = nog te backfillen.
+    // De waarden spiegelen EMOTIONS uit @animus/brain (db kan de brain niet importeren).
+    baseEmotion: text("base_emotion"),
+    // Stemming: de sterkste recente Emotie; de intensiteit dooft uit (zie mood.ts). Alle drie samen NULL of gezet.
+    moodEmotion: text("mood_emotion"),
+    moodIntensity: real("mood_intensity"),
+    moodAt: timestamp("mood_at", { withTimezone: true }),
     // NULL = Slapend; gezet = Wakker (en de marker van deze wake-generatie).
     awakeSince: timestamp("awake_since", { withTimezone: true }),
     // Persoonlijkheid: 0..1 = positie richting de tweede letter (I↔E, S↔N, T↔F, J↔P). NULL = nog te backfillen.
@@ -24,6 +29,19 @@ export const dynimos = pgTable(
   },
   // Hooguit één Wakker: alle wakkere rijen delen dezelfde constante indexwaarde.
   (table) => [
+    check(
+      "dynimos_base_emotion_check",
+      sql`${table.baseEmotion} in ('blij', 'boos', 'verrast', 'kalm', 'verveeld', 'nieuwsgierig', 'bang', 'neutraal')`,
+    ),
+    check(
+      "dynimos_mood_emotion_check",
+      sql`${table.moodEmotion} in ('blij', 'boos', 'verrast', 'kalm', 'verveeld', 'nieuwsgierig', 'bang', 'neutraal')`,
+    ),
+    check("dynimos_mood_intensity_range", sql`${table.moodIntensity} between 0 and 1`),
+    check(
+      "dynimos_mood_all_or_none",
+      sql`(${table.moodEmotion} is null) = (${table.moodIntensity} is null) and (${table.moodEmotion} is null) = (${table.moodAt} is null)`,
+    ),
     check("dynimos_axis_ie_range", sql`${table.axisIe} between 0 and 1`),
     check("dynimos_axis_sn_range", sql`${table.axisSn} between 0 and 1`),
     check("dynimos_axis_tf_range", sql`${table.axisTf} between 0 and 1`),

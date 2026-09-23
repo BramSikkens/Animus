@@ -1,5 +1,6 @@
 import { desc, eq } from "drizzle-orm";
 import { formatAge } from "@animus/brain/age";
+import { moodOfRow } from "@animus/brain/mood";
 import { DRIVE_KINDS, DRIVE_LABELS, type DriveKind } from "@animus/brain/drives";
 import { AXES, AXIS_LETTERS, mbtiType, rowAxes } from "@animus/brain/personality";
 import { drives, dynimos, epitaphs, memories } from "@animus/db/schema";
@@ -68,13 +69,24 @@ export default async function DashboardPage() {
             {dynimoRows.map((dynimo, index) => {
               const awake = dynimo.awakeSince !== null;
               const axes = rowAxes(dynimo);
-              const intensityPercent = dynimo.lastIntensity != null ? Math.round(dynimo.lastIntensity * 100) : null;
+              // Enkel de wakkere Dynimo heeft een levende Stemming.
+              const mood = awake ? moodOfRow(dynimo, new Date()) : null;
               return (
                 <li key={dynimo.id}>
                   <h3>{dynimo.name}</h3>
                   <p>
                     {awake ? "wakker" : "slapend"} · Leeftijd: {formatAge(Date.now() - dynimo.bornAt.getTime())}
                   </p>
+                  {mood && (
+                    <p>
+                      Stemming: {mood.emotion}
+                      <span className="bar" role="img" aria-label={`intensiteit ${Math.round(mood.intensity * 100)}%`}>
+                        <span className="bar-fill" style={{ width: `${Math.round(mood.intensity * 100)}%` }} />
+                      </span>
+                      {Math.round(mood.intensity * 100)}%
+                    </p>
+                  )}
+                  <p>Basisemotie: {dynimo.baseEmotion ?? "nog niet bepaald"}</p>
                   {axes ? (
                     <div className="personality">
                       <p>
@@ -149,20 +161,6 @@ export default async function DashboardPage() {
                       <dd>{dynimo.seed}</dd>
                       <dt>Geboortedatum</dt>
                       <dd>{formatDate(dynimo.bornAt)}</dd>
-                      <dt>Laatste emotie</dt>
-                      <dd>
-                        {dynimo.lastEmotion && intensityPercent != null ? (
-                          <>
-                            {dynimo.lastEmotion}
-                            <span className="bar" aria-hidden="true">
-                              <span className="bar-fill" style={{ width: `${intensityPercent}%` }} />
-                            </span>
-                            {intensityPercent}%
-                          </>
-                        ) : (
-                          "nog geen"
-                        )}
-                      </dd>
                     </dl>
                     <h4>Recente herinneringen</h4>
                     {recentMemories[index]!.length ? (

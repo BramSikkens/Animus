@@ -36,7 +36,7 @@ async function main(): Promise<void> {
       let heard = false;
       for await (const event of brain.hear(line)) {
         heard = true;
-        if (event.type === "emotion") {
+        if (event.type === "mood") {
           process.stdout.write(`(${event.emotion} ${event.intensity.toFixed(2)}) ${name}: `);
         } else if (event.type === "text") {
           process.stdout.write(event.delta);

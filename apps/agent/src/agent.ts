@@ -1,7 +1,7 @@
 import { ReadableStream } from "node:stream/web";
 import { fileURLToPath } from "node:url";
 import { createBrain, type Brain } from "@animus/brain";
-import { DISPLAY_TOPIC, type DisplayMessage, type DisplayState } from "@animus/brain/display";
+import { DISPLAY_TOPIC, type DisplayMessage } from "@animus/brain/display";
 import { EMOTION_TOPIC, type EmotionMessage } from "@animus/brain/emotion";
 import { EMBEDDING_MODEL, loadType2Config, TYPE1_MODEL } from "@animus/brain/config";
 import { createDb, migrate } from "@animus/db";
@@ -23,7 +23,7 @@ import * as livekit from "@livekit/agents-plugin-livekit";
 import * as openai from "@livekit/agents-plugin-openai";
 import * as silero from "@livekit/agents-plugin-silero";
 import { RoomEvent } from "@livekit/rtc-node";
-import { watchDynimos } from "./dynimo-watch.js";
+import { readState, watchDynimos } from "./dynimo-watch.js";
 import { textStream } from "./text-stream.js";
 
 try {
@@ -91,7 +91,7 @@ class AnimusAgent extends voice.Agent {
     if (!text) return null;
     // tool-*-events uit brain.hear() worden hier genegeerd (ticket #7).
     return textStream(this.#brain.hear(text), {
-      onEmotion: (emotion, intensity) => {
+      onMood: (emotion, intensity) => {
         const participant = this.#room.localParticipant;
         if (!participant) {
           console.error("Emotie niet gepubliceerd: agent is (nog) niet verbonden met de room.");
@@ -148,41 +148,50 @@ export default defineAgent<AgentUserData>({
 
     // Volgt de wakkere Dynimo (dashboard-acties komen binnen via Postgres NOTIFY): een wissel breekt het
     // lopende antwoord af (zoals barge-in; de brain-stream sluit via textStream) en zet het gezichtje om.
-    const publishDisplay = (display: DisplayState): void => {
+    const publish = (topic: string, message: DisplayMessage | EmotionMessage): void => {
       const participant = ctx.room.localParticipant;
       if (!participant) return;
-      const message: DisplayMessage = { state: display };
       participant
-        .publishData(new TextEncoder().encode(JSON.stringify(message)), { reliable: true, topic: DISPLAY_TOPIC })
+        .publishData(new TextEncoder().encode(JSON.stringify(message)), { reliable: true, topic })
         .catch((error: unknown) => {
-          console.error("Weergavetoestand publiceren faalde:", error instanceof Error ? error.message : error);
+          console.error(`Publiceren op "${topic}" faalde:`, error instanceof Error ? error.message : error);
         });
+    };
+    // Weergavetoestand plus, bij wakker, de HUIDIGE Stemming (vers gelezen), zodat het gezichtje na wekken direct klopt.
+    const publishState = async (): Promise<void> => {
+      try {
+        const state = await readState(brain);
+        publish(DISPLAY_TOPIC, { state: state.display });
+        if (state.mood) publish(EMOTION_TOPIC, state.mood);
+      } catch (error) {
+        console.error("Toestand publiceren faalde:", error instanceof Error ? error.message : error);
+      }
     };
     const watcher = await watchDynimos({
       databaseUrl,
       brain,
-      onChange: (state) => {
+      onChange: () => {
         // interrupt gooit/weigert als er niets te onderbreken valt; dat is geen fout.
         try {
           session.interrupt({ force: true }).await.catch(() => {});
         } catch {
           // niets lopend
         }
-        publishDisplay(state.display);
+        void publishState();
       },
     });
     ctx.addShutdownCallback(() => watcher.close());
-    publishDisplay(watcher.current().display);
+    void publishState();
     // Een later ladend gezichtje kent de toestand nog niet. ParticipantConnected vuurt vóórdat het gezichtje
     // zijn data-channel-subscriber gemount heeft, dus nog eens na een korte vertraging.
     // ponytail: een echte oplossing (state-sync via participant attributes of een request-bericht) pas nodig
     // als dit in de praktijk misgaat.
     const retryTimers = new Set<NodeJS.Timeout>();
     ctx.room.on(RoomEvent.ParticipantConnected, () => {
-      publishDisplay(watcher.current().display);
+      void publishState();
       const timer = setTimeout(() => {
         retryTimers.delete(timer);
-        publishDisplay(watcher.current().display);
+        void publishState();
       }, 2000);
       retryTimers.add(timer);
     });

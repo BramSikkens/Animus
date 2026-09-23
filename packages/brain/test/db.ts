@@ -14,5 +14,5 @@ export function createTestDb(): Db {
 }
 
 export async function truncateAll(db: Db): Promise<void> {
-  await db.execute(`TRUNCATE TABLE identity, memories RESTART IDENTITY CASCADE`);
+  await db.execute(`TRUNCATE TABLE identity, memories, epitaphs RESTART IDENTITY CASCADE`);
 }

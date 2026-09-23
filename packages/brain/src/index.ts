@@ -16,7 +16,7 @@ import {
 import { cosineDistance, eq, notInArray } from "drizzle-orm";
 import { z } from "zod";
 import type { Db } from "@animus/db";
-import { identity, memories } from "@animus/db/schema";
+import { epitaphs, identity, memories } from "@animus/db/schema";
 import { EMOTIONS, type Emotion } from "./emotion.js";
 import { createTools } from "./tools.js";
 
@@ -30,11 +30,18 @@ export type BrainEvent =
 
 export type Identity = Omit<typeof identity.$inferSelect, "id">;
 
+export type Epitaph = typeof epitaphs.$inferSelect;
+
 export type Type2Models = { light: LanguageModel; heavy: LanguageModel };
 
 export type Brain = {
   boot(): Promise<Identity>;
   hear(text: string): AsyncIterable<BrainEvent>;
+  /**
+   * Verwijdert het wezen onomkeerbaar, maar enkel als `confirmedName` exact zijn naam is.
+   * Geeft het Grafschrift terug, of null als er niets verwijderd is.
+   */
+  delete(confirmedName: string): Promise<Epitaph | null>;
 };
 
 const genesisSchema = z.object({
@@ -81,6 +88,9 @@ Antwoord in karakter en in het Nederlands.`;
 function toIdentity({ id: _id, ...rest }: typeof identity.$inferSelect): Identity {
   return rest;
 }
+
+const FAREWELL_PROMPT = `Je wordt zo meteen voor altijd verwijderd: je naam, je karakter en al je herinneringen verdwijnen.
+Schrijf je Afscheidsreflectie: je laatste woorden, in karakter, in een paar zinnen.`;
 
 const RECALL_LIMIT = 5;
 
@@ -178,6 +188,11 @@ export function createBrain(deps: {
   }
 
   // Het geheugen is aanvullend: faalt het embedden, dan gaat het gesprek door zonder herinneringen.
+  // Leeftijd = kalendertijd sinds born_at (ADR-0002), na het cachepunt want ze verandert.
+  function ageMessage(being: Identity): SystemModelMessage {
+    return { role: "system", content: `Leeftijd: ${formatAge(now().getTime() - being.bornAt.getTime())}` };
+  }
+
   async function recall(utterance: string): Promise<string[]> {
     try {
       const { embedding } = await embed({ model: deps.embedder, value: utterance });
@@ -219,7 +234,16 @@ export function createBrain(deps: {
       return { emotion: "neutraal", intensity: 0, intent: "simpel" };
     });
 
-    await deps.db.update(identity).set({ lastEmotion: emotion, lastIntensity: intensity }).where(eq(identity.id, 1));
+    const updated = await deps.db
+      .update(identity)
+      .set({ lastEmotion: emotion, lastIntensity: intensity })
+      .where(eq(identity.id, 1))
+      .returning({ id: identity.id });
+    // Een andere instantie (bv. de verwijder-CLI) kan het wezen intussen gewist hebben.
+    if (updated.length === 0) {
+      forgetBeing();
+      throw new Error("Dit wezen is intussen verwijderd; roep boot() opnieuw aan.");
+    }
 
     yield { type: "emotion", emotion, intensity };
 
@@ -231,15 +255,11 @@ export function createBrain(deps: {
       content: buildStableSystemPrompt(bootedIdentity),
       providerOptions: { anthropic: { cacheControl: { type: "ephemeral" } } },
     };
-    const agePrompt: SystemModelMessage = {
-      role: "system",
-      content: `Leeftijd: ${formatAge(now().getTime() - bootedIdentity.bornAt.getTime())}`,
-    };
 
     const userMessage: ModelMessage = { role: "user", content: text };
     const result = streamText({
       model: intent === "complex" ? deps.type2.heavy : deps.type2.light,
-      instructions: [stable, agePrompt, recallPrompt(recalled)],
+      instructions: [stable, ageMessage(bootedIdentity), recallPrompt(recalled)],
       messages: [...workingMemory, userMessage],
       tools,
       // Genoeg stappen om een tool te gebruiken en daarna het resultaat te verwoorden.
@@ -267,5 +287,44 @@ export function createBrain(deps: {
     if (full.trim()) await remember(`Gesprekspartner: ${text}\n${bootedIdentity.name}: ${full}`);
   }
 
-  return { boot, hear };
+  // Alles wat deze instantie over het wezen weet; na verwijdering mag niets doorsijpelen naar een nieuw wezen.
+  function forgetBeing(): void {
+    bootedIdentity = undefined;
+    workingMemory.length = 0;
+    sessionMemoryIds.length = 0;
+  }
+
+  async function deleteBeing(confirmedName: string): Promise<Epitaph | null> {
+    if (!bootedIdentity || confirmedName !== bootedIdentity.name) return null;
+    const being = bootedIdentity;
+
+    // (1) Aparte, finale Type2-call: de laatste woorden, niet een bestaande reflectie.
+    // Faalt die, dan wordt er bewust niets verwijderd: geen Grafschrift zonder laatste woorden.
+    const { text: farewellReflection } = await generateText({
+      model: deps.type2.heavy,
+      instructions: [
+        { role: "system", content: buildStableSystemPrompt(being) },
+        ageMessage(being),
+      ],
+      prompt: FAREWELL_PROMPT,
+    });
+
+    // (2) Grafschrift + (3) hard verwijderen, samen of helemaal niet.
+    const epitaph = await deps.db.transaction(async (tx) => {
+      // Eerst de identiteit claimen: was een andere instantie ons voor, dan schrijven we niets.
+      const deleted = await tx.delete(identity).where(eq(identity.id, 1)).returning({ id: identity.id });
+      if (deleted.length === 0) return null;
+      await tx.delete(memories);
+      const [row] = await tx
+        .insert(epitaphs)
+        .values({ name: being.name, bornAt: being.bornAt, deletedAt: now(), farewellReflection })
+        .returning();
+      return row!;
+    });
+
+    forgetBeing();
+    return epitaph;
+  }
+
+  return { boot, hear, delete: deleteBeing };
 }

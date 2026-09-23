@@ -22,6 +22,13 @@
       "when": 1790165034001,
       "tag": "0002_silly_mojo",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1790167162294,
+      "tag": "0003_empty_human_cannonball",
+      "breakpoints": true
     }
   ]
 }

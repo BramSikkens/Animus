@@ -15,6 +15,13 @@
       "when": 1790163753715,
       "tag": "0001_chunky_black_knight",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1790165034001,
+      "tag": "0002_silly_mojo",
+      "breakpoints": true
     }
   ]
 }

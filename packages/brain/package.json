@@ -15,6 +15,7 @@
     "@ai-sdk/openai": "4.0.73",
     "@animus/db": "workspace:*",
     "ai": "7.0.112",
+    "drizzle-orm": "0.45.3",
     "zod": "4.6.5"
   },
   "devDependencies": {

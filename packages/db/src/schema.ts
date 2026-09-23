@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { check, integer, pgTable, real, text, timestamp } from "drizzle-orm/pg-core";
+import { check, index, integer, pgTable, real, serial, text, timestamp, vector } from "drizzle-orm/pg-core";
 
 // Exact één rij mogelijk: id is vastgepind op 1 en gecheckt in de DB.
 export const identity = pgTable(
@@ -16,4 +16,20 @@ export const identity = pgTable(
     lastIntensity: real("last_intensity"),
   },
   (table) => [check("identity_singleton", sql`${table.id} = 1`)],
+);
+
+// Dimensie van OpenAI text-embedding-3-small (ADR-0008): een andere embedding-provider
+// betekent een migratie én alles opnieuw embedden.
+export const EMBEDDING_DIMENSIONS = 1536;
+
+// Eén herinnering per afgeronde beurt.
+export const memories = pgTable(
+  "memories",
+  {
+    id: serial("id").primaryKey(),
+    text: text("text").notNull(),
+    embedding: vector("embedding", { dimensions: EMBEDDING_DIMENSIONS }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [index("memories_embedding_idx").using("hnsw", table.embedding.op("vector_cosine_ops"))],
 );

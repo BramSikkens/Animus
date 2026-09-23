@@ -2,7 +2,7 @@ import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 import { createDb, migrate } from "@animus/db";
 import { createBrain, formatAge } from "./index.js";
-import { loadType2Config, TYPE1_MODEL } from "./config.js";
+import { EMBEDDING_MODEL, loadType2Config, TYPE1_MODEL } from "./config.js";
 
 try {
   process.loadEnvFile(fileURLToPath(new URL("../../../.env", import.meta.url)));
@@ -15,7 +15,7 @@ async function main(): Promise<void> {
   const db = createDb(databaseUrl);
   await migrate(db);
 
-  const brain = createBrain({ db, type1: TYPE1_MODEL, type2: loadType2Config() });
+  const brain = createBrain({ db, type1: TYPE1_MODEL, type2: loadType2Config(), embedder: EMBEDDING_MODEL });
   const identity = await brain.boot();
 
   console.log(`Je praat met ${identity.name}.`);

@@ -1,6 +1,7 @@
 import { ReadableStream } from "node:stream/web";
 import { fileURLToPath } from "node:url";
 import { createBrain, type Brain } from "@animus/brain";
+import { EMOTION_TOPIC, type EmotionMessage } from "@animus/brain/emotion";
 import { EMBEDDING_MODEL, loadType2Config, TYPE1_MODEL } from "@animus/brain/config";
 import { createDb, migrate } from "@animus/db";
 import {
@@ -70,12 +71,14 @@ class BrainPlaceholderLLM extends llm.LLM {
 
 class AnimusAgent extends voice.Agent {
   readonly #brain: Brain;
+  readonly #room: JobContext["room"];
 
-  constructor(brain: Brain) {
+  constructor(brain: Brain, room: JobContext["room"]) {
     // instructions is verplicht op voice.Agent, maar onbenut: llmNode hieronder draait i.p.v. het
     // ingebouwde LLM-pad de brein-kern.
     super({ instructions: "Animus", llm: new BrainPlaceholderLLM() });
     this.#brain = brain;
+    this.#room = room;
   }
 
   override async llmNode(chatCtx: ChatContext, _toolCtx: ToolContext): Promise<ReadableStream<string> | null> {
@@ -83,9 +86,23 @@ class AnimusAgent extends voice.Agent {
       item.type === "message" && item.role === "user";
     const text = chatCtx.items.filter(isUserMessage).at(-1)?.textContent;
     if (!text) return null;
-    // emotion- en tool-*-events uit brain.hear() worden hier genegeerd (ticket #7).
-    // Ticket #8 publiceert de emotie op het LiveKit data channel.
-    return textStream(this.#brain.hear(text));
+    // tool-*-events uit brain.hear() worden hier genegeerd (ticket #7).
+    return textStream(this.#brain.hear(text), {
+      onEmotion: (emotion, intensity) => {
+        const participant = this.#room.localParticipant;
+        if (!participant) {
+          console.error("Emotie niet gepubliceerd: agent is (nog) niet verbonden met de room.");
+          return;
+        }
+        const message: EmotionMessage = { emotion, intensity };
+        // Fire-and-forget: een mislukte publicatie mag de beurt niet breken.
+        participant
+          .publishData(new TextEncoder().encode(JSON.stringify(message)), { reliable: true, topic: EMOTION_TOPIC })
+          .catch((error: unknown) => {
+            console.error("Emotie publiceren faalde:", error instanceof Error ? error.message : error);
+          });
+      },
+    });
   }
 }
 
@@ -126,7 +143,7 @@ export default defineAgent<AgentUserData>({
       },
     });
 
-    await session.start({ agent: new AnimusAgent(brain), room: ctx.room });
+    await session.start({ agent: new AnimusAgent(brain, ctx.room), room: ctx.room });
   },
 });
 

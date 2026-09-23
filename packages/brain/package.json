@@ -5,7 +5,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./age": "./src/age.ts",
-    "./config": "./src/config.ts"
+    "./config": "./src/config.ts",
+    "./emotion": "./src/emotion.ts"
   },
   "scripts": {
     "test": "vitest run",

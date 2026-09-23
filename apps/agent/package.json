@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "dev": "tsx src/agent.ts start",
     "start": "tsx src/agent.ts start",
     "download-files": "livekit-agents download-files",
     "typecheck": "tsc --noEmit",

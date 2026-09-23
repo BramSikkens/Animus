@@ -1,7 +1,8 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { MockEmbeddingModelV4, MockLanguageModelV4, Experimental_EvaluationMockModelV4 } from "ai/test";
 import { simulateReadableStream } from "ai";
-import { EMBEDDING_DIMENSIONS, epitaphs, identity, memories } from "@animus/db/schema";
+import { eq } from "drizzle-orm";
+import { EMBEDDING_DIMENSIONS, dynimos, epitaphs, memories } from "@animus/db/schema";
 import { createBrain, type BrainEvent } from "../src/index.js";
 import { createTestDb, truncateAll } from "./db.js";
 
@@ -185,7 +186,7 @@ describe("createBrain", () => {
     expect(result.seed).toBe("ochtendnevel over een stil water"); // random 0 → eerste Seed uit seeds.txt
     expect(JSON.stringify(heavy.doGenerateCalls[0]?.prompt)).toContain(result.seed);
 
-    const rows = await db.select().from(identity);
+    const rows = await db.select().from(dynimos);
     expect(rows).toHaveLength(1);
     expect(rows[0]?.name).toBe("Nova");
     expect(rows[0]?.seed).toBe(result.seed);
@@ -414,7 +415,7 @@ describe("createBrain", () => {
     await brain.boot();
     await collectText(brain.hear("Vertel eens iets nieuws."));
 
-    const rows = await db.select().from(identity);
+    const rows = await db.select().from(dynimos);
     expect(rows[0]?.lastEmotion).toBe("nieuwsgierig");
     expect(rows[0]?.lastIntensity).toBeCloseTo(0.65);
   });
@@ -672,7 +673,7 @@ describe("createBrain", () => {
 
     expect(await brain.delete("Nora")).toBeNull();
 
-    expect(await db.select().from(identity)).toHaveLength(1);
+    expect(await db.select().from(dynimos)).toHaveLength(1);
     expect(await db.select().from(memories)).toHaveLength(1);
     expect(heavy.doGenerateCalls).toHaveLength(1); // enkel de genesis
   });
@@ -702,8 +703,37 @@ describe("createBrain", () => {
     expect(epitaph).toMatchObject({ name: "Nova", bornAt, deletedAt, farewellReflection: "Dank je voor elk gesprek." });
     expect(heavy.doGenerateCalls).toHaveLength(2); // genesis + aparte Afscheidsreflectie
     expect(JSON.stringify(heavy.doGenerateCalls[1]?.prompt)).toContain("Nova");
-    expect(await db.select().from(identity)).toHaveLength(0);
+    expect(await db.select().from(dynimos)).toHaveLength(0);
     expect(await db.select().from(memories)).toHaveLength(0);
+  });
+
+  it("wist bij delete() enkel de herinneringen van het verwijderde wezen, niet die van andere Dynimo's", async () => {
+    const bornAt = new Date("2026-01-01T12:00:00.000Z");
+    const heavy = lifecycleModel("Nova", "Dank je voor elk gesprek.");
+    const brain = createBrain({
+      db,
+      embedder: embedModel(),
+      type1: type1Model(),
+      type2: { light: textModel(["Hoi."]), heavy },
+      now: () => bornAt,
+      random: () => 0,
+    });
+    await brain.boot();
+    await collectText(brain.hear("Mijn kat heet Mimi."));
+
+    const [other] = await db
+      .insert(dynimos)
+      .values({ name: "Vero", coreCharacter: "x", birthStory: "y", seed: "z", bornAt })
+      .returning({ id: dynimos.id });
+    await db
+      .insert(memories)
+      .values({ dynimoId: other!.id, text: "Herinnering van Vero.", embedding: fakeVector(""), createdAt: bornAt });
+
+    await brain.delete("Nova");
+
+    const otherMemories = await db.select().from(memories).where(eq(memories.dynimoId, other!.id));
+    expect(otherMemories).toHaveLength(1);
+    expect(otherMemories[0]?.text).toBe("Herinnering van Vero.");
   });
 
   it("laat na delete() een volledig nieuw wezen geboren worden dat niets van het Grafschrift ziet", async () => {

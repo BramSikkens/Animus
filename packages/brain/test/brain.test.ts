@@ -24,10 +24,17 @@ const NULL_USAGE = {
 
 const STOP: { unified: "stop"; raw: undefined } = { unified: "stop", raw: undefined };
 
-function genesisModel(result: { name: string; coreCharacter: string; birthStory: string }) {
+const MID_AXES = { ie: 0.5, sn: 0.5, tf: 0.5, jp: 0.5 };
+
+function genesisModel(result: {
+  name: string;
+  coreCharacter: string;
+  birthStory: string;
+  axes?: { ie: number; sn: number; tf: number; jp: number };
+}) {
   return new MockLanguageModelV4({
     doGenerate: async () => ({
-      content: [{ type: "text" as const, text: JSON.stringify(result) }],
+      content: [{ type: "text" as const, text: JSON.stringify({ axes: MID_AXES, ...result }) }],
       finishReason: STOP,
       usage: NULL_USAGE,
       warnings: [],
@@ -43,7 +50,7 @@ function generateResult(text: string) {
 function lifecycleModel(name: string, farewell: string) {
   return new MockLanguageModelV4({
     doGenerate: [
-      generateResult(JSON.stringify({ name, coreCharacter: "Speels.", birthStory: "Geboren uit ochtendnevel." })),
+      generateResult(JSON.stringify({ name, coreCharacter: "Speels.", birthStory: "Geboren uit ochtendnevel.", axes: MID_AXES })),
       generateResult(farewell),
     ],
   });
@@ -737,9 +744,9 @@ describe("createBrain", () => {
     const bornAt = new Date("2026-01-01T12:00:00.000Z");
     const heavy = new MockLanguageModelV4({
       doGenerate: [
-        generateResult(JSON.stringify({ name: "Nova", coreCharacter: "Speels.", birthStory: "Ochtendnevel." })),
+        generateResult(JSON.stringify({ name: "Nova", coreCharacter: "Speels.", birthStory: "Ochtendnevel.", axes: MID_AXES })),
         generateResult("Vaarwel, lieve Mimi-kenner."),
-        generateResult(JSON.stringify({ name: "Lumen", coreCharacter: "Rustig.", birthStory: "Maanlicht." })),
+        generateResult(JSON.stringify({ name: "Lumen", coreCharacter: "Rustig.", birthStory: "Maanlicht.", axes: MID_AXES })),
       ],
     });
     const light = new MockLanguageModelV4({ doStream: [textStream("Hoi."), textStream("Hallo, ik ben Lumen.")] });
@@ -855,9 +862,9 @@ describe("createBrain", () => {
     const bornAt = new Date("2026-01-01T12:00:00.000Z");
     const heavy = new MockLanguageModelV4({
       doGenerate: [
-        generateResult(JSON.stringify({ name: "Nova", coreCharacter: "x", birthStory: "y" })),
+        generateResult(JSON.stringify({ name: "Nova", coreCharacter: "x", birthStory: "y", axes: MID_AXES })),
         generateResult("Vaarwel."),
-        generateResult(JSON.stringify({ name: "Lumen", coreCharacter: "Rustig.", birthStory: "Maanlicht." })),
+        generateResult(JSON.stringify({ name: "Lumen", coreCharacter: "Rustig.", birthStory: "Maanlicht.", axes: MID_AXES })),
       ],
     });
     const deleter = createBrain({
@@ -935,8 +942,8 @@ describe("createBrain", () => {
     function genesisTwice(first: string, second: string) {
       return new MockLanguageModelV4({
         doGenerate: [
-          generateResult(JSON.stringify({ name: first, coreCharacter: "x", birthStory: "y" })),
-          generateResult(JSON.stringify({ name: second, coreCharacter: "x", birthStory: "y" })),
+          generateResult(JSON.stringify({ name: first, coreCharacter: "x", birthStory: "y", axes: MID_AXES })),
+          generateResult(JSON.stringify({ name: second, coreCharacter: "x", birthStory: "y", axes: MID_AXES })),
         ],
       });
     }
@@ -1144,8 +1151,8 @@ describe("createBrain", () => {
     function twoDynimosBrain() {
       const heavy = new MockLanguageModelV4({
         doGenerate: [
-          generateResult(JSON.stringify({ name: "Nova", coreCharacter: "x", birthStory: "y" })),
-          generateResult(JSON.stringify({ name: "Lumen", coreCharacter: "x", birthStory: "y" })),
+          generateResult(JSON.stringify({ name: "Nova", coreCharacter: "x", birthStory: "y", axes: MID_AXES })),
+          generateResult(JSON.stringify({ name: "Lumen", coreCharacter: "x", birthStory: "y", axes: MID_AXES })),
           generateResult("Vaarwel."),
         ],
       });
@@ -1272,7 +1279,7 @@ describe("createBrain", () => {
           light: unusedModel(),
           heavy: new MockLanguageModelV4({
             doGenerate: [
-              generateResult(JSON.stringify({ name: "Nova", coreCharacter: "x", birthStory: "y" })),
+              generateResult(JSON.stringify({ name: "Nova", coreCharacter: "x", birthStory: "y", axes: MID_AXES })),
               generateResult("Vaarwel."),
             ],
           }),
@@ -1301,6 +1308,266 @@ describe("createBrain", () => {
 
       expect(unhandled).toEqual([]);
       expect(await db.select().from(memories)).toHaveLength(0);
+    });
+  });
+
+  describe("Persoonlijkheid", () => {
+    const bornAt = new Date("2026-01-01T12:00:00.000Z");
+    const INTROVERT = { ie: 0.1, sn: 0.5, tf: 0.5, jp: 0.5 };
+    const EXTRAVERT = { ie: 0.9, sn: 0.5, tf: 0.5, jp: 0.5 };
+
+    function brainWith(type2: { light: MockLanguageModelV4; heavy: MockLanguageModelV4 }) {
+      return createBrain({
+        db,
+        embedder: embedModel(),
+        type1: type1Model(),
+        type2,
+        now: () => bornAt,
+        random: () => 0,
+      });
+    }
+
+    async function insertDynimo(axes?: { ie: number; sn: number; tf: number; jp: number }) {
+      const [row] = await db
+        .insert(dynimos)
+        .values({
+          name: "Vero",
+          coreCharacter: "Rustig.",
+          birthStory: "Geboren.",
+          seed: "z",
+          bornAt,
+          awakeSince: bornAt,
+          axisIe: axes?.ie,
+          axisSn: axes?.sn,
+          axisTf: axes?.tf,
+          axisJp: axes?.jp,
+        })
+        .returning();
+      return row!;
+    }
+
+    it("bewaart de assen uit de genesis-call op de nieuwe Dynimo", async () => {
+      const axes = { ie: 0.1, sn: 0.9, tf: 0.2, jp: 0.8 };
+      const brain = brainWith({
+        light: unusedModel(),
+        heavy: genesisModel({ name: "Nova", coreCharacter: "x", birthStory: "y", axes }),
+      });
+
+      const nova = await brain.bringToLife();
+
+      expect([nova.axisIe, nova.axisSn, nova.axisTf, nova.axisJp]).toEqual([0.1, 0.9, 0.2, 0.8].map((v) => expect.closeTo(v)));
+      const [row] = await db.select().from(dynimos);
+      expect(row?.axisIe).toBeCloseTo(0.1);
+      expect(row?.axisJp).toBeCloseTo(0.8);
+    });
+
+    it("faalt bringToLife() zonder rij als de genesis assen buiten 0..1 geeft", async () => {
+      const brain = brainWith({
+        light: unusedModel(),
+        heavy: genesisModel({
+          name: "Nova",
+          coreCharacter: "x",
+          birthStory: "y",
+          axes: { ie: 1.5, sn: 0.5, tf: 0.5, jp: 0.5 },
+        }),
+      });
+
+      await expect(brain.bringToLife()).rejects.toThrow();
+      expect(await db.select().from(dynimos)).toHaveLength(0);
+    });
+
+    it("geeft een introverte Dynimo de korte-antwoorden-richtlijn en niet de extraverte", async () => {
+      await insertDynimo(INTROVERT);
+      const light = textModel(["Hoi."]);
+      await collectText(brainWith({ light, heavy: unusedModel() }).hear("Hallo!"));
+
+      const system = contentsByRole(light.doStreamCalls[0]?.prompt, "system").join(" ");
+      expect(system).toContain("Persoonlijkheid: INFP");
+      expect(system).toContain("één korte zin");
+      expect(system).not.toContain("uitweiden");
+    });
+
+    it("geeft een extraverte Dynimo de uitweid-richtlijn en niet de introverte", async () => {
+      await insertDynimo(EXTRAVERT);
+      const light = textModel(["Hoi."]);
+      await collectText(brainWith({ light, heavy: unusedModel() }).hear("Hallo!"));
+
+      const system = contentsByRole(light.doStreamCalls[0]?.prompt, "system").join(" ");
+      expect(system).toContain("Persoonlijkheid: ENFP");
+      expect(system).toContain("uitweiden");
+      expect(system).not.toContain("één korte zin");
+    });
+
+    it("bewaart de exacte randwaarden 0 en 1 uit de genesis en behandelt 0 niet als ontbrekend", async () => {
+      const brain = brainWith({
+        light: textModel(["Hoi."]),
+        heavy: genesisModel({
+          name: "Nova",
+          coreCharacter: "x",
+          birthStory: "y",
+          axes: { ie: 0, sn: 1, tf: 0, jp: 1 },
+        }),
+      });
+      const nova = await brain.bringToLife();
+      expect([nova.axisIe, nova.axisSn, nova.axisTf, nova.axisJp]).toEqual([0, 1, 0, 1]);
+
+      const light = textModel(["Hoi."]);
+      await collectText(brainWith({ light, heavy: unusedModel() }).hear("Hallo!"));
+      expect(contentsByRole(light.doStreamCalls[0]?.prompt, "system").join(" ")).toContain("Persoonlijkheid: INTP");
+    });
+
+    it("laat het persoonlijkheidsblok weg bij een Dynimo zonder assen", async () => {
+      await insertDynimo();
+      const light = textModel(["Hoi."]);
+      await collectText(brainWith({ light, heavy: unusedModel() }).hear("Hallo!"));
+
+      expect(contentsByRole(light.doStreamCalls[0]?.prompt, "system").join(" ")).not.toContain("Persoonlijkheid");
+    });
+  });
+
+  describe("backfill", () => {
+    const bornAt = new Date("2026-01-01T12:00:00.000Z");
+    const AXES_RESULT = { axes: { ie: 0.2, sn: 0.8, tf: 0.7, jp: 0.3 } };
+
+    function brainWith(heavy: MockLanguageModelV4, light: MockLanguageModelV4 = unusedModel()) {
+      return createBrain({
+        db,
+        embedder: embedModel(),
+        type1: type1Model(),
+        type2: { light, heavy },
+        now: () => bornAt,
+        random: () => 0,
+      });
+    }
+
+    // Een fase-1-achtige rij: geen assen.
+    async function insertLegacy(name: string, extra: Partial<typeof dynimos.$inferInsert> = {}) {
+      const [row] = await db
+        .insert(dynimos)
+        .values({ name, coreCharacter: `Kern van ${name}.`, birthStory: "Geboren.", seed: "z", bornAt, ...extra })
+        .returning();
+      return row!;
+    }
+
+    it("vult de assen van een Dynimo zonder assen aan", async () => {
+      const legacy = await insertLegacy("Lumi");
+      const heavy = new MockLanguageModelV4({ doGenerate: [generateResult(JSON.stringify(AXES_RESULT))] });
+
+      expect(await brainWith(heavy).backfill()).toBe(1);
+
+      const [row] = await db.select().from(dynimos).where(eq(dynimos.id, legacy.id));
+      expect([row?.axisIe, row?.axisSn, row?.axisTf, row?.axisJp]).toEqual([0.2, 0.8, 0.7, 0.3].map((v) => expect.closeTo(v)));
+    });
+
+    it("geeft Kernkarakter, Geëvolueerd karakter en Herinneringen mee aan de backfillcall", async () => {
+      const legacy = await insertLegacy("Lumi", { evolvedCharacter: "Groeide zachter." });
+      await db
+        .insert(memories)
+        .values({ dynimoId: legacy.id, text: "Gesprekspartner: kat Mimi", embedding: fakeVector("kat"), createdAt: bornAt });
+      const heavy = new MockLanguageModelV4({ doGenerate: [generateResult(JSON.stringify(AXES_RESULT))] });
+
+      await brainWith(heavy).backfill();
+
+      const prompt = JSON.stringify(heavy.doGenerateCalls[0]?.prompt);
+      expect(prompt).toContain("Kern van Lumi.");
+      expect(prompt).toContain("Groeide zachter.");
+      expect(prompt).toContain("kat Mimi");
+    });
+
+    it("doet bij een tweede backfill() geen Type2-call meer", async () => {
+      await insertLegacy("Lumi");
+      const heavy = new MockLanguageModelV4({ doGenerate: [generateResult(JSON.stringify(AXES_RESULT))] });
+      const brain = brainWith(heavy);
+
+      await brain.backfill();
+      expect(await brain.backfill()).toBe(0);
+
+      expect(heavy.doGenerateCalls).toHaveLength(1);
+    });
+
+    it("slaat een Dynimo met assen over", async () => {
+      await insertLegacy("Lumi", { axisIe: 0.5, axisSn: 0.5, axisTf: 0.5, axisJp: 0.5 });
+      const heavy = unusedModel();
+
+      expect(await brainWith(heavy).backfill()).toBe(0);
+      expect(heavy.doGenerateCalls).toHaveLength(0);
+    });
+
+    it("laat bij een fout voor één Dynimo die rij NULL en gaat door met de volgende", async () => {
+      const first = await insertLegacy("Eerste");
+      const second = await insertLegacy("Tweede");
+      let calls = 0;
+      const heavy = new MockLanguageModelV4({
+        doGenerate: async () => {
+          calls++;
+          if (calls === 1) throw new Error("model plat");
+          return generateResult(JSON.stringify(AXES_RESULT));
+        },
+      });
+
+      expect(await brainWith(heavy).backfill()).toBe(1);
+
+      const rows = await db.select().from(dynimos).orderBy(dynimos.id);
+      expect(rows.find((row) => row.id === first.id)?.axisIe).toBeNull();
+      expect(rows.find((row) => row.id === second.id)?.axisIe).toBeCloseTo(0.2);
+    });
+
+    it("bewaart de randwaarden 0 en 1 bij backfill", async () => {
+      await insertLegacy("Lumi");
+      const heavy = new MockLanguageModelV4({
+        doGenerate: [generateResult(JSON.stringify({ axes: { ie: 0, sn: 1, tf: 0, jp: 1 } }))],
+      });
+
+      expect(await brainWith(heavy).backfill()).toBe(1);
+
+      const [row] = await db.select().from(dynimos);
+      expect([row?.axisIe, row?.axisSn, row?.axisTf, row?.axisJp]).toEqual([0, 1, 0, 1]);
+    });
+
+    it("laat de rij NULL bij ongeldige Type2-output (as buiten 0..1) en gaat door met de volgende", async () => {
+      const first = await insertLegacy("Eerste");
+      const second = await insertLegacy("Tweede");
+      const heavy = new MockLanguageModelV4({
+        doGenerate: [
+          generateResult(JSON.stringify({ axes: { ie: 1.5, sn: 0.5, tf: 0.5, jp: 0.5 } })),
+          generateResult(JSON.stringify(AXES_RESULT)),
+        ],
+      });
+
+      expect(await brainWith(heavy).backfill()).toBe(1);
+
+      const rows = await db.select().from(dynimos);
+      expect(rows.find((row) => row.id === first.id)?.axisIe).toBeNull();
+      expect(rows.find((row) => row.id === second.id)?.axisIe).toBeCloseTo(0.2);
+    });
+
+    it("overschrijft assen niet die intussen door een andere instantie gezet zijn", async () => {
+      const legacy = await insertLegacy("Lumi");
+      const heavy = new MockLanguageModelV4({
+        doGenerate: async () => {
+          // Een andere instantie was ons voor terwijl de call liep.
+          await db.update(dynimos).set({ axisIe: 0.9, axisSn: 0.9, axisTf: 0.9, axisJp: 0.9 }).where(eq(dynimos.id, legacy.id));
+          return generateResult(JSON.stringify(AXES_RESULT));
+        },
+      });
+
+      expect(await brainWith(heavy).backfill()).toBe(0);
+
+      const [row] = await db.select().from(dynimos);
+      expect(row?.axisIe).toBeCloseTo(0.9);
+    });
+
+    it("werkt een pratende instantie meteen bij: de persoonlijkheid komt in de volgende beurt zonder herstart", async () => {
+      await insertLegacy("Lumi", { awakeSince: bornAt });
+      const light = new MockLanguageModelV4({ doStream: [textStream("Hoi."), textStream("Hallo.")] });
+      const talker = brainWith(unusedModel(), light);
+      await collectText(talker.hear("Hallo!"));
+      expect(contentsByRole(light.doStreamCalls[0]?.prompt, "system").join(" ")).not.toContain("Persoonlijkheid");
+
+      await brainWith(new MockLanguageModelV4({ doGenerate: [generateResult(JSON.stringify(AXES_RESULT))] })).backfill();
+      await collectText(talker.hear("Nog een keer."));
+
+      expect(contentsByRole(light.doStreamCalls[1]?.prompt, "system").join(" ")).toContain("Persoonlijkheid: INFJ");
     });
   });
 });

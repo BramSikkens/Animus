@@ -7,14 +7,16 @@
     "./age": "./src/age.ts",
     "./config": "./src/config.ts",
     "./emotion": "./src/emotion.ts",
-    "./display": "./src/display.ts"
+    "./display": "./src/display.ts",
+    "./personality": "./src/personality.ts"
   },
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "repl": "tsx src/repl.ts",
     "verwijder": "tsx src/delete-cli.ts",
-    "slaap-allen": "tsx src/sleep-all-cli.ts"
+    "slaap-allen": "tsx src/sleep-all-cli.ts",
+    "backfill": "tsx src/backfill-cli.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "4.0.61",

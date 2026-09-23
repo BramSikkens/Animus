@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { index, integer, pgTable, real, serial, text, timestamp, uniqueIndex, vector } from "drizzle-orm/pg-core";
+import { check, index, integer, pgTable, real, serial, text, timestamp, uniqueIndex, vector } from "drizzle-orm/pg-core";
 
 // Meerdere rijen mogelijk: elke rij is een Dynimo.
 export const dynimos = pgTable(
@@ -16,9 +16,20 @@ export const dynimos = pgTable(
     lastIntensity: real("last_intensity"),
     // NULL = Slapend; gezet = Wakker (en de marker van deze wake-generatie).
     awakeSince: timestamp("awake_since", { withTimezone: true }),
+    // Persoonlijkheid: 0..1 = positie richting de tweede letter (I↔E, S↔N, T↔F, J↔P). NULL = nog te backfillen.
+    axisIe: real("axis_ie"),
+    axisSn: real("axis_sn"),
+    axisTf: real("axis_tf"),
+    axisJp: real("axis_jp"),
   },
   // Hooguit één Wakker: alle wakkere rijen delen dezelfde constante indexwaarde.
-  (table) => [uniqueIndex("dynimos_single_awake_idx").on(sql`(true)`).where(sql`${table.awakeSince} is not null`)],
+  (table) => [
+    check("dynimos_axis_ie_range", sql`${table.axisIe} between 0 and 1`),
+    check("dynimos_axis_sn_range", sql`${table.axisSn} between 0 and 1`),
+    check("dynimos_axis_tf_range", sql`${table.axisTf} between 0 and 1`),
+    check("dynimos_axis_jp_range", sql`${table.axisJp} between 0 and 1`),
+    uniqueIndex("dynimos_single_awake_idx").on(sql`(true)`).where(sql`${table.awakeSince} is not null`),
+  ],
 );
 
 // Dimensie van OpenAI text-embedding-3-small (ADR-0008): een andere embedding-provider

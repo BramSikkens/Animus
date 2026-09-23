@@ -11,11 +11,12 @@ import {
   type ModelMessage,
   type SystemModelMessage,
 } from "ai";
-import { and, cosineDistance, eq, isNotNull, notInArray, sql } from "drizzle-orm";
+import { and, cosineDistance, desc, eq, isNotNull, isNull, notInArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { Db } from "@animus/db";
 import { dynimos, epitaphs, memories } from "@animus/db/schema";
 import { formatAge } from "./age.js";
+import { AXIS_DESCRIPTIONS, axisGuidelines, mbtiType, rowAxes } from "./personality.js";
 import { EMOTIONS, isEmotion, type Emotion } from "./emotion.js";
 import { SEEDS } from "./seeds.js";
 import { createTools } from "./tools.js";
@@ -48,6 +49,11 @@ export type Brain = {
    */
   kill(id: number, confirmedName: string): Promise<Epitaph | null>;
   list(): Promise<Dynimo[]>;
+  /**
+   * Vult ontbrekende eigenschappen (nu: Persoonlijkheidsassen) van bestaande Dynimo's aan met één Type2-call
+   * per Dynimo. Idempotent; een fout bij één Dynimo laat die rij ongemoeid. Geeft het aantal bijgewerkte rijen.
+   */
+  backfill(): Promise<number>;
   /** Praat met de Wakker Dynimo (elke beurt uit de database gelezen). Niemand wakker: geen events. */
   hear(text: string): AsyncIterable<BrainEvent>;
 };
@@ -58,15 +64,32 @@ const WAKE_LOCK_KEY = 7_142_001;
 /** Postgres NOTIFY-kanaal voor toestandswijzigingen (wakker/slapend/gedood); de payload is enkel informatief. */
 export const STATE_CHANNEL = "animus_state";
 
+const axesSchema = z.object({
+  ie: z.number().min(0).max(1),
+  sn: z.number().min(0).max(1),
+  tf: z.number().min(0).max(1),
+  jp: z.number().min(0).max(1),
+});
+
 const genesisSchema = z.object({
   name: z.string().min(1),
   coreCharacter: z.string().min(1),
   birthStory: z.string().min(1),
+  axes: axesSchema,
 });
+
+const BACKFILL_INSTRUCTIONS = `Hieronder staat een bestaand wezen: zijn kern-karakter, geboorteverhaal, geëvolueerde karakter en recente herinneringen.
+Bepaal zijn positie op vier persoonlijkheidsassen, elk een getal van 0 tot 1, op basis van wie hij/zij blijkt te zijn:
+${AXIS_DESCRIPTIONS}`;
+
+const BACKFILL_MEMORY_LIMIT = 20;
 
 const GENESIS_INSTRUCTIONS = `Je ontwaakt zojuist. Je hebt nog geen naam en geen karakter — die kies je nu zelf.
 Je krijgt hieronder één beeld (de "Seed") als vertrekpunt voor wie je wordt. Laat je erdoor inspireren, maar kopieer het niet letterlijk.
 Kies een naam, beschrijf je kern-karakter in een paar zinnen, en schrijf een kort geboorteverhaal.
+Bepaal ook je startpositie op vier persoonlijkheidsassen, elk een getal van 0 tot 1, geïnspireerd door de Seed:
+${AXIS_DESCRIPTIONS}
+Wees niet allemaal in het midden: kies een eigen, uitgesproken positie.
 Antwoord in het Nederlands.`;
 
 function pickSeed(random: () => number): string {
@@ -74,9 +97,13 @@ function pickSeed(random: () => number): string {
 }
 
 function buildStableSystemPrompt(identityRecord: Dynimo): string {
+  const axes = rowAxes(identityRecord);
+  const personality = axes
+    ? `\nPersoonlijkheid: ${mbtiType(axes)}${axisGuidelines(axes).map((line) => `\n- ${line}`).join("")}`
+    : "";
   return `Je bent ${identityRecord.name}.
 Je kern-karakter: ${identityRecord.coreCharacter}
-Je geboorteverhaal: ${identityRecord.birthStory}
+Je geboorteverhaal: ${identityRecord.birthStory}${personality}
 Antwoord in karakter en in het Nederlands.`;
 }
 
@@ -161,6 +188,10 @@ export function createBrain(deps: {
       name: result.output.name,
       coreCharacter: result.output.coreCharacter,
       birthStory: result.output.birthStory,
+      axisIe: result.output.axes.ie,
+      axisSn: result.output.axes.sn,
+      axisTf: result.output.axes.tf,
+      axisJp: result.output.axes.jp,
       seed,
       bornAt: now(),
     };
@@ -229,6 +260,57 @@ export function createBrain(deps: {
 
   async function list(): Promise<Dynimo[]> {
     return deps.db.select().from(dynimos).orderBy(dynimos.id);
+  }
+
+  // Elke stap vult één soort ontbrekende eigenschap aan; #25/#26 voegen hier drijfveren en Basisemotie toe.
+  // `fill` geeft terug of de rij daadwerkelijk bijgewerkt is.
+  const backfillSteps: { isMissing(row: Dynimo): boolean; fill(row: Dynimo): Promise<boolean> }[] = [
+    {
+      isMissing: (row) => rowAxes(row) === null,
+      fill: async (row) => {
+        const recent = await deps.db
+          .select({ text: memories.text })
+          .from(memories)
+          .where(eq(memories.dynimoId, row.id))
+          .orderBy(desc(memories.createdAt))
+          .limit(BACKFILL_MEMORY_LIMIT);
+        const { output } = await generateText({
+          model: deps.type2.heavy,
+          instructions: BACKFILL_INSTRUCTIONS,
+          prompt: `Naam: ${row.name}
+Kern-karakter: ${row.coreCharacter}
+Geboorteverhaal: ${row.birthStory}
+Geëvolueerd karakter: ${row.evolvedCharacter || "(nog niet)"}
+Recente herinneringen:
+${recent.map((memory) => `- ${memory.text}`).join("\n") || "(nog geen)"}`,
+          output: Output.object({ schema: z.object({ axes: axesSchema }) }),
+        });
+        // Race-veilig: enkel schrijven als een andere instantie er niet al assen op gezet heeft.
+        const updated = await deps.db
+          .update(dynimos)
+          .set({ axisIe: output.axes.ie, axisSn: output.axes.sn, axisTf: output.axes.tf, axisJp: output.axes.jp })
+          .where(and(eq(dynimos.id, row.id), isNull(dynimos.axisIe)))
+          .returning({ id: dynimos.id });
+        return updated.length > 0;
+      },
+    },
+  ];
+
+  async function backfill(): Promise<number> {
+    let updatedRows = 0;
+    for (const row of await list()) {
+      let changed = false;
+      for (const step of backfillSteps) {
+        if (!step.isMissing(row)) continue;
+        try {
+          changed = (await step.fill(row)) || changed;
+        } catch (error) {
+          console.warn(`Backfill faalde voor ${row.name}:`, error instanceof Error ? error.message : error);
+        }
+      }
+      if (changed) updatedRows++;
+    }
+    return updatedRows;
   }
 
   // Het geheugen is aanvullend: faalt het embedden, dan gaat het gesprek door zonder herinneringen.
@@ -304,7 +386,7 @@ export function createBrain(deps: {
 
     const stable: SystemModelMessage = {
       role: "system",
-      content: buildStableSystemPrompt(being),
+      content: buildStableSystemPrompt(awake),
       providerOptions: { anthropic: { cacheControl: { type: "ephemeral" } } },
     };
 
@@ -399,5 +481,5 @@ export function createBrain(deps: {
     return epitaph;
   }
 
-  return { bringToLife, wake, sleep, kill, list, hear };
+  return { bringToLife, wake, sleep, kill, list, backfill, hear };
 }

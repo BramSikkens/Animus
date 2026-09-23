@@ -1,5 +1,6 @@
 import { desc, eq } from "drizzle-orm";
 import { formatAge } from "@animus/brain/age";
+import { AXES, AXIS_LETTERS, mbtiType, rowAxes } from "@animus/brain/personality";
 import { dynimos, epitaphs, memories } from "@animus/db/schema";
 import { db } from "../lib/db";
 import { ActionForm } from "./action-form";
@@ -61,6 +62,7 @@ export default async function DashboardPage() {
           <ul>
             {dynimoRows.map((dynimo, index) => {
               const awake = dynimo.awakeSince !== null;
+              const axes = rowAxes(dynimo);
               const intensityPercent = dynimo.lastIntensity != null ? Math.round(dynimo.lastIntensity * 100) : null;
               return (
                 <li key={dynimo.id}>
@@ -68,6 +70,28 @@ export default async function DashboardPage() {
                   <p>
                     {awake ? "wakker" : "slapend"} · Leeftijd: {formatAge(Date.now() - dynimo.bornAt.getTime())}
                   </p>
+                  {axes ? (
+                    <div className="personality">
+                      <p>
+                        Persoonlijkheid: <strong>{mbtiType(axes)}</strong>
+                      </p>
+                      {AXES.map((axis) => {
+                        const percent = Math.round(axes[axis] * 100);
+                        const [first, second] = AXIS_LETTERS[axis];
+                        return (
+                          <p key={axis} className="axis">
+                            {first}
+                            <span className="bar" role="img" aria-label={`${first}↔${second}: ${percent}% richting ${second}`}>
+                              <span className="bar-fill" style={{ width: `${percent}%` }} />
+                            </span>
+                            {second}
+                          </p>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <p>Persoonlijkheid: nog niet bepaald</p>
+                  )}
                   {awake ? (
                     <ActionForm action={sleep} label="Laten slapen" pendingLabel="Bezig…" />
                   ) : (

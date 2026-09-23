@@ -1,0 +1,268 @@
+{
+  "id": "5e5eebd0-fbba-4b2e-9865-946a5cf0f6f4",
+  "prevId": "ae8c068c-3a5e-4546-8e19-400a5fb022c2",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.dynimos": {
+      "name": "dynimos",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "core_character": {
+          "name": "core_character",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "evolved_character": {
+          "name": "evolved_character",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "birth_story": {
+          "name": "birth_story",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "seed": {
+          "name": "seed",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "born_at": {
+          "name": "born_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "last_emotion": {
+          "name": "last_emotion",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_intensity": {
+          "name": "last_intensity",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "awake_since": {
+          "name": "awake_since",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "axis_ie": {
+          "name": "axis_ie",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "axis_sn": {
+          "name": "axis_sn",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "axis_tf": {
+          "name": "axis_tf",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "axis_jp": {
+          "name": "axis_jp",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "dynimos_single_awake_idx": {
+          "name": "dynimos_single_awake_idx",
+          "columns": [
+            {
+              "expression": "(true)",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"dynimos\".\"awake_since\" is not null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "dynimos_axis_ie_range": {
+          "name": "dynimos_axis_ie_range",
+          "value": "\"dynimos\".\"axis_ie\" between 0 and 1"
+        },
+        "dynimos_axis_sn_range": {
+          "name": "dynimos_axis_sn_range",
+          "value": "\"dynimos\".\"axis_sn\" between 0 and 1"
+        },
+        "dynimos_axis_tf_range": {
+          "name": "dynimos_axis_tf_range",
+          "value": "\"dynimos\".\"axis_tf\" between 0 and 1"
+        },
+        "dynimos_axis_jp_range": {
+          "name": "dynimos_axis_jp_range",
+          "value": "\"dynimos\".\"axis_jp\" between 0 and 1"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.epitaphs": {
+      "name": "epitaphs",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "born_at": {
+          "name": "born_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "farewell_reflection": {
+          "name": "farewell_reflection",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.memories": {
+      "name": "memories",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "dynimo_id": {
+          "name": "dynimo_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "text": {
+          "name": "text",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "embedding": {
+          "name": "embedding",
+          "type": "vector(1536)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "memories_embedding_idx": {
+          "name": "memories_embedding_idx",
+          "columns": [
+            {
+              "expression": "embedding",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last",
+              "opclass": "vector_cosine_ops"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "hnsw",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "memories_dynimo_id_dynimos_id_fk": {
+          "name": "memories_dynimo_id_dynimos_id_fk",
+          "tableFrom": "memories",
+          "tableTo": "dynimos",
+          "columnsFrom": [
+            "dynimo_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {},
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}

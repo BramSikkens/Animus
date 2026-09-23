@@ -43,6 +43,13 @@
       "when": 1790193852195,
       "tag": "0005_dynimos_awake_since",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1790196086370,
+      "tag": "0006_dynimos_axes",
+      "breakpoints": true
     }
   ]
 }

@@ -2,7 +2,7 @@ import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 import { createDb, migrate } from "@animus/db";
 import { createBrain, formatAge } from "./index.js";
-import { loadType2Config } from "./config.js";
+import { loadType2Config, TYPE1_MODEL } from "./config.js";
 
 try {
   process.loadEnvFile(fileURLToPath(new URL("../../../.env", import.meta.url)));
@@ -15,7 +15,7 @@ async function main(): Promise<void> {
   const db = createDb(databaseUrl);
   await migrate(db);
 
-  const brain = createBrain({ db, type2: loadType2Config() });
+  const brain = createBrain({ db, type1: TYPE1_MODEL, type2: loadType2Config() });
   const identity = await brain.boot();
 
   console.log(`Je praat met ${identity.name}.`);
@@ -27,9 +27,10 @@ async function main(): Promise<void> {
   // Eindigt bij EOF (Ctrl+D of gepipete input).
   for await (const line of rl) {
     if (line.trim()) {
-      process.stdout.write(`${identity.name}: `);
       for await (const event of brain.hear(line)) {
-        if (event.type === "text") {
+        if (event.type === "emotion") {
+          process.stdout.write(`(${event.emotion} ${event.intensity.toFixed(2)}) ${identity.name}: `);
+        } else {
           process.stdout.write(event.delta);
         }
       }

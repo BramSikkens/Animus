@@ -1,11 +1,25 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { generateText, streamText, Output, type LanguageModel, type ModelMessage, type SystemModelMessage } from "ai";
+import {
+  experimental_evaluate,
+  generateText,
+  streamText,
+  Output,
+  type Experimental_EvaluationModel,
+  type LanguageModel,
+  type ModelMessage,
+  type SystemModelMessage,
+} from "ai";
 import { z } from "zod";
 import type { Db } from "@animus/db";
 import { identity } from "@animus/db/schema";
+import { EMOTIONS, type Emotion } from "./emotion.js";
 
-export type BrainEvent = { type: "text"; delta: string };
+export { EMOTIONS, type Emotion };
+
+export type BrainEvent =
+  | { type: "emotion"; emotion: Emotion; intensity: number }
+  | { type: "text"; delta: string };
 
 export type Identity = Omit<typeof identity.$inferSelect, "id">;
 
@@ -61,8 +75,47 @@ function toIdentity({ id: _id, ...rest }: typeof identity.$inferSelect): Identit
   return rest;
 }
 
+type Type1Result = { emotion: Emotion; intensity: number; intent: "simpel" | "complex" };
+
+// Eén Type1-call per beurt: emotie + intensiteit + intent-routering, tegelijk over dezelfde uiting.
+async function classify(type1: Experimental_EvaluationModel, text: string): Promise<Type1Result> {
+  const { answers } = await experimental_evaluate({
+    model: type1,
+    state: text,
+    questions: {
+      emotion: {
+        type: "choice",
+        instructions: "Welke emotie past het best bij deze uiting?",
+        criteria: Object.fromEntries(EMOTIONS.map((emotion) => [emotion, null])) as Record<Emotion, null>,
+      },
+      intensity: {
+        type: "score",
+        instructions: "Hoe intens is de emotie in deze uiting?",
+        criteria: ["laag", "hoog"],
+      },
+      intent: {
+        type: "choice",
+        instructions: "Vraagt deze uiting om een simpel of complex antwoord?",
+        criteria: {
+          simpel: "begroeting, kort praatje of eenvoudige vraag",
+          complex: "vraagt uitleg, redenering, planning of een oordeel",
+        },
+      },
+    },
+  });
+
+  const emotion: Emotion = (EMOTIONS as readonly string[]).includes(answers.emotion.choice)
+    ? (answers.emotion.choice as Emotion)
+    : "neutraal";
+  const intensity = Math.min(1, Math.max(0, answers.intensity.score));
+  const intent = answers.intent.choice === "complex" ? "complex" : "simpel";
+
+  return { emotion, intensity, intent };
+}
+
 export function createBrain(deps: {
   db: Db;
+  type1: Experimental_EvaluationModel;
   type2: Type2Models;
   now?: () => Date;
   random?: () => number;
@@ -105,6 +158,18 @@ export function createBrain(deps: {
     if (!bootedIdentity) {
       throw new Error("hear() aangeroepen vóór boot(): er is nog geen identiteit geladen.");
     }
+    // Type1 is een reflex: faalt hij, dan antwoordt Type2 toch, met een neutrale emotie.
+    const { emotion, intensity, intent } = await classify(deps.type1, text).catch((error: unknown): Type1Result => {
+      console.warn("Type1 faalde, val terug op neutraal/simpel:", error instanceof Error ? error.message : error);
+      return { emotion: "neutraal", intensity: 0, intent: "simpel" };
+    });
+
+    // ponytail: singleton-tabel (CHECK id = 1), dus geen where() nodig — drizzle-orm is geen
+    // dependency van dit package, zie packages/brain/package.json.
+    await deps.db.update(identity).set({ lastEmotion: emotion, lastIntensity: intensity });
+
+    yield { type: "emotion", emotion, intensity };
+
     const stable: SystemModelMessage = {
       role: "system",
       content: buildStableSystemPrompt(bootedIdentity),
@@ -117,7 +182,7 @@ export function createBrain(deps: {
 
     const userMessage: ModelMessage = { role: "user", content: text };
     const result = streamText({
-      model: deps.type2.light,
+      model: intent === "complex" ? deps.type2.heavy : deps.type2.light,
       instructions: [stable, agePrompt],
       messages: [...workingMemory, userMessage],
     });

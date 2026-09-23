@@ -8,6 +8,13 @@
       "when": 1790158361271,
       "tag": "0000_closed_songbird",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1790163753715,
+      "tag": "0001_chunky_black_knight",
+      "breakpoints": true
     }
   ]
 }

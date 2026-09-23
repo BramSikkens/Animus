@@ -33,3 +33,7 @@ export function loadType2Config(): Type2Models {
     heavy: resolveModel("TYPE2_HEAVY_MODEL"),
   };
 }
+
+// Vaste waarde, geen env-var: Jev via de AI Gateway verandert niet per omgeving.
+// AI_GATEWAY_API_KEY leest de AI SDK zelf uit de env.
+export const TYPE1_MODEL = "typesafe-ai/jev";

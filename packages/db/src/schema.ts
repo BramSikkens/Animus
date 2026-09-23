@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { check, integer, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import { check, integer, pgTable, real, text, timestamp } from "drizzle-orm/pg-core";
 
 // Exact één rij mogelijk: id is vastgepind op 1 en gecheckt in de DB.
 export const identity = pgTable(
@@ -12,6 +12,8 @@ export const identity = pgTable(
     birthStory: text("birth_story").notNull(),
     seed: text("seed").notNull(),
     bornAt: timestamp("born_at", { withTimezone: true }).notNull(),
+    lastEmotion: text("last_emotion"),
+    lastIntensity: real("last_intensity"),
   },
   (table) => [check("identity_singleton", sql`${table.id} = 1`)],
 );

@@ -19,6 +19,11 @@ export const dynimos = pgTable(
     moodEmotion: text("mood_emotion"),
     moodIntensity: real("mood_intensity"),
     moodAt: timestamp("mood_at", { withTimezone: true }),
+    // Reflectie (#27): tot en met welke Herinnering er gereflecteerd is (NULL = nog nooit), en de Ontwaakstemming
+    // waarmee de Dynimo bij het wekken begint (samen NULL of samen gezet).
+    lastReflectedAt: timestamp("last_reflected_at", { withTimezone: true }),
+    wakeMoodEmotion: text("wake_mood_emotion"),
+    wakeMoodIntensity: real("wake_mood_intensity"),
     // NULL = Slapend; gezet = Wakker (en de marker van deze wake-generatie).
     awakeSince: timestamp("awake_since", { withTimezone: true }),
     // Persoonlijkheid: 0..1 = positie richting de tweede letter (I↔E, S↔N, T↔F, J↔P). NULL = nog te backfillen.
@@ -41,6 +46,15 @@ export const dynimos = pgTable(
     check(
       "dynimos_mood_all_or_none",
       sql`(${table.moodEmotion} is null) = (${table.moodIntensity} is null) and (${table.moodEmotion} is null) = (${table.moodAt} is null)`,
+    ),
+    check(
+      "dynimos_wake_mood_emotion_check",
+      sql`${table.wakeMoodEmotion} in ('blij', 'boos', 'verrast', 'kalm', 'verveeld', 'nieuwsgierig', 'bang', 'neutraal')`,
+    ),
+    check("dynimos_wake_mood_intensity_range", sql`${table.wakeMoodIntensity} between 0 and 1`),
+    check(
+      "dynimos_wake_mood_all_or_none",
+      sql`(${table.wakeMoodEmotion} is null) = (${table.wakeMoodIntensity} is null)`,
     ),
     check("dynimos_axis_ie_range", sql`${table.axisIe} between 0 and 1`),
     check("dynimos_axis_sn_range", sql`${table.axisSn} between 0 and 1`),
@@ -65,8 +79,13 @@ export const memories = pgTable(
     text: text("text").notNull(),
     embedding: vector("embedding", { dimensions: EMBEDDING_DIMENSIONS }).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    // Hoe vormend de uiting was (Type1, 0..1); zware Indruk weegt zwaar in de Reflectie. Default = neutraal.
+    impression: real("impression").notNull().default(0.5),
   },
-  (table) => [index("memories_embedding_idx").using("hnsw", table.embedding.op("vector_cosine_ops"))],
+  (table) => [
+    index("memories_embedding_idx").using("hnsw", table.embedding.op("vector_cosine_ops")),
+    check("memories_impression_range", sql`${table.impression} between 0 and 1`),
+  ],
 );
 
 // Drijfveren van een Dynimo (CONTEXT.md). Rijen worden niet hard verwijderd: Doelen gaan naar bereikt/opgegeven
@@ -84,6 +103,8 @@ export const drives = pgTable(
     strength: real("strength"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+    // Zachte verwijdering: Drijfveren worden nooit hard verwijderd ("nul rijen" = ontbreekt voor de backfill).
+    droppedAt: timestamp("dropped_at", { withTimezone: true }),
   },
   (table) => [
     index("drives_dynimo_id_idx").on(table.dynimoId),

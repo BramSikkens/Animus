@@ -28,7 +28,14 @@ export type DriveRow = {
   status: GoalStatus | null;
   /** Enkel Afkeer en Ergernis, 0..1. */
   strength: number | null;
+  /** Zachte verwijdering (Reflectie): gedropte Drijfveren tellen nergens meer mee. */
+  droppedAt?: Date | null;
 };
+
+/** Actief = niet gedropt, en bij een Doel ook status actief. */
+export function isActiveDrive(row: DriveRow): boolean {
+  return !row.droppedAt && (row.kind !== "doel" || row.status === "actief");
+}
 
 export function strengthWord(strength: number): "mild" | "sterk" {
   return strength >= 0.5 ? "sterk" : "mild";
@@ -39,7 +46,7 @@ export function drivesPromptBlock(rows: readonly DriveRow[]): string {
   const sections: string[] = [];
   for (const kind of DRIVE_KINDS) {
     const active = rows
-      .filter((row) => row.kind === kind && (kind !== "doel" || row.status === "actief"))
+      .filter((row) => row.kind === kind && isActiveDrive(row))
       .sort((a, b) => a.id - b.id);
     if (active.length === 0) continue;
     const lines = active.map((row) => `- ${row.text}${row.strength === null ? "" : ` (${strengthWord(row.strength)})`}`);

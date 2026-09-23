@@ -1,4 +1,4 @@
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, isNull } from "drizzle-orm";
 import { formatAge } from "@animus/brain/age";
 import { moodOfRow } from "@animus/brain/mood";
 import { DRIVE_KINDS, DRIVE_LABELS, type DriveKind } from "@animus/brain/drives";
@@ -20,7 +20,7 @@ async function loadDashboard() {
   const [dynimoRows, epitaphRows, driveRows] = await Promise.all([
     db.select().from(dynimos).orderBy(dynimos.id),
     db.select().from(epitaphs).orderBy(desc(epitaphs.deletedAt)),
-    db.select().from(drives).orderBy(drives.id),
+    db.select().from(drives).where(isNull(drives.droppedAt)).orderBy(drives.id),
   ]);
   // Eén query voor alle Drijfveren; groeperen per Dynimo in code (geen N+1).
   const drivesByDynimo = new Map<number, typeof driveRows>();
@@ -145,9 +145,9 @@ export default async function DashboardPage() {
                     })}
                   </div>
                   {awake ? (
-                    <ActionForm action={sleep} label="Laten slapen" pendingLabel="Bezig…" />
+                    <ActionForm action={sleep} label="Laten slapen" pendingLabel="Reflecteert…" />
                   ) : (
-                    <ActionForm action={wake} label="Wakker maken" pendingLabel="Bezig…" id={dynimo.id} />
+                    <ActionForm action={wake} label="Wakker maken" pendingLabel="Wordt wakker…" id={dynimo.id} />
                   )}
                   <ActionForm action={kill} label="Doden" pendingLabel="Neemt afscheid…" id={dynimo.id} confirmName />
                   <details>
@@ -155,6 +155,12 @@ export default async function DashboardPage() {
                     <dl>
                       <dt>Kern-karakter</dt>
                       <dd>{dynimo.coreCharacter}</dd>
+                      {dynimo.evolvedCharacter && (
+                        <>
+                          <dt>Geëvolueerd karakter</dt>
+                          <dd style={{ whiteSpace: "pre-wrap" }}>{dynimo.evolvedCharacter}</dd>
+                        </>
+                      )}
                       <dt>Geboorteverhaal</dt>
                       <dd style={{ whiteSpace: "pre-wrap" }}>{dynimo.birthStory}</dd>
                       <dt>Seed</dt>

@@ -1,0 +1,456 @@
+{
+  "id": "ceae9558-bb31-4441-bad2-73c7e174eae3",
+  "prevId": "d80a6ae2-8c48-45a6-a808-a103a68a01e1",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.drives": {
+      "name": "drives",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "dynimo_id": {
+          "name": "dynimo_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "text": {
+          "name": "text",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "strength": {
+          "name": "strength",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "dropped_at": {
+          "name": "dropped_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "drives_dynimo_id_idx": {
+          "name": "drives_dynimo_id_idx",
+          "columns": [
+            {
+              "expression": "dynimo_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "drives_dynimo_id_dynimos_id_fk": {
+          "name": "drives_dynimo_id_dynimos_id_fk",
+          "tableFrom": "drives",
+          "tableTo": "dynimos",
+          "columnsFrom": [
+            "dynimo_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "drives_kind_check": {
+          "name": "drives_kind_check",
+          "value": "\"drives\".\"kind\" in ('wens', 'doel', 'toekomstdroom', 'afkeer', 'ergernis')"
+        },
+        "drives_status_check": {
+          "name": "drives_status_check",
+          "value": "\"drives\".\"status\" in ('actief', 'bereikt', 'opgegeven')"
+        },
+        "drives_status_only_goal": {
+          "name": "drives_status_only_goal",
+          "value": "(\"drives\".\"kind\" = 'doel') = (\"drives\".\"status\" is not null)"
+        },
+        "drives_strength_only_aversion": {
+          "name": "drives_strength_only_aversion",
+          "value": "(\"drives\".\"kind\" in ('afkeer', 'ergernis')) = (\"drives\".\"strength\" is not null)"
+        },
+        "drives_strength_range": {
+          "name": "drives_strength_range",
+          "value": "\"drives\".\"strength\" between 0 and 1"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.dynimos": {
+      "name": "dynimos",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "core_character": {
+          "name": "core_character",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "evolved_character": {
+          "name": "evolved_character",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "birth_story": {
+          "name": "birth_story",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "seed": {
+          "name": "seed",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "born_at": {
+          "name": "born_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "base_emotion": {
+          "name": "base_emotion",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "mood_emotion": {
+          "name": "mood_emotion",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "mood_intensity": {
+          "name": "mood_intensity",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "mood_at": {
+          "name": "mood_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_reflected_at": {
+          "name": "last_reflected_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "wake_mood_emotion": {
+          "name": "wake_mood_emotion",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "wake_mood_intensity": {
+          "name": "wake_mood_intensity",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "awake_since": {
+          "name": "awake_since",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "axis_ie": {
+          "name": "axis_ie",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "axis_sn": {
+          "name": "axis_sn",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "axis_tf": {
+          "name": "axis_tf",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "axis_jp": {
+          "name": "axis_jp",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "dynimos_single_awake_idx": {
+          "name": "dynimos_single_awake_idx",
+          "columns": [
+            {
+              "expression": "(true)",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"dynimos\".\"awake_since\" is not null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "dynimos_base_emotion_check": {
+          "name": "dynimos_base_emotion_check",
+          "value": "\"dynimos\".\"base_emotion\" in ('blij', 'boos', 'verrast', 'kalm', 'verveeld', 'nieuwsgierig', 'bang', 'neutraal')"
+        },
+        "dynimos_mood_emotion_check": {
+          "name": "dynimos_mood_emotion_check",
+          "value": "\"dynimos\".\"mood_emotion\" in ('blij', 'boos', 'verrast', 'kalm', 'verveeld', 'nieuwsgierig', 'bang', 'neutraal')"
+        },
+        "dynimos_mood_intensity_range": {
+          "name": "dynimos_mood_intensity_range",
+          "value": "\"dynimos\".\"mood_intensity\" between 0 and 1"
+        },
+        "dynimos_mood_all_or_none": {
+          "name": "dynimos_mood_all_or_none",
+          "value": "(\"dynimos\".\"mood_emotion\" is null) = (\"dynimos\".\"mood_intensity\" is null) and (\"dynimos\".\"mood_emotion\" is null) = (\"dynimos\".\"mood_at\" is null)"
+        },
+        "dynimos_wake_mood_emotion_check": {
+          "name": "dynimos_wake_mood_emotion_check",
+          "value": "\"dynimos\".\"wake_mood_emotion\" in ('blij', 'boos', 'verrast', 'kalm', 'verveeld', 'nieuwsgierig', 'bang', 'neutraal')"
+        },
+        "dynimos_wake_mood_intensity_range": {
+          "name": "dynimos_wake_mood_intensity_range",
+          "value": "\"dynimos\".\"wake_mood_intensity\" between 0 and 1"
+        },
+        "dynimos_wake_mood_all_or_none": {
+          "name": "dynimos_wake_mood_all_or_none",
+          "value": "(\"dynimos\".\"wake_mood_emotion\" is null) = (\"dynimos\".\"wake_mood_intensity\" is null)"
+        },
+        "dynimos_axis_ie_range": {
+          "name": "dynimos_axis_ie_range",
+          "value": "\"dynimos\".\"axis_ie\" between 0 and 1"
+        },
+        "dynimos_axis_sn_range": {
+          "name": "dynimos_axis_sn_range",
+          "value": "\"dynimos\".\"axis_sn\" between 0 and 1"
+        },
+        "dynimos_axis_tf_range": {
+          "name": "dynimos_axis_tf_range",
+          "value": "\"dynimos\".\"axis_tf\" between 0 and 1"
+        },
+        "dynimos_axis_jp_range": {
+          "name": "dynimos_axis_jp_range",
+          "value": "\"dynimos\".\"axis_jp\" between 0 and 1"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.epitaphs": {
+      "name": "epitaphs",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "born_at": {
+          "name": "born_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "farewell_reflection": {
+          "name": "farewell_reflection",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.memories": {
+      "name": "memories",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "dynimo_id": {
+          "name": "dynimo_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "text": {
+          "name": "text",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "embedding": {
+          "name": "embedding",
+          "type": "vector(1536)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "impression": {
+          "name": "impression",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0.5
+        }
+      },
+      "indexes": {
+        "memories_embedding_idx": {
+          "name": "memories_embedding_idx",
+          "columns": [
+            {
+              "expression": "embedding",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last",
+              "opclass": "vector_cosine_ops"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "hnsw",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "memories_dynimo_id_dynimos_id_fk": {
+          "name": "memories_dynimo_id_dynimos_id_fk",
+          "tableFrom": "memories",
+          "tableTo": "dynimos",
+          "columnsFrom": [
+            "dynimo_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "memories_impression_range": {
+          "name": "memories_impression_range",
+          "value": "\"memories\".\"impression\" between 0 and 1"
+        }
+      },
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {},
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}

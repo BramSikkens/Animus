@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DRIVE_KINDS, DRIVE_LABELS, drivesPromptBlock, strengthWord, type DriveRow } from "../src/drives.js";
+import { DRIVE_KINDS, DRIVE_LABELS, drivesPromptBlock, isActiveDrive, strengthWord, type DriveRow } from "../src/drives.js";
 
 const drive = (id: number, kind: DriveRow["kind"], text: string, extra: Partial<DriveRow> = {}): DriveRow => ({
   id,
@@ -27,6 +27,22 @@ describe("drives", () => {
     expect(block).toContain("Nieuw doel");
     expect(block).not.toContain("Oud doel");
     expect(block).not.toContain("Laat los");
+  });
+
+  it("laat gedropte Drijfveren weg uit het blok (zachte verwijdering)", () => {
+    const dropped = new Date("2026-01-01T00:00:00.000Z");
+    const rows = [drive(1, "wens", "Gedropte wens", { droppedAt: dropped }), drive(2, "afkeer", "Gedropte afkeer", { droppedAt: dropped })];
+    expect(drivesPromptBlock(rows)).toBe("");
+    const block = drivesPromptBlock([...rows, drive(3, "wens", "Levende wens")]);
+    expect(block).toContain("Levende wens");
+    expect(block).not.toContain("Gedropte");
+  });
+
+  it("kent een actieve Drijfveer: niet gedropt, en bij een Doel status actief", () => {
+    expect(isActiveDrive(drive(1, "wens", "a"))).toBe(true);
+    expect(isActiveDrive(drive(2, "wens", "a", { droppedAt: new Date() }))).toBe(false);
+    expect(isActiveDrive(drive(3, "doel", "a", { status: "bereikt" }))).toBe(false);
+    expect(isActiveDrive(drive(4, "doel", "a"))).toBe(true);
   });
 
   it("groepeert per soort in vaste volgorde en binnen een soort op id", () => {

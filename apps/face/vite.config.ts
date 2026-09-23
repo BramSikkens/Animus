@@ -16,8 +16,9 @@ process.env.LIVEKIT_API_SECRET ??= "secret";
 
 const ROOM_NAME = "animus";
 
-// ponytail: alleen een dev-middleware, geen productie-backend — in #7 is er nog geen server om
-// tokens uit te geven, en dit endpoint bestaat dan ook enkel tijdens `vite dev`.
+// ponytail: alleen een dev-middleware, zonder authenticatie en met één vaste room — veilig zolang
+// `vite dev` enkel op localhost luistert (default; start dus niet met --host). Fase 1 kent één
+// eigenaar; bij meerdere gebruikers of een productie-build hoort hier een echte, beveiligde backend.
 function tokenEndpoint(): Plugin {
   return {
     name: "animus-token-endpoint",

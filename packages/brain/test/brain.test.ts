@@ -3,8 +3,9 @@ import { MockEmbeddingModelV4, MockLanguageModelV4, Experimental_EvaluationMockM
 import { simulateReadableStream } from "ai";
 import { eq, isNotNull } from "drizzle-orm";
 import { EMBEDDING_DIMENSIONS, dynimos, epitaphs, memories } from "@animus/db/schema";
-import { createBrain, type BrainEvent } from "../src/index.js";
-import { createTestDb, truncateAll } from "./db.js";
+import postgres from "postgres";
+import { createBrain, STATE_CHANNEL, type BrainEvent } from "../src/index.js";
+import { createTestDb, databaseUrl, TEST_DB_NAME, truncateAll } from "./db.js";
 
 const db = createTestDb();
 
@@ -1121,6 +1122,185 @@ describe("createBrain", () => {
       expect(type1.doEvaluateCalls).toHaveLength(0);
       expect(light.doStreamCalls).toHaveLength(0);
       expect(heavy.doGenerateCalls).toHaveLength(0);
+    });
+  });
+
+  describe("toestandsnotificaties", () => {
+    const bornAt = new Date("2026-01-01T12:00:00.000Z");
+    const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+    // Aparte connectie die luistert zoals de agent zal doen; Postgres levert pas na commit.
+    async function listen() {
+      const client = postgres(databaseUrl(TEST_DB_NAME), { onnotice: () => {} });
+      const received: string[] = [];
+      await client.listen(STATE_CHANNEL, (payload) => received.push(payload));
+      const settle = async () => {
+        await pause(150);
+        return received.length;
+      };
+      return { received, settle, close: () => client.end() };
+    }
+
+    function twoDynimosBrain() {
+      const heavy = new MockLanguageModelV4({
+        doGenerate: [
+          generateResult(JSON.stringify({ name: "Nova", coreCharacter: "x", birthStory: "y" })),
+          generateResult(JSON.stringify({ name: "Lumen", coreCharacter: "x", birthStory: "y" })),
+          generateResult("Vaarwel."),
+        ],
+      });
+      return createBrain({
+        db,
+        embedder: embedModel(),
+        type1: type1Model(),
+        type2: { light: unusedModel(), heavy },
+        now: () => bornAt,
+        random: () => 0,
+      });
+    }
+
+    it("meldt bringToLife() op het toestandskanaal", async () => {
+      const brain = twoDynimosBrain();
+      const listener = await listen();
+      try {
+        await brain.bringToLife();
+        expect(await listener.settle()).toBe(1);
+      } finally {
+        await listener.close();
+      }
+    });
+
+    it("meldt wake() van een andere Dynimo, maar niet wake() van een al wakkere", async () => {
+      const brain = twoDynimosBrain();
+      const nova = await brain.bringToLife();
+      await brain.bringToLife();
+      const listener = await listen();
+      try {
+        await brain.wake(nova.id);
+        expect(await listener.settle()).toBe(1);
+        await brain.wake(nova.id);
+        expect(await listener.settle()).toBe(1);
+      } finally {
+        await listener.close();
+      }
+    });
+
+    it("meldt sleep() op het toestandskanaal", async () => {
+      const brain = twoDynimosBrain();
+      await brain.bringToLife();
+      const listener = await listen();
+      try {
+        await brain.sleep();
+        expect(await listener.settle()).toBe(1);
+      } finally {
+        await listener.close();
+      }
+    });
+
+    it("meldt kill() enkel als er echt iets gedood is", async () => {
+      const brain = twoDynimosBrain();
+      const nova = await brain.bringToLife();
+      const listener = await listen();
+      try {
+        expect(await brain.kill(nova.id, "Fout")).toBeNull();
+        expect(await listener.settle()).toBe(0);
+        await brain.kill(nova.id, "Nova");
+        expect(await listener.settle()).toBe(1);
+      } finally {
+        await listener.close();
+      }
+    });
+  });
+
+  describe("onderbroken beurten", () => {
+    const bornAt = new Date("2026-01-01T12:00:00.000Z");
+
+    function setup(light: MockLanguageModelV4) {
+      return createBrain({
+        db,
+        embedder: embedModel(),
+        type1: type1Model(),
+        type2: { light, heavy: genesisModel({ name: "Nova", coreCharacter: "x", birthStory: "y" }) },
+        now: () => bornAt,
+        random: () => 0,
+      });
+    }
+
+    function streamOf(...deltas: string[]) {
+      return {
+        stream: simulateReadableStream({
+          chunks: [
+            { type: "stream-start" as const, warnings: [] },
+            { type: "text-start" as const, id: "1" },
+            ...deltas.map((delta) => ({ type: "text-delta" as const, id: "1", delta })),
+            { type: "text-end" as const, id: "1" },
+            { type: "finish" as const, usage: NULL_USAGE, finishReason: STOP },
+          ],
+        }),
+      };
+    }
+
+    it("breekt de LLM-stream af (abortSignal) als de consument vroegtijdig stopt", async () => {
+      const light = new MockLanguageModelV4({ doStream: [streamOf("Wat een ", "mooie naam.")] });
+      const brain = setup(light);
+      await brain.bringToLife();
+
+      for await (const event of brain.hear("Mijn kat heet Mimi.")) {
+        if (event.type === "text") break;
+      }
+
+      expect(light.doStreamCalls[0]?.abortSignal?.aborted).toBe(true);
+    });
+
+    it("breekt de LLM-stream niet af na een normaal afgeronde beurt", async () => {
+      const light = new MockLanguageModelV4({ doStream: [streamOf("Hoi.")] });
+      const brain = setup(light);
+      await brain.bringToLife();
+
+      await collectText(brain.hear("Hallo!"));
+
+      expect(light.doStreamCalls[0]?.abortSignal).toBeDefined();
+      expect(light.doStreamCalls[0]?.abortSignal?.aborted).toBe(false);
+    });
+
+    it("rondt een beurt netjes af als de Dynimo halverwege door een andere instantie gedood wordt", async () => {
+      const killer = createBrain({
+        db,
+        embedder: embedModel(),
+        type1: type1Model(),
+        type2: {
+          light: unusedModel(),
+          heavy: new MockLanguageModelV4({
+            doGenerate: [
+              generateResult(JSON.stringify({ name: "Nova", coreCharacter: "x", birthStory: "y" })),
+              generateResult("Vaarwel."),
+            ],
+          }),
+        },
+        now: () => bornAt,
+        random: () => 0,
+      });
+      const nova = await killer.bringToLife();
+      const talker = setup(new MockLanguageModelV4({ doStream: [streamOf("Wat een ", "mooie naam.")] }));
+
+      const unhandled: unknown[] = [];
+      const onUnhandled = (reason: unknown) => unhandled.push(reason);
+      process.on("unhandledRejection", onUnhandled);
+      try {
+        const iterator = talker.hear("Mijn kat heet Mimi.")[Symbol.asyncIterator]();
+        for (;;) {
+          const { value, done } = await iterator.next();
+          if (done || value.type === "text") break;
+        }
+        await killer.kill(nova.id, "Nova");
+        await expect(iterator.return?.()).resolves.toBeDefined();
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      } finally {
+        process.off("unhandledRejection", onUnhandled);
+      }
+
+      expect(unhandled).toEqual([]);
+      expect(await db.select().from(memories)).toHaveLength(0);
     });
   });
 });

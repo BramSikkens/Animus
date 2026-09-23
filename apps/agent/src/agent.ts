@@ -1,6 +1,7 @@
 import { ReadableStream } from "node:stream/web";
 import { fileURLToPath } from "node:url";
 import { createBrain, type Brain } from "@animus/brain";
+import { DISPLAY_TOPIC, type DisplayMessage, type DisplayState } from "@animus/brain/display";
 import { EMOTION_TOPIC, type EmotionMessage } from "@animus/brain/emotion";
 import { EMBEDDING_MODEL, loadType2Config, TYPE1_MODEL } from "@animus/brain/config";
 import { createDb, migrate } from "@animus/db";
@@ -21,6 +22,8 @@ import * as deepgram from "@livekit/agents-plugin-deepgram";
 import * as livekit from "@livekit/agents-plugin-livekit";
 import * as openai from "@livekit/agents-plugin-openai";
 import * as silero from "@livekit/agents-plugin-silero";
+import { RoomEvent } from "@livekit/rtc-node";
+import { watchDynimos } from "./dynimo-watch.js";
 import { textStream } from "./text-stream.js";
 
 try {
@@ -142,6 +145,50 @@ export default defineAgent<AgentUserData>({
     });
 
     await session.start({ agent: new AnimusAgent(brain, ctx.room), room: ctx.room });
+
+    // Volgt de wakkere Dynimo (dashboard-acties komen binnen via Postgres NOTIFY): een wissel breekt het
+    // lopende antwoord af (zoals barge-in; de brain-stream sluit via textStream) en zet het gezichtje om.
+    const publishDisplay = (display: DisplayState): void => {
+      const participant = ctx.room.localParticipant;
+      if (!participant) return;
+      const message: DisplayMessage = { state: display };
+      participant
+        .publishData(new TextEncoder().encode(JSON.stringify(message)), { reliable: true, topic: DISPLAY_TOPIC })
+        .catch((error: unknown) => {
+          console.error("Weergavetoestand publiceren faalde:", error instanceof Error ? error.message : error);
+        });
+    };
+    const watcher = await watchDynimos({
+      databaseUrl,
+      brain,
+      onChange: (state) => {
+        // interrupt gooit/weigert als er niets te onderbreken valt; dat is geen fout.
+        try {
+          session.interrupt({ force: true }).await.catch(() => {});
+        } catch {
+          // niets lopend
+        }
+        publishDisplay(state.display);
+      },
+    });
+    ctx.addShutdownCallback(() => watcher.close());
+    publishDisplay(watcher.current().display);
+    // Een later ladend gezichtje kent de toestand nog niet. ParticipantConnected vuurt vóórdat het gezichtje
+    // zijn data-channel-subscriber gemount heeft, dus nog eens na een korte vertraging.
+    // ponytail: een echte oplossing (state-sync via participant attributes of een request-bericht) pas nodig
+    // als dit in de praktijk misgaat.
+    const retryTimers = new Set<NodeJS.Timeout>();
+    ctx.room.on(RoomEvent.ParticipantConnected, () => {
+      publishDisplay(watcher.current().display);
+      const timer = setTimeout(() => {
+        retryTimers.delete(timer);
+        publishDisplay(watcher.current().display);
+      }, 2000);
+      retryTimers.add(timer);
+    });
+    ctx.addShutdownCallback(async () => {
+      for (const timer of retryTimers) clearTimeout(timer);
+    });
   },
 });
 

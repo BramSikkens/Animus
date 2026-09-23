@@ -55,6 +55,9 @@ export type Brain = {
 // Serialiseert alle wissels van Wakker/Slapend tussen instanties en processen.
 const WAKE_LOCK_KEY = 7_142_001;
 
+/** Postgres NOTIFY-kanaal voor toestandswijzigingen (wakker/slapend/gedood); de payload is enkel informatief. */
+export const STATE_CHANNEL = "animus_state";
+
 const genesisSchema = z.object({
   name: z.string().min(1),
   coreCharacter: z.string().min(1),
@@ -171,6 +174,11 @@ export function createBrain(deps: {
     });
   }
 
+  // Postgres levert de melding pas na commit van de omliggende transactie.
+  function notifyStateChange(tx: Tx, id = "") {
+    return tx.execute(sql`select pg_notify(${STATE_CHANNEL}, ${id})`);
+  }
+
   function sleepAll(tx: Tx) {
     return tx.update(dynimos).set({ awakeSince: null }).where(isNotNull(dynimos.awakeSince));
   }
@@ -193,6 +201,7 @@ export function createBrain(deps: {
         .insert(dynimos)
         .values({ ...values, awakeSince: now() })
         .returning();
+      await notifyStateChange(tx, String(inserted!.id));
       return inserted!;
     });
     return adopt(row);
@@ -204,13 +213,17 @@ export function createBrain(deps: {
       if (!found || found.awakeSince) return found ?? null;
       await sleepAll(tx);
       const [woken] = await tx.update(dynimos).set({ awakeSince: now() }).where(eq(dynimos.id, id)).returning();
+      await notifyStateChange(tx, String(id));
       return woken!;
     });
     return row && adopt(row);
   }
 
   async function sleep(): Promise<void> {
-    await withWakeLock(sleepAll);
+    await withWakeLock(async (tx) => {
+      await sleepAll(tx);
+      await notifyStateChange(tx);
+    });
     forgetBeing();
   }
 
@@ -296,7 +309,9 @@ export function createBrain(deps: {
     };
 
     const userMessage: ModelMessage = { role: "user", content: text };
+    const abort = new AbortController();
     const result = streamText({
+      abortSignal: abort.signal,
       model: intent === "complex" ? deps.type2.heavy : deps.type2.light,
       instructions: [stable, ageMessage(being), recallPrompt(recalled)],
       messages: [...workingMemory, userMessage],
@@ -329,6 +344,8 @@ export function createBrain(deps: {
       outcome = "failed";
       throw error;
     } finally {
+      // Onderbroken of mislukt: de generatie mag niet doorlopen (kosten).
+      if (outcome !== "completed") abort.abort();
       // Een mislukte beurt komt nergens in; een onderbroken beurt wel, met wat al gezegd was.
       if (outcome === "completed") {
         workingMemory.push(userMessage, ...(await result.responseMessages));
@@ -370,6 +387,7 @@ export function createBrain(deps: {
       // De FK (ON DELETE CASCADE) ruimt de memories van deze dynimo hierbij meteen zelf op.
       const deleted = await tx.delete(dynimos).where(eq(dynimos.id, id)).returning({ id: dynimos.id });
       if (deleted.length === 0) return null;
+      await notifyStateChange(tx, String(id));
       const [row] = await tx
         .insert(epitaphs)
         .values({ name: being.name, bornAt: being.bornAt, deletedAt: now(), farewellReflection })

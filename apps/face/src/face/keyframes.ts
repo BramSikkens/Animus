@@ -91,3 +91,12 @@ export const KEYFRAMES = {
   },
   neutraal: NEUTRAL,
 } satisfies Record<Emotion, Keyframe>;
+
+/** Weergavetoestand "slapend": ogen (bijna) dicht, vlakke mond, gedempte donkere achtergrond, geen emotie. */
+const EYE_CLOSED: Eye = { open: 0.08, scale: 1, pupilX: 0, pupilY: 0 };
+
+export const SLEEP: Keyframe = {
+  eyes: { left: EYE_CLOSED, right: EYE_CLOSED },
+  mouth: { width: 30, curve: 0, open: 0 },
+  background: "#22222b",
+};

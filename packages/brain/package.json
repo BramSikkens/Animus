@@ -6,7 +6,8 @@
     ".": "./src/index.ts",
     "./age": "./src/age.ts",
     "./config": "./src/config.ts",
-    "./emotion": "./src/emotion.ts"
+    "./emotion": "./src/emotion.ts",
+    "./display": "./src/display.ts"
   },
   "scripts": {
     "test": "vitest run",

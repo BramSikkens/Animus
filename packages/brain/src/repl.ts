@@ -30,9 +30,11 @@ async function main(): Promise<void> {
       for await (const event of brain.hear(line)) {
         if (event.type === "emotion") {
           process.stdout.write(`(${event.emotion} ${event.intensity.toFixed(2)}) ${identity.name}: `);
-        } else {
+        } else if (event.type === "text") {
           process.stdout.write(event.delta);
-        }
+        } else if (event.type === "tool-call") {
+          process.stdout.write(`[tool: ${event.toolName}] `);
+        } // tool-result bewust niet getoond: Type2 verwoordt het resultaat zelf.
       }
       process.stdout.write("\n");
     }

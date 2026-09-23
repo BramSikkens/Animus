@@ -4,6 +4,7 @@ import {
   embed,
   experimental_evaluate,
   generateText,
+  isStepCount,
   streamText,
   Output,
   type EmbeddingModel,
@@ -17,12 +18,15 @@ import { z } from "zod";
 import type { Db } from "@animus/db";
 import { identity, memories } from "@animus/db/schema";
 import { EMOTIONS, type Emotion } from "./emotion.js";
+import { createTools } from "./tools.js";
 
 export { EMOTIONS, type Emotion };
 
 export type BrainEvent =
   | { type: "emotion"; emotion: Emotion; intensity: number }
-  | { type: "text"; delta: string };
+  | { type: "text"; delta: string }
+  | { type: "tool-call"; toolName: string; input: unknown }
+  | { type: "tool-result"; toolName: string; output: unknown };
 
 export type Identity = Omit<typeof identity.$inferSelect, "id">;
 
@@ -139,6 +143,7 @@ export function createBrain(deps: {
   const now = deps.now ?? (() => new Date());
   const random = deps.random ?? Math.random;
   let bootedIdentity: Identity | undefined;
+  const tools = createTools({ now, remember });
   const workingMemory: ModelMessage[] = [];
   // Herinneringen uit deze sessie staan al in het werkgeheugen; niet dubbel ophalen.
   const sessionMemoryIds: number[] = [];
@@ -189,7 +194,7 @@ export function createBrain(deps: {
     }
   }
 
-  async function remember(memoryText: string): Promise<void> {
+  async function remember(memoryText: string): Promise<boolean> {
     try {
       const { embedding } = await embed({ model: deps.embedder, value: memoryText });
       const [row] = await deps.db
@@ -197,8 +202,10 @@ export function createBrain(deps: {
         .values({ text: memoryText, embedding, createdAt: now() })
         .returning({ id: memories.id });
       sessionMemoryIds.push(row!.id);
+      return true;
     } catch (error) {
       console.warn("Herinnering opslaan faalde:", error instanceof Error ? error.message : error);
+      return false;
     }
   }
 
@@ -234,6 +241,9 @@ export function createBrain(deps: {
       model: intent === "complex" ? deps.type2.heavy : deps.type2.light,
       instructions: [stable, agePrompt, recallPrompt(recalled)],
       messages: [...workingMemory, userMessage],
+      tools,
+      // Genoeg stappen om een tool te gebruiken en daarna het resultaat te verwoorden.
+      stopWhen: isStepCount(5),
     });
 
     let full = "";
@@ -244,11 +254,17 @@ export function createBrain(deps: {
         full += part.text;
         yield { type: "text", delta: part.text };
       }
+      if (part.type === "tool-call") yield { type: "tool-call", toolName: part.toolName, input: part.input };
+      if (part.type === "tool-result") yield { type: "tool-result", toolName: part.toolName, output: part.output };
+      if (part.type === "tool-error") {
+        const message = part.error instanceof Error ? part.error.message : String(part.error);
+        yield { type: "tool-result", toolName: part.toolName, output: { error: message } };
+      }
     }
-    // Enkel een geslaagde beurt komt in het werkgeheugen.
-    workingMemory.push(userMessage, { role: "assistant", content: full });
+    // Enkel een geslaagde beurt komt in het werkgeheugen, mét eventuele tool-stappen.
+    workingMemory.push(userMessage, ...(await result.responseMessages));
 
-    await remember(`Gesprekspartner: ${text}\n${bootedIdentity.name}: ${full}`);
+    if (full.trim()) await remember(`Gesprekspartner: ${text}\n${bootedIdentity.name}: ${full}`);
   }
 
   return { boot, hear };

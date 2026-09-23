@@ -1,6 +1,6 @@
 # Animus
 
-Animus is een AI-robotje met een wisselbaar brein, een groeiend geheugen en een zelfgekozen, evoluerend karakter, uitgedrukt via een monochroom gezichtje en spraak.
+Animus is een AI-robotje dat Dynimo's huisvest: wezentjes met elk een wisselbaar brein, een groeiend geheugen en een zelfgekozen, evoluerend karakter, uitgedrukt via een monochroom gezichtje en spraak.
 
 ## Language
 
@@ -25,18 +25,30 @@ De persoon die met Animus praat. In Fase 1 is er één: de eigenaar.
 _Avoid_: gebruiker, user
 
 **Werkgeheugen**:
-De lopende conversatie van de huidige sessie, letterlijk meegegeven aan Type2. Verdwijnt bij herstart.
+De lopende conversatie van de huidige sessie, letterlijk meegegeven aan Type2. Verdwijnt bij herstart en wanneer de Dynimo gaat slapen.
 _Avoid_: context, chatgeschiedenis
 
 **Herinnering**:
-Eén opgeslagen, afgeronde beurt (uiting van de Gesprekspartner + antwoord) met een embedding, of iets dat Animus expliciet moest onthouden. Blijft bewaard over herstarts heen; Type2 krijgt vóór elk antwoord de meest relevante herinneringen uit eerdere sessies mee.
+Eén opgeslagen, afgeronde beurt (uiting van de Gesprekspartner + antwoord) met een embedding en een Indruk, of iets dat Animus expliciet moest onthouden. Blijft bewaard over herstarts heen; Type2 krijgt vóór elk antwoord de meest relevante herinneringen uit eerdere sessies mee.
 _Avoid_: memory (in proza), log
 
+**Indruk**:
+Een score (0–1) die Type1 per uiting geeft voor hoe vormend die is voor de Dynimo (een expliciet verzoek zoals "praat wat minder" = hoog, gewone babbel = laag). Bewaard bij de Herinnering; de Reflectie weegt ermee, binnen haar grens.
+_Avoid_: prioriteit, urgentie, gewicht
+
 **Langetermijngeheugen**:
-Het geheel van alle Herinneringen van één wezen (tabel `memories`). Wordt hard gewist bij verwijderen.
+Het geheel van alle Herinneringen van één Dynimo (tabel `memories`). Wordt hard gewist bij verwijderen.
 _Avoid_: database, archief (dat is het Grafschrift)
 
 ### Identiteit
+
+**Dynimo**:
+Eén wezentje dat in Animus leeft, van genesis tot dood, met een eigen naam, Langetermijngeheugen, persoonlijkheid en Drijfveren. Er kunnen er meerdere bestaan; ze weten niet van elkaars bestaan en delen niets. Meervoud: Dynimo's.
+_Avoid_: wezen, robotje, identiteit, creature
+
+**Wakker / Slapend**:
+De twee toestanden van een levende Dynimo. Hooguit één Dynimo is wakker en praat via het gezichtje; alle anderen slapen. Na een herstart van Animus slapen ze allemaal. Slapen is een toestand binnen een draaiend Animus, geen gestopt proces. Laten slapen triggert een Reflectie en wist het Werkgeheugen; de Herinneringen blijven. Bij het wekken begint de Stemming bij wat de laatste Reflectie klaarzette.
+_Avoid_: aan/uit, actief/inactief
 
 **Seed**:
 Een random startpunt, getrokken uit een curated woordenlijst, dat Type2 tijdens de genesis-flow gebruikt om zelf een naam en karakter te kiezen. Wordt samen met het resultaat in het `identity`-record bewaard.
@@ -54,11 +66,39 @@ _Avoid_: backup, export
 De "laatste woorden" in het grafschrift: een aparte, finale Type2-call vlak vóór verwijdering, niet de meest recente bestaande reflectie/droom.
 _Avoid_: laatste reflectie (dat suggereert hergebruik van een bestaande)
 
+**Kernkarakter**:
+De karakterbeschrijving die Type2 bij genesis kiest, het temperament. Verandert nooit.
+_Avoid_: basiskarakter, persoonlijkheid
+
+**Geëvolueerd karakter**:
+Vrije tekst naast het Kernkarakter, die elke Reflectie in kleine stappen herschrijft op basis van wat de Dynimo meemaakte.
+_Avoid_: groei, nieuw karakter
+
+**Persoonlijkheid**:
+Het MBTI-type van een Dynimo, afgeleid uit vier assen (I↔E, S↔N, T↔F, J↔P) die elk een getal van 0 tot 1 zijn; de letter volgt uit de kant van het midden. De assen verschuiven traag via Reflecties. Spraakzaamheid volgt uit de I↔E-as.
+_Avoid_: karakter (dat is de vrije tekst), Big Five
+
+**Drijfveer**:
+Iets wat een Dynimo wil of niet wil, van één van vijf soorten: Wens, Doel (kan bereikt of opgegeven worden), Toekomstdroom, Afkeer (mild) of Ergernis (sterk). Kleurt welke Emotie een uiting oproept.
+_Avoid_: voorkeur, interesse; een Toekomstdroom is geen Droom (de nachtelijke droomtekst)
+
+**Reflectie**:
+Een Type2-verwerking van recente ervaringen die het geëvolueerde karakter, de persoonlijkheidsassen en de Drijfveren van een Dynimo bijstelt, telkens met een grens op hoeveel er mag verschuiven. Draait wanneer de Dynimo gaat slapen, en bij lange stilte terwijl hij wakker is; dat laatste is zichtbaar aan het gezichtje (reflecterend), maar zegt de Gesprekspartner iets, dan antwoordt de Dynimo gewoon en loopt de Reflectie op de achtergrond verder.
+_Avoid_: samenvatting, evaluatie; niet te verwarren met de Afscheidsreflectie
+
 ### Expressie
 
 **Emotie**:
-Een vaste, eindige categorie uit de set {blij, boos, verrast, kalm, verveeld, nieuwsgierig, bang, neutraal}, met een intensiteit (0–1), die Type1 per uiting aflevert.
-_Avoid_: sentiment, stemming (als los begrip)
+Een vaste, eindige categorie uit de set {blij, boos, verrast, kalm, verveeld, nieuwsgierig, bang, neutraal}, met een intensiteit (0–1), die Type1 per uiting aflevert. Vanaf fase 2 is dat hoe de Dynimo zich bij de uiting voelt (met zijn Drijfveren en persoonlijkheid als context), niet de emotie van de Gesprekspartner. Een Emotie verschuift enkel de Stemming; ze wordt zelf niet getoond.
+_Avoid_: sentiment
+
+**Stemming**:
+De emotionele toestand van een Dynimo die over beurten heen blijft hangen: elke nieuwe Emotie duwt ertegen, en tussendoor dooft ze geleidelijk uit naar de Basisemotie. Het gezichtje en de toon van Type2 volgen de Stemming.
+_Avoid_: humeur, emotie (voor de blijvende toestand)
+
+**Basisemotie**:
+De emotie waar de Stemming van een Dynimo naartoe uitdooft, bij genesis door Type2 gekozen als deel van het temperament en daarna vrijwel onveranderlijk.
+_Avoid_: default-emotie, rustemotie
 
 **Emotiekeyframe**:
 De visuele definitie van één emotie: oogvorm/scale/pupil-offset, mondkromming (bezier), achtergrondkleur en, voor een subset van emoties (verrast, boos, bang), een wenkbrauwstand — de overige emoties gebruiken een neutraal-rechte wenkbrauw. Bij een emotiewissel wordt hiertussen getweend.

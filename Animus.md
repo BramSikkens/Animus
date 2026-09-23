@@ -288,18 +288,18 @@ Twee sporen, te combineren:
 
 ## Open vragen & nog te beslissen punten
 
-Beslist tijdens de `/grill-with-docs`-sessie — zie [CONTEXT.md](CONTEXT.md) en `docs/adr/` voor de vastgelegde redenen:
+Beslist tijdens de `/grill-with-docs`-sessies (fase 1 en fase 2a) — zie [CONTEXT.md](CONTEXT.md) en `docs/adr/` voor de vastgelegde redenen:
 
 - [x] **Leeftijd:** kalendertijd sinds `born_at`. Zie [ADR-0002](docs/adr/0002-leeftijd-kalendertijd.md).
 - [x] **Wenkbrauwen:** toch behouden, maar enkel voor een subset van emoties (verrast, boos, bang) — de rest blijft neutraal-recht. Zie **Emotiekeyframe** in [CONTEXT.md](CONTEXT.md).
 - [x] **Verwijderen — "grafschrift":** bewaren, onleesbaar voor de nieuwe robot. Zie [ADR-0003](docs/adr/0003-verwijderen-bewaart-grafschrift.md).
 - [x] **Local-only fallback:** nu niet bouwen (YAGNI) — de Vercel AI SDK-abstractie maakt dit later goedkoop toevoegbaar. Heropenen zodra er een concrete aanleiding is.
 - [x] **Meerdere gebruikers:** uitgesteld naar fase 3 (optioneel) — per-persoon-geheugen is geen vereiste voor fase 2.
-- [ ] **Persoonlijkheid — tempo:** hoe traag is "traag"? Maximale verschuiving per reflectie, en dus hoeveel weken/maanden van gesprekken per letterwissel.
-- [ ] **Persoonlijkheid — gewicht van verzoeken:** hoe zwaar weegt een expliciet verzoek ("praat wat minder") tegenover gewone ervaringen in de reflectie?
-- [ ] **Stemming — tempo:** hoe snel dooft een emotie uit naar de basis, en hangt dat af van de persoonlijkheid?
-- [ ] **Drijfveren — aantal:** hoeveel per soort bij genesis, en is er een maximum (zodat de prompt beheersbaar blijft)?
-- [ ] **Doelen — actief nastreven:** werkt het wezen zelf aan doelen (bv. via initiatief erover beginnen), of verandert de status enkel bij reflectie?
-- [ ] **Meerdere wezens — wisselen:** wat gebeurt er met een lopend gesprek als je via het dashboard een ander wezen wakker maakt (afbreken, of eerst laten afronden)?
-- [ ] **Meerdere wezens — maximum:** is er een grens op het aantal levende wezens (kost van reflectie en dromen per slapend wezen)?
+- [x] **Persoonlijkheid — tempo:** maximaal 0,02 per as per Reflectie, en enkel reflecteren als er nieuwe Herinneringen zijn — een letterwissel kost minstens ~10 Reflecties (weken).
+- [x] **Persoonlijkheid — gewicht van verzoeken:** Type1 geeft per uiting een **Indruk** (0–1), bewaard bij de Herinnering; de Reflectie weegt ermee, binnen dezelfde cap.
+- [x] **Stemming — tempo:** tijdgebaseerd, halfwaardetijd 10 minuten, voor alle Dynimo's gelijk. Een nieuwe Emotie vervangt de Stemming als ze intenser is dan de uitgedoofde huidige. Basisemotie per Dynimo, gekozen bij genesis.
+- [x] **Drijfveren — aantal:** 1–2 per soort bij genesis, maximaal 5 actieve per soort.
+- [x] **Doelen — actief nastreven:** in 2a verandert de status enkel bij Reflectie; actief nastreven hoort bij initiatief (2b).
+- [x] **Meerdere wezens — wisselen:** het lopende antwoord wordt meteen onderbroken, de huidige Dynimo gaat slapen (met Reflectie), daarna wordt de andere wakker.
+- [x] **Meerdere wezens — maximum:** geen grens.
 - [ ] **Initiatief:** bevestigen dat het van de N- en P-kant afgeleid wordt (voorstel), of een eigen as/knop krijgt.

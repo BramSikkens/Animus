@@ -1,0 +1,3 @@
+# Bestaande Dynimo's worden bij elke wijziging aangevuld, nooit vervangen
+
+Nieuwe eigenschappen (zoals in fase 2 de Persoonlijkheid, Basisemotie en Drijfveren) ontbreken bij Dynimo's die eerder ontstonden. Opnieuw beginnen (doden en een nieuwe genesis) zou geen migratiecode kosten, maar de eigenaar wil tijdens de hele ontwikkeling oude Dynimo's behouden. Daarom mag een schema- of modelwijziging een bestaande Dynimo nooit dwingen tot doden: elke nieuwe eigenschap krijgt een eenmalige backfill, desnoods via een Type2-call die ze afleidt uit het Kernkarakter, het geboorteverhaal en de Herinneringen. Gevolg: elke feature die een Dynimo-eigenschap toevoegt, moet een backfill-stap bevatten.

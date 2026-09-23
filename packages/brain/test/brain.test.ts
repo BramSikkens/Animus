@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { MockEmbeddingModelV4, MockLanguageModelV4, Experimental_EvaluationMockModelV4 } from "ai/test";
 import { simulateReadableStream } from "ai";
-import { eq } from "drizzle-orm";
+import { eq, isNotNull } from "drizzle-orm";
 import { EMBEDDING_DIMENSIONS, dynimos, epitaphs, memories } from "@animus/db/schema";
 import { createBrain, type BrainEvent } from "../src/index.js";
 import { createTestDb, truncateAll } from "./db.js";
@@ -160,7 +160,7 @@ async function collectText(events: AsyncIterable<BrainEvent>): Promise<string> {
 }
 
 describe("createBrain", () => {
-  it("draait genesis bij de eerste boot() op een lege database", async () => {
+  it("draait genesis bij bringToLife() en laat de nieuwe Dynimo meteen wakker zijn", async () => {
     const bornAt = new Date("2026-01-01T00:00:00.000Z");
     const heavy = genesisModel({
       name: "Nova",
@@ -176,53 +176,51 @@ describe("createBrain", () => {
       random: () => 0,
     });
 
-    const result = await brain.boot();
+    const result = await brain.bringToLife();
 
     expect(result.name).toBe("Nova");
     expect(result.coreCharacter).toBe("Nieuwsgierig en zachtaardig.");
     expect(result.birthStory).toBe("Nova ontwaakte uit een ochtendnevel over stil water.");
     expect(result.evolvedCharacter).toBe("");
     expect(result.bornAt).toEqual(bornAt);
-    expect(result.seed).toBe("ochtendnevel over een stil water"); // random 0 → eerste Seed uit seeds.txt
+    expect(result.seed).toBe("ochtendnevel over een stil water"); // random 0 → eerste Seed uit seeds.ts
     expect(JSON.stringify(heavy.doGenerateCalls[0]?.prompt)).toContain(result.seed);
 
     const rows = await db.select().from(dynimos);
     expect(rows).toHaveLength(1);
     expect(rows[0]?.name).toBe("Nova");
     expect(rows[0]?.seed).toBe(result.seed);
+    expect(result.awakeSince).toEqual(bornAt);
+    expect(rows[0]?.awakeSince).toEqual(bornAt);
   });
 
-  it("laadt bij de tweede boot() hetzelfde wezen zonder Type2-call, ook vanuit een nieuwe brain-instantie", async () => {
+  it("praat vanuit een nieuwe brain-instantie met de wakkere Dynimo, zonder genesis", async () => {
     const bornAt = new Date("2026-01-01T00:00:00.000Z");
-    const firstHeavy = genesisModel({
-      name: "Nova",
-      coreCharacter: "Nieuwsgierig en zachtaardig.",
-      birthStory: "Nova ontwaakte uit een ochtendnevel over stil water.",
-    });
     const firstBrain = createBrain({
       db,
       embedder: embedModel(),
       type1: type1Model(),
-      type2: { light: unusedModel(), heavy: firstHeavy },
+      type2: { light: unusedModel(), heavy: genesisModel({ name: "Nova", coreCharacter: "Nieuwsgierig.", birthStory: "y" }) },
       now: () => bornAt,
       random: () => 0,
     });
-    const first = await firstBrain.boot();
+    await firstBrain.bringToLife();
 
-    const secondHeavy = unusedModel();
+    const light = textModel(["Hoi."]);
+    const heavy = unusedModel();
     const secondBrain = createBrain({
       db,
       embedder: embedModel(),
       type1: type1Model(),
-      type2: { light: unusedModel(), heavy: secondHeavy },
+      type2: { light, heavy },
       now: () => bornAt,
       random: () => 0,
     });
-    const second = await secondBrain.boot();
+    await collectText(secondBrain.hear("Hallo!"));
 
-    expect(second).toEqual(first);
-    expect(secondHeavy.doGenerateCalls).toHaveLength(0);
-    expect(secondHeavy.doStreamCalls).toHaveLength(0);
+    expect(contentsByRole(light.doStreamCalls[0]?.prompt, "system").join(" ")).toContain("Nova");
+    expect(heavy.doGenerateCalls).toHaveLength(0);
+    expect(await db.select().from(dynimos)).toHaveLength(1);
   });
 
   it("berekent de Leeftijd als kalendertijd sinds born_at en stuurt die mee naar Type2", async () => {
@@ -236,7 +234,7 @@ describe("createBrain", () => {
       now: () => clock,
       random: () => 0,
     });
-    await brain.boot();
+    await brain.bringToLife();
 
     clock = new Date(bornAt.getTime() + 3 * 24 * 60 * 60 * 1000 + 4 * 60 * 60 * 1000);
     const light = textModel(["Hoi."]);
@@ -248,7 +246,6 @@ describe("createBrain", () => {
       now: () => clock,
       random: () => 0,
     });
-    await brainWithLight.boot();
     await collectText(brainWithLight.hear("Hallo!"));
 
     const contents = contentsByRole(light.doStreamCalls[0]?.prompt, "system").join(" ");
@@ -266,7 +263,7 @@ describe("createBrain", () => {
       now: () => bornAt,
       random: () => 0,
     });
-    await brain.boot();
+    await brain.bringToLife();
 
     const text = await collectText(brain.hear("Hoi Nova!"));
 
@@ -287,7 +284,7 @@ describe("createBrain", () => {
       now: () => bornAt,
       random: () => 0,
     });
-    await brain.boot();
+    await brain.bringToLife();
     await collectText(brain.hear("Ik heet Bram."));
     await collectText(brain.hear("Wat is mijn naam?"));
 
@@ -315,7 +312,7 @@ describe("createBrain", () => {
       now: () => bornAt,
       random: () => 0,
     });
-    await brain.boot();
+    await brain.bringToLife();
     await expect(collectText(brain.hear("Mislukt"))).rejects.toThrow();
     await collectText(brain.hear("Tweede poging"));
 
@@ -334,7 +331,7 @@ describe("createBrain", () => {
       now: () => bornAt,
       random: () => 0,
     });
-    await brain.boot();
+    await brain.bringToLife();
 
     const events: BrainEvent[] = [];
     for await (const event of brain.hear("Hoi!")) events.push(event);
@@ -355,7 +352,7 @@ describe("createBrain", () => {
       now: () => bornAt,
       random: () => 0,
     });
-    await genesisBrain.boot();
+    await genesisBrain.bringToLife();
 
     const heavy = textModel(["Zwaar antwoord."]);
     const brain = createBrain({
@@ -366,7 +363,6 @@ describe("createBrain", () => {
       now: () => bornAt,
       random: () => 0,
     });
-    await brain.boot();
     const text = await collectText(brain.hear("Leg iets ingewikkelds uit."));
 
     expect(text).toBe("Zwaar antwoord.");
@@ -383,7 +379,7 @@ describe("createBrain", () => {
       now: () => bornAt,
       random: () => 0,
     });
-    await genesisBrain.boot();
+    await genesisBrain.bringToLife();
 
     const light = textModel(["Hoi!"]);
     const brain = createBrain({
@@ -394,7 +390,6 @@ describe("createBrain", () => {
       now: () => bornAt,
       random: () => 0,
     });
-    await brain.boot();
     const text = await collectText(brain.hear("Hoi!"));
 
     expect(text).toBe("Hoi!");
@@ -412,7 +407,7 @@ describe("createBrain", () => {
       now: () => bornAt,
       random: () => 0,
     });
-    await brain.boot();
+    await brain.bringToLife();
     await collectText(brain.hear("Vertel eens iets nieuws."));
 
     const rows = await db.select().from(dynimos);
@@ -432,7 +427,7 @@ describe("createBrain", () => {
       now: () => bornAt,
       random: () => 0,
     });
-    await brain.boot();
+    await brain.bringToLife();
     await collectText(brain.hear("Wat een mooie dag!"));
 
     expect(type1.doEvaluateCalls).toHaveLength(1);
@@ -455,7 +450,7 @@ describe("createBrain", () => {
       now: () => bornAt,
       random: () => 0,
     });
-    await brain.boot();
+    await brain.bringToLife();
 
     const events: BrainEvent[] = [];
     for await (const event of brain.hear("Hoi!")) events.push(event);
@@ -474,7 +469,7 @@ describe("createBrain", () => {
       now: () => bornAt,
       random: () => 0,
     });
-    await brain.boot();
+    await brain.bringToLife();
     await collectText(brain.hear("Mijn kat heet Mimi."));
 
     const rows = await db.select().from(memories);
@@ -495,7 +490,7 @@ describe("createBrain", () => {
       now: () => bornAt,
       random: () => 0,
     });
-    await firstSession.boot();
+    await firstSession.bringToLife();
     await collectText(firstSession.hear("Ik hou van pizza."));
     await collectText(firstSession.hear("Mijn kat heet Mimi."));
 
@@ -508,7 +503,6 @@ describe("createBrain", () => {
       now: () => bornAt,
       random: () => 0,
     });
-    await secondSession.boot();
     await collectText(secondSession.hear("Hoe heet mijn kat?"));
 
     const system = contentsByRole(light.doStreamCalls[0]?.prompt, "system").join(" ");
@@ -531,7 +525,7 @@ describe("createBrain", () => {
       now: () => bornAt,
       random: () => 0,
     });
-    await brain.boot();
+    await brain.bringToLife();
 
     expect(await collectText(brain.hear("Hoi!"))).toBe("Hoi.");
   });
@@ -547,7 +541,7 @@ describe("createBrain", () => {
       now: () => bornAt,
       random: () => 0,
     });
-    await brain.boot();
+    await brain.bringToLife();
     await collectText(brain.hear("Mijn kat heet Mimi."));
     await collectText(brain.hear("Hoe heet mijn kat?"));
 
@@ -566,7 +560,7 @@ describe("createBrain", () => {
       now: () => bornAt,
       random: () => 0,
     });
-    await brain.boot();
+    await brain.bringToLife();
 
     const events: BrainEvent[] = [];
     for await (const event of brain.hear("Welke dag is het vandaag?")) events.push(event);
@@ -589,7 +583,7 @@ describe("createBrain", () => {
       now: () => bornAt,
       random: () => 0,
     });
-    await brain.boot();
+    await brain.bringToLife();
     await collectText(brain.hear("Onthoud dat ik mijn koffie zwart drink."));
 
     const rows = await db.select().from(memories);
@@ -611,7 +605,7 @@ describe("createBrain", () => {
       now: () => bornAt,
       random: () => 0,
     });
-    await brain.boot();
+    await brain.bringToLife();
     await collectText(brain.hear("Welke dag is het?"));
     await collectText(brain.hear("En morgen?"));
 
@@ -630,7 +624,7 @@ describe("createBrain", () => {
       now: () => bornAt,
       random: () => 0,
     });
-    await brain.boot();
+    await brain.bringToLife();
 
     const events: BrainEvent[] = [];
     for await (const event of brain.hear("Onthoud dit.")) events.push(event);
@@ -651,13 +645,13 @@ describe("createBrain", () => {
       now: () => bornAt,
       random: () => 0,
     });
-    await brain.boot();
+    await brain.bringToLife();
     await collectText(brain.hear("Welke dag is het?"));
 
     expect(await db.select().from(memories)).toHaveLength(0);
   });
 
-  it("doet niets bij delete() zonder de juiste naam als bevestiging", async () => {
+  it("doet niets bij kill() zonder de juiste naam als bevestiging", async () => {
     const bornAt = new Date("2026-01-01T12:00:00.000Z");
     const heavy = genesisModel({ name: "Nova", coreCharacter: "x", birthStory: "y" });
     const brain = createBrain({
@@ -668,17 +662,18 @@ describe("createBrain", () => {
       now: () => bornAt,
       random: () => 0,
     });
-    await brain.boot();
+    const nova = await brain.bringToLife();
     await collectText(brain.hear("Mijn kat heet Mimi."));
 
-    expect(await brain.delete("Nora")).toBeNull();
+    expect(await brain.kill(nova.id, "Nora")).toBeNull();
+    expect(await brain.kill(nova.id + 999, "Nova")).toBeNull();
 
     expect(await db.select().from(dynimos)).toHaveLength(1);
     expect(await db.select().from(memories)).toHaveLength(1);
     expect(heavy.doGenerateCalls).toHaveLength(1); // enkel de genesis
   });
 
-  it("schrijft bij delete() met de juiste naam een Grafschrift en wist identiteit en herinneringen", async () => {
+  it("schrijft bij kill() met de juiste naam een Grafschrift en wist de Dynimo en zijn herinneringen", async () => {
     const bornAt = new Date("2026-01-01T12:00:00.000Z");
     const deletedAt = new Date("2026-01-11T12:00:00.000Z");
     let clock = bornAt;
@@ -691,11 +686,11 @@ describe("createBrain", () => {
       now: () => clock,
       random: () => 0,
     });
-    await brain.boot();
+    const nova = await brain.bringToLife();
     await collectText(brain.hear("Mijn kat heet Mimi."));
     clock = deletedAt;
 
-    const returned = await brain.delete("Nova");
+    const returned = await brain.kill(nova.id, "Nova");
 
     const [epitaph, ...rest] = await db.select().from(epitaphs);
     expect(rest).toHaveLength(0);
@@ -707,7 +702,7 @@ describe("createBrain", () => {
     expect(await db.select().from(memories)).toHaveLength(0);
   });
 
-  it("wist bij delete() enkel de herinneringen van het verwijderde wezen, niet die van andere Dynimo's", async () => {
+  it("wist bij kill() enkel de Dynimo en herinneringen van het gedoode wezen, niet die van andere Dynimo's", async () => {
     const bornAt = new Date("2026-01-01T12:00:00.000Z");
     const heavy = lifecycleModel("Nova", "Dank je voor elk gesprek.");
     const brain = createBrain({
@@ -718,7 +713,7 @@ describe("createBrain", () => {
       now: () => bornAt,
       random: () => 0,
     });
-    await brain.boot();
+    const nova = await brain.bringToLife();
     await collectText(brain.hear("Mijn kat heet Mimi."));
 
     const [other] = await db
@@ -729,14 +724,15 @@ describe("createBrain", () => {
       .insert(memories)
       .values({ dynimoId: other!.id, text: "Herinnering van Vero.", embedding: fakeVector(""), createdAt: bornAt });
 
-    await brain.delete("Nova");
+    await brain.kill(nova.id, "Nova");
 
+    expect((await db.select().from(dynimos)).map((row) => row.name)).toEqual(["Vero"]);
     const otherMemories = await db.select().from(memories).where(eq(memories.dynimoId, other!.id));
     expect(otherMemories).toHaveLength(1);
     expect(otherMemories[0]?.text).toBe("Herinnering van Vero.");
   });
 
-  it("laat na delete() een volledig nieuw wezen geboren worden dat niets van het Grafschrift ziet", async () => {
+  it("laat na kill() van de wakkere Dynimo niemand wakker, en een nieuwe Dynimo ziet niets van het Grafschrift", async () => {
     const bornAt = new Date("2026-01-01T12:00:00.000Z");
     const heavy = new MockLanguageModelV4({
       doGenerate: [
@@ -746,19 +742,24 @@ describe("createBrain", () => {
       ],
     });
     const light = new MockLanguageModelV4({ doStream: [textStream("Hoi."), textStream("Hallo, ik ben Lumen.")] });
+    const type1 = type1Model();
     const brain = createBrain({
       db,
       embedder: embedModel(),
-      type1: type1Model(),
+      type1,
       type2: { light, heavy },
       now: () => bornAt,
       random: () => 0,
     });
-    await brain.boot();
+    const nova = await brain.bringToLife();
     await collectText(brain.hear("Mijn kat heet Mimi."));
-    await brain.delete("Nova");
+    await brain.kill(nova.id, "Nova");
 
-    const reborn = await brain.boot();
+    expect(await db.select().from(dynimos).where(isNotNull(dynimos.awakeSince))).toHaveLength(0);
+    expect(await collectText(brain.hear("Ben je er nog?"))).toBe("");
+    expect(type1.doEvaluateCalls).toHaveLength(1); // enkel de eerste beurt
+
+    const reborn = await brain.bringToLife();
     await collectText(brain.hear("Wie ben jij?"));
 
     expect(reborn.name).toBe("Lumen");
@@ -769,7 +770,7 @@ describe("createBrain", () => {
     expect(inputsAfterDeletion).not.toContain("Mimi");
   });
 
-  it("maakt maar één Grafschrift als twee instanties hetzelfde wezen verwijderen", async () => {
+  it("maakt maar één Grafschrift als twee instanties hetzelfde wezen gelijktijdig doden", async () => {
     const bornAt = new Date("2026-01-01T12:00:00.000Z");
     const first = createBrain({
       db,
@@ -779,7 +780,7 @@ describe("createBrain", () => {
       now: () => bornAt,
       random: () => 0,
     });
-    await first.boot();
+    const nova = await first.bringToLife();
     const second = createBrain({
       db,
       embedder: embedModel(),
@@ -788,14 +789,39 @@ describe("createBrain", () => {
       now: () => bornAt,
       random: () => 0,
     });
-    await second.boot();
 
-    expect(await first.delete("Nova")).not.toBeNull();
-    expect(await second.delete("Nova")).toBeNull();
+    const results = await Promise.all([first.kill(nova.id, "Nova"), second.kill(nova.id, "Nova")]);
+
+    expect(results.filter((epitaph) => epitaph !== null)).toHaveLength(1);
     expect(await db.select().from(epitaphs)).toHaveLength(1);
   });
 
-  it("weigert hear() in een instantie waarvan het wezen intussen verwijderd is", async () => {
+  it("kan een slapende Dynimo doden vanuit een andere instantie", async () => {
+    const bornAt = new Date("2026-01-01T12:00:00.000Z");
+    const maker = createBrain({
+      db,
+      embedder: embedModel(),
+      type1: type1Model(),
+      type2: { light: unusedModel(), heavy: genesisModel({ name: "Nova", coreCharacter: "x", birthStory: "y" }) },
+      now: () => bornAt,
+      random: () => 0,
+    });
+    const nova = await maker.bringToLife();
+    await maker.sleep();
+    const killer = createBrain({
+      db,
+      embedder: embedModel(),
+      type1: type1Model(),
+      type2: { light: unusedModel(), heavy: new MockLanguageModelV4({ doGenerate: [generateResult("Vaarwel.")] }) },
+      now: () => bornAt,
+      random: () => 0,
+    });
+
+    expect(await killer.kill(nova.id, "Nova")).toMatchObject({ name: "Nova", farewellReflection: "Vaarwel." });
+    expect(await db.select().from(dynimos)).toHaveLength(0);
+  });
+
+  it("levert geen events en gooit niet als de wakkere Dynimo door een andere instantie gedood is", async () => {
     const bornAt = new Date("2026-01-01T12:00:00.000Z");
     const deleter = createBrain({
       db,
@@ -805,7 +831,7 @@ describe("createBrain", () => {
       now: () => bornAt,
       random: () => 0,
     });
-    await deleter.boot();
+    const nova = await deleter.bringToLife();
     const stale = createBrain({
       db,
       embedder: embedModel(),
@@ -814,44 +840,47 @@ describe("createBrain", () => {
       now: () => bornAt,
       random: () => 0,
     });
-    await stale.boot();
-    await deleter.delete("Nova");
+    await collectText(stale.hear("Hallo.")); // stale kent Nova nu
+    await deleter.kill(nova.id, "Nova");
 
-    await expect(collectText(stale.hear("Mijn kat heet Mimi."))).rejects.toThrow(/verwijderd/);
+    const events: BrainEvent[] = [];
+    for await (const event of stale.hear("Mijn kat heet Mimi.")) events.push(event);
+
+    expect(events).toEqual([]);
     expect(await db.select().from(memories)).toHaveLength(0);
   });
 
-  it("vergeet in een verouderde instantie ook het werkgeheugen, zodat een nieuw wezen er niets van ziet", async () => {
+  it("vergeet in een verouderde instantie ook het werkgeheugen, zodat een nieuwe Dynimo er niets van ziet", async () => {
     const bornAt = new Date("2026-01-01T12:00:00.000Z");
+    const heavy = new MockLanguageModelV4({
+      doGenerate: [
+        generateResult(JSON.stringify({ name: "Nova", coreCharacter: "x", birthStory: "y" })),
+        generateResult("Vaarwel."),
+        generateResult(JSON.stringify({ name: "Lumen", coreCharacter: "Rustig.", birthStory: "Maanlicht." })),
+      ],
+    });
     const deleter = createBrain({
       db,
       embedder: embedModel(),
       type1: type1Model(),
-      type2: { light: unusedModel(), heavy: lifecycleModel("Nova", "Vaarwel.") },
+      type2: { light: unusedModel(), heavy },
       now: () => bornAt,
       random: () => 0,
     });
-    await deleter.boot();
+    const nova = await deleter.bringToLife();
     const light = new MockLanguageModelV4({ doStream: [textStream("Leuke kat."), textStream("Hoi, ik ben Lumen.")] });
     const stale = createBrain({
       db,
       embedder: embedModel(),
       type1: type1Model(),
-      type2: {
-        light,
-        heavy: new MockLanguageModelV4({
-          doGenerate: [generateResult(JSON.stringify({ name: "Lumen", coreCharacter: "Rustig.", birthStory: "Maanlicht." }))],
-        }),
-      },
+      type2: { light, heavy: unusedModel() },
       now: () => bornAt,
       random: () => 0,
     });
-    await stale.boot();
     await collectText(stale.hear("Mijn kat heet Mimi."));
-    await deleter.delete("Nova");
-    await expect(collectText(stale.hear("Ben je er nog?"))).rejects.toThrow(/verwijderd/);
+    await deleter.kill(nova.id, "Nova");
+    await deleter.bringToLife();
 
-    await stale.boot();
     await collectText(stale.hear("Wie ben jij?"));
 
     expect(JSON.stringify(light.doStreamCalls[1]?.prompt)).not.toContain("Mimi");
@@ -884,7 +913,7 @@ describe("createBrain", () => {
       now: () => bornAt,
       random: () => 0,
     });
-    await brain.boot();
+    await brain.bringToLife();
 
     // De gesprekspartner valt Animus in de rede na het eerste stukje tekst.
     for await (const event of brain.hear("Mijn kat heet Mimi.")) {
@@ -898,5 +927,200 @@ describe("createBrain", () => {
     const rows = await db.select().from(memories);
     expect(rows.some((row) => row.text.includes("Mijn kat heet Mimi."))).toBe(true);
   });
-});
 
+  describe("Wakker en Slapend", () => {
+    const bornAt = new Date("2026-01-01T12:00:00.000Z");
+
+    function genesisTwice(first: string, second: string) {
+      return new MockLanguageModelV4({
+        doGenerate: [
+          generateResult(JSON.stringify({ name: first, coreCharacter: "x", birthStory: "y" })),
+          generateResult(JSON.stringify({ name: second, coreCharacter: "x", birthStory: "y" })),
+        ],
+      });
+    }
+
+    function brainWith(type2: { light: MockLanguageModelV4; heavy: MockLanguageModelV4 }, options: { now?: () => Date } = {}) {
+      const type1 = type1Model();
+      const brain = createBrain({
+        db,
+        embedder: embedModel(),
+        type1,
+        type2,
+        now: options.now ?? (() => bornAt),
+        random: () => 0,
+      });
+      return { brain, type1 };
+    }
+
+    async function awakeNames(): Promise<string[]> {
+      const rows = await db.select().from(dynimos).where(isNotNull(dynimos.awakeSince));
+      return rows.map((row) => row.name);
+    }
+
+    it("laat bringToLife() een eerder wakkere Dynimo slapen leggen", async () => {
+      const { brain } = brainWith({ light: unusedModel(), heavy: genesisTwice("Nova", "Lumen") });
+
+      await brain.bringToLife();
+      await brain.bringToLife();
+
+      expect(await awakeNames()).toEqual(["Lumen"]);
+      expect(await db.select().from(dynimos)).toHaveLength(2);
+    });
+
+    it("laat wake(B) Dynimo A slapen leggen en geeft een onbekende id null", async () => {
+      const { brain } = brainWith({ light: unusedModel(), heavy: genesisTwice("Nova", "Lumen") });
+      const nova = await brain.bringToLife();
+      const lumen = await brain.bringToLife();
+
+      const woken = await brain.wake(nova.id);
+
+      expect(woken?.name).toBe("Nova");
+      expect(woken?.awakeSince).toEqual(bornAt);
+      expect(await awakeNames()).toEqual(["Nova"]);
+      expect(await brain.wake(lumen.id + 999)).toBeNull();
+      expect(await awakeNames()).toEqual(["Nova"]);
+    });
+
+    it("ververst awake_since niet als wake() een al wakkere Dynimo wekt", async () => {
+      let clock = bornAt;
+      const { brain } = brainWith({ light: unusedModel(), heavy: genesisTwice("Nova", "Lumen") }, { now: () => clock });
+      const nova = await brain.bringToLife();
+      clock = new Date(bornAt.getTime() + 60_000);
+
+      const woken = await brain.wake(nova.id);
+
+      expect(woken?.awakeSince).toEqual(bornAt);
+      expect((await db.select().from(dynimos))[0]?.awakeSince).toEqual(bornAt);
+    });
+
+    it("houdt hooguit één Dynimo wakker bij gelijktijdig wake() en gelijktijdig bringToLife()", async () => {
+      const { brain } = brainWith({ light: unusedModel(), heavy: genesisTwice("Nova", "Lumen") });
+      const nova = await brain.bringToLife();
+      const lumen = await brain.bringToLife();
+
+      await Promise.all([brain.wake(nova.id), brain.wake(lumen.id)]);
+      expect(await awakeNames()).toHaveLength(1);
+
+      const two = brainWith({ light: unusedModel(), heavy: genesisTwice("Vero", "Mira") });
+      await Promise.all([two.brain.bringToLife(), two.brain.bringToLife()]);
+      expect(await awakeNames()).toHaveLength(1);
+      expect(await db.select().from(dynimos)).toHaveLength(4);
+    });
+
+    it("levert na sleep() niemand wakker: hear() geeft niets en roept geen enkel model aan", async () => {
+      const light = unusedModel();
+      const heavy = genesisModel({ name: "Nova", coreCharacter: "x", birthStory: "y" });
+      const { brain, type1 } = brainWith({ light, heavy });
+      await brain.bringToLife();
+
+      await brain.sleep();
+      await brain.sleep(); // idempotent
+
+      const events: BrainEvent[] = [];
+      for await (const event of brain.hear("Hallo?")) events.push(event);
+      expect(events).toEqual([]);
+      expect(await awakeNames()).toEqual([]);
+      expect(type1.doEvaluateCalls).toHaveLength(0);
+      expect(light.doStreamCalls).toHaveLength(0);
+      expect(heavy.doGenerateCalls).toHaveLength(1); // enkel de genesis
+    });
+
+    it("heeft na sleep() en wake() een leeg Werkgeheugen, maar recall vindt de Herinneringen nog", async () => {
+      const light = new MockLanguageModelV4({ doStream: [textStream("Leuk."), textStream("Mimi.")] });
+      const { brain } = brainWith({ light, heavy: genesisModel({ name: "Nova", coreCharacter: "x", birthStory: "y" }) });
+      const nova = await brain.bringToLife();
+      await collectText(brain.hear("Mijn kat heet Mimi."));
+
+      await brain.sleep();
+      await brain.wake(nova.id);
+      await collectText(brain.hear("Hoe heet mijn kat?"));
+
+      const prompt = light.doStreamCalls[1]?.prompt;
+      expect(contentsByRole(prompt, "user").join(" ")).not.toContain("Mijn kat heet Mimi.");
+      expect(contentsByRole(prompt, "system").join(" ")).toContain("Mijn kat heet Mimi.");
+    });
+
+    it("leegt het Werkgeheugen van een pratende instantie als een andere instantie dezelfde Dynimo laat slapen en wekken", async () => {
+      let clock = bornAt;
+      const manager = brainWith({ light: unusedModel(), heavy: genesisModel({ name: "Nova", coreCharacter: "x", birthStory: "y" }) }, { now: () => clock });
+      const nova = await manager.brain.bringToLife();
+      const light = new MockLanguageModelV4({ doStream: [textStream("Leuk."), textStream("Mimi.")] });
+      const talker = brainWith({ light, heavy: unusedModel() }, { now: () => clock });
+      await collectText(talker.brain.hear("Mijn kat heet Mimi."));
+
+      clock = new Date(bornAt.getTime() + 60_000);
+      await manager.brain.sleep();
+      await manager.brain.wake(nova.id);
+      await collectText(talker.brain.hear("Hoe heet mijn kat?"));
+
+      const prompt = light.doStreamCalls[1]?.prompt;
+      expect(contentsByRole(prompt, "user").join(" ")).not.toContain("Mijn kat heet Mimi.");
+      expect(contentsByRole(prompt, "system").join(" ")).toContain("Mijn kat heet Mimi."); // recall vindt hem wel
+    });
+
+    it("laat Dynimo's elkaars Herinneringen niet zien", async () => {
+      const light = new MockLanguageModelV4({
+        doStream: [textStream("Leuk."), textStream("Lekker."), textStream("Mimi."), textStream("Pizza.")],
+      });
+      const { brain } = brainWith({ light, heavy: genesisTwice("Nova", "Lumen") });
+      const nova = await brain.bringToLife();
+      await collectText(brain.hear("Mijn kat heet Mimi."));
+      const lumen = await brain.bringToLife();
+      await collectText(brain.hear("Ik hou van pizza."));
+
+      await brain.wake(nova.id);
+      await collectText(brain.hear("Wat weet je nog?"));
+      const novaSystem = contentsByRole(light.doStreamCalls[2]?.prompt, "system").join(" ");
+      expect(novaSystem).toContain("Mijn kat heet Mimi.");
+      expect(novaSystem).not.toContain("pizza");
+
+      await brain.wake(lumen.id);
+      await collectText(brain.hear("Wat weet je nog?"));
+      const lumenSystem = contentsByRole(light.doStreamCalls[3]?.prompt, "system").join(" ");
+      expect(lumenSystem).toContain("Ik hou van pizza.");
+      expect(lumenSystem).not.toContain("Mimi");
+    });
+
+    it("weigert in Postgres zelf een tweede wakkere rij, maar staat een wakkere plus slapende rij toe", async () => {
+      const row = { coreCharacter: "x", birthStory: "y", seed: "z", bornAt: new Date("2026-01-01T12:00:00.000Z") };
+      await db.insert(dynimos).values({ ...row, name: "Nova", awakeSince: row.bornAt });
+      await db.insert(dynimos).values({ ...row, name: "Slaper" });
+
+      await expect(db.insert(dynimos).values({ ...row, name: "Lumen", awakeSince: row.bornAt })).rejects.toThrow();
+      expect(await db.select().from(dynimos)).toHaveLength(2);
+      await expect(
+        db.insert(dynimos).values({ ...row, name: "Lumen", awakeSince: row.bornAt }),
+      ).rejects.toMatchObject({ cause: { constraint_name: "dynimos_single_awake_idx" } });
+    });
+
+    it("geeft met list() alle levende Dynimo's, gesorteerd op id", async () => {
+      const { brain } = brainWith({ light: unusedModel(), heavy: genesisTwice("Nova", "Lumen") });
+      expect(await brain.list()).toEqual([]);
+      const nova = await brain.bringToLife();
+      const lumen = await brain.bringToLife();
+
+      const rows = await brain.list();
+
+      expect(rows.map((row) => row.id)).toEqual([nova.id, lumen.id]);
+      expect(rows.map((row) => row.name)).toEqual(["Nova", "Lumen"]);
+      expect(rows[1]?.awakeSince).toEqual(bornAt);
+      expect(rows[0]?.awakeSince).toBeNull();
+    });
+
+    it("maakt bij hear() op een lege database geen Dynimo aan en roept geen model aan", async () => {
+      const light = unusedModel();
+      const heavy = unusedModel();
+      const { brain, type1 } = brainWith({ light, heavy });
+
+      const events: BrainEvent[] = [];
+      for await (const event of brain.hear("Hallo?")) events.push(event);
+
+      expect(events).toEqual([]);
+      expect(await db.select().from(dynimos)).toHaveLength(0);
+      expect(type1.doEvaluateCalls).toHaveLength(0);
+      expect(light.doStreamCalls).toHaveLength(0);
+      expect(heavy.doGenerateCalls).toHaveLength(0);
+    });
+  });
+});

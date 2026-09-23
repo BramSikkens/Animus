@@ -118,8 +118,6 @@ export default defineAgent<AgentUserData>({
 
     // In-process (spec: geen aparte brein-API); elke job krijgt zijn eigen brein-instantie.
     const brain = createBrain({ db, type1: TYPE1_MODEL, type2: loadType2Config(), embedder: EMBEDDING_MODEL });
-    const identity = await brain.boot();
-    console.log(`Animus-agent: brein gebooted, wezen "${identity.name}"`);
 
     ctx.addShutdownCallback(async () => {
       await db.$client.end();

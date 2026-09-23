@@ -119,3 +119,6 @@ li h3 {
     padding: 1rem 0.75rem 2rem;
   }
 }
+
+.action { display: inline-flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-right: 0.75rem; }
+.error { color: #b3261e; margin: 0; }

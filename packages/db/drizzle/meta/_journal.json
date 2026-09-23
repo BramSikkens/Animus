@@ -36,6 +36,13 @@
       "when": 1790192011938,
       "tag": "0004_dynimos_multi_row",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1790193852195,
+      "tag": "0005_dynimos_awake_since",
+      "breakpoints": true
     }
   ]
 }

@@ -13,6 +13,11 @@ services:
       POSTGRES_DB: animus
     volumes:
       - animus_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U animus -d animus"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
 
   livekit:
     image: livekit/livekit-server:v1.13.7

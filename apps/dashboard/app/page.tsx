@@ -1,7 +1,9 @@
-import { desc } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { formatAge } from "@animus/brain/age";
 import { dynimos, epitaphs, memories } from "@animus/db/schema";
 import { db } from "../lib/db";
+import { ActionForm } from "./action-form";
+import { bringToLife, kill, sleep, wake } from "./actions";
 import { formatDate, formatDateTime } from "../lib/format";
 
 export const dynamic = "force-dynamic";
@@ -12,16 +14,21 @@ const RECENT_MEMORIES_LIMIT = 20;
 const UNDEFINED_TABLE = "42P01";
 
 async function loadDashboard() {
-  const [beingRows, recentMemories, epitaphRows] = await Promise.all([
-    db.select().from(dynimos).orderBy(dynimos.id).limit(1),
-    db
-      .select({ id: memories.id, text: memories.text, createdAt: memories.createdAt })
-      .from(memories)
-      .orderBy(desc(memories.createdAt))
-      .limit(RECENT_MEMORIES_LIMIT),
+  const [dynimoRows, epitaphRows] = await Promise.all([
+    db.select().from(dynimos).orderBy(dynimos.id),
     db.select().from(epitaphs).orderBy(desc(epitaphs.deletedAt)),
   ]);
-  return { being: beingRows[0] ?? null, recentMemories, epitaphRows };
+  const recentMemories = await Promise.all(
+    dynimoRows.map((dynimo) =>
+      db
+        .select({ id: memories.id, text: memories.text, createdAt: memories.createdAt })
+        .from(memories)
+        .where(eq(memories.dynimoId, dynimo.id))
+        .orderBy(desc(memories.createdAt))
+        .limit(RECENT_MEMORIES_LIMIT),
+    ),
+  );
+  return { dynimoRows, recentMemories, epitaphRows };
 }
 
 export default async function DashboardPage() {
@@ -41,69 +48,80 @@ export default async function DashboardPage() {
       </main>
     );
   }
-  const { being, recentMemories, epitaphRows } = data;
-  const intensityPercent = being?.lastIntensity != null ? Math.round(being.lastIntensity * 100) : null;
+  const { dynimoRows, recentMemories, epitaphRows } = data;
 
   return (
     <main>
       <h1>Animus — dashboard</h1>
 
-      {being ? (
-        <>
-          <section>
-            <h2>Identiteit</h2>
-            <dl>
-              <dt>Naam</dt>
-              <dd>{being.name}</dd>
-              <dt>Kern-karakter</dt>
-              <dd>{being.coreCharacter}</dd>
-              <dt>Geboorteverhaal</dt>
-              <dd style={{ whiteSpace: "pre-wrap" }}>{being.birthStory}</dd>
-              <dt>Seed</dt>
-              <dd>{being.seed}</dd>
-              <dt>Geboortedatum</dt>
-              <dd>{formatDate(being.bornAt)}</dd>
-              <dt>Leeftijd</dt>
-              <dd>{formatAge(Date.now() - being.bornAt.getTime())}</dd>
-            </dl>
-          </section>
-
-          <section>
-            <h2>Emotie</h2>
-            {being.lastEmotion && intensityPercent != null ? (
-              <p>
-                {being.lastEmotion}
-                <span className="bar" aria-hidden="true">
-                  <span className="bar-fill" style={{ width: `${intensityPercent}%` }} />
-                </span>
-                {intensityPercent}%
-              </p>
-            ) : (
-              <p>nog geen</p>
-            )}
-          </section>
-
-          <section>
-            <h2>Recente herinneringen</h2>
-            {recentMemories.length ? (
-              <ul>
-                {recentMemories.map((memory) => (
-                  <li key={memory.id}>
-                    <time dateTime={memory.createdAt.toISOString()}>{formatDateTime(memory.createdAt)}</time>
-                    <p style={{ whiteSpace: "pre-wrap" }}>{memory.text}</p>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p>nog geen</p>
-            )}
-          </section>
-        </>
-      ) : (
-        <p>
-          Er is nog geen wezen. Start <code>pnpm repl</code> om er een te laten geboren worden.
-        </p>
-      )}
+      <section>
+        <h2>Dynimo&apos;s</h2>
+        <ActionForm action={bringToLife} label="Tot leven wekken" pendingLabel="Wordt geboren…" />
+        {dynimoRows.length ? (
+          <ul>
+            {dynimoRows.map((dynimo, index) => {
+              const awake = dynimo.awakeSince !== null;
+              const intensityPercent = dynimo.lastIntensity != null ? Math.round(dynimo.lastIntensity * 100) : null;
+              return (
+                <li key={dynimo.id}>
+                  <h3>{dynimo.name}</h3>
+                  <p>
+                    {awake ? "wakker" : "slapend"} · Leeftijd: {formatAge(Date.now() - dynimo.bornAt.getTime())}
+                  </p>
+                  {awake ? (
+                    <ActionForm action={sleep} label="Laten slapen" pendingLabel="Bezig…" />
+                  ) : (
+                    <ActionForm action={wake} label="Wakker maken" pendingLabel="Bezig…" id={dynimo.id} />
+                  )}
+                  <ActionForm action={kill} label="Doden" pendingLabel="Neemt afscheid…" id={dynimo.id} confirmName />
+                  <details>
+                    <summary>Details en herinneringen</summary>
+                    <dl>
+                      <dt>Kern-karakter</dt>
+                      <dd>{dynimo.coreCharacter}</dd>
+                      <dt>Geboorteverhaal</dt>
+                      <dd style={{ whiteSpace: "pre-wrap" }}>{dynimo.birthStory}</dd>
+                      <dt>Seed</dt>
+                      <dd>{dynimo.seed}</dd>
+                      <dt>Geboortedatum</dt>
+                      <dd>{formatDate(dynimo.bornAt)}</dd>
+                      <dt>Laatste emotie</dt>
+                      <dd>
+                        {dynimo.lastEmotion && intensityPercent != null ? (
+                          <>
+                            {dynimo.lastEmotion}
+                            <span className="bar" aria-hidden="true">
+                              <span className="bar-fill" style={{ width: `${intensityPercent}%` }} />
+                            </span>
+                            {intensityPercent}%
+                          </>
+                        ) : (
+                          "nog geen"
+                        )}
+                      </dd>
+                    </dl>
+                    <h4>Recente herinneringen</h4>
+                    {recentMemories[index]!.length ? (
+                      <ul>
+                        {recentMemories[index]!.map((memory) => (
+                          <li key={memory.id}>
+                            <time dateTime={memory.createdAt.toISOString()}>{formatDateTime(memory.createdAt)}</time>
+                            <p style={{ whiteSpace: "pre-wrap" }}>{memory.text}</p>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p>nog geen</p>
+                    )}
+                  </details>
+                </li>
+              );
+            })}
+          </ul>
+        ) : (
+          <p>Er zijn nog geen Dynimo&apos;s — wek er een tot leven.</p>
+        )}
+      </section>
 
       <section>
         <h2>Grafschriften</h2>

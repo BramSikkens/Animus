@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "docker compose up -d && pnpm --parallel --filter @animus/agent --filter @animus/face --filter @animus/dashboard run dev",
+    "dev": "docker compose up -d --wait && pnpm --filter @animus/brain run slaap-allen && pnpm --parallel --filter @animus/agent --filter @animus/face --filter @animus/dashboard run dev",
     "test": "turbo run test",
     "typecheck": "turbo run typecheck",
     "repl": "pnpm --filter @animus/brain run repl",

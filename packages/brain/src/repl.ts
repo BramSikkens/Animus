@@ -16,10 +16,14 @@ async function main(): Promise<void> {
   await migrate(db);
 
   const brain = createBrain({ db, type1: TYPE1_MODEL, type2: loadType2Config(), embedder: EMBEDDING_MODEL });
-  const identity = await brain.boot();
+  const awake = (await brain.list()).find((dynimo) => dynimo.awakeSince);
 
-  console.log(`Je praat met ${identity.name}.`);
-  console.log(`Leeftijd: ${formatAge(Date.now() - identity.bornAt.getTime())}`);
+  if (awake) {
+    console.log(`Je praat met ${awake.name}.`);
+    console.log(`Leeftijd: ${formatAge(Date.now() - awake.bornAt.getTime())}`);
+  } else {
+    console.log("Niemand is wakker — wek een Dynimo via het dashboard.");
+  }
   console.log("Typ een zin en druk op enter. Ctrl+C om te stoppen.\n");
 
   const rl = createInterface({ input: process.stdin, output: process.stdout });
@@ -27,16 +31,20 @@ async function main(): Promise<void> {
   // Eindigt bij EOF (Ctrl+D of gepipete input).
   for await (const line of rl) {
     if (line.trim()) {
+      // Het dashboard kan intussen een andere Dynimo wekken: de naam elke regel opnieuw ophalen.
+      const name = (await brain.list()).find((dynimo) => dynimo.awakeSince)?.name;
+      let heard = false;
       for await (const event of brain.hear(line)) {
+        heard = true;
         if (event.type === "emotion") {
-          process.stdout.write(`(${event.emotion} ${event.intensity.toFixed(2)}) ${identity.name}: `);
+          process.stdout.write(`(${event.emotion} ${event.intensity.toFixed(2)}) ${name}: `);
         } else if (event.type === "text") {
           process.stdout.write(event.delta);
         } else if (event.type === "tool-call") {
           process.stdout.write(`[tool: ${event.toolName}] `);
         } // tool-result bewust niet getoond: Type2 verwoordt het resultaat zelf.
       }
-      process.stdout.write("\n");
+      process.stdout.write(heard ? "\n" : "(niemand wakker)\n");
     }
     rl.prompt();
   }

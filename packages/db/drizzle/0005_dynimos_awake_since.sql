@@ -1,0 +1,2 @@
+ALTER TABLE "dynimos" ADD COLUMN "awake_since" timestamp with time zone;--> statement-breakpoint
+CREATE UNIQUE INDEX "dynimos_single_awake_idx" ON "dynimos" USING btree ((true)) WHERE "dynimos"."awake_since" is not null;

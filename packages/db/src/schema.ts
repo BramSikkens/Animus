@@ -1,17 +1,25 @@
-import { index, integer, pgTable, real, serial, text, timestamp, vector } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
+import { index, integer, pgTable, real, serial, text, timestamp, uniqueIndex, vector } from "drizzle-orm/pg-core";
 
 // Meerdere rijen mogelijk: elke rij is een Dynimo.
-export const dynimos = pgTable("dynimos", {
-  id: serial("id").primaryKey(),
-  name: text("name").notNull(),
-  coreCharacter: text("core_character").notNull(),
-  evolvedCharacter: text("evolved_character").notNull().default(""),
-  birthStory: text("birth_story").notNull(),
-  seed: text("seed").notNull(),
-  bornAt: timestamp("born_at", { withTimezone: true }).notNull(),
-  lastEmotion: text("last_emotion"),
-  lastIntensity: real("last_intensity"),
-});
+export const dynimos = pgTable(
+  "dynimos",
+  {
+    id: serial("id").primaryKey(),
+    name: text("name").notNull(),
+    coreCharacter: text("core_character").notNull(),
+    evolvedCharacter: text("evolved_character").notNull().default(""),
+    birthStory: text("birth_story").notNull(),
+    seed: text("seed").notNull(),
+    bornAt: timestamp("born_at", { withTimezone: true }).notNull(),
+    lastEmotion: text("last_emotion"),
+    lastIntensity: real("last_intensity"),
+    // NULL = Slapend; gezet = Wakker (en de marker van deze wake-generatie).
+    awakeSince: timestamp("awake_since", { withTimezone: true }),
+  },
+  // Hooguit één Wakker: alle wakkere rijen delen dezelfde constante indexwaarde.
+  (table) => [uniqueIndex("dynimos_single_awake_idx").on(sql`(true)`).where(sql`${table.awakeSince} is not null`)],
+);
 
 // Dimensie van OpenAI text-embedding-3-small (ADR-0008): een andere embedding-provider
 // betekent een migratie én alles opnieuw embedden.

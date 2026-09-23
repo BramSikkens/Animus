@@ -5,7 +5,8 @@
   "scripts": {
     "test": "turbo run test",
     "typecheck": "turbo run typecheck",
-    "repl": "pnpm --filter @animus/brain run repl"
+    "repl": "pnpm --filter @animus/brain run repl",
+    "verwijder": "pnpm --filter @animus/brain run verwijder"
   },
   "packageManager": "pnpm@10.33.0",
   "devDependencies": {

@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { MockEmbeddingModelV4, MockLanguageModelV4, Experimental_EvaluationMockModelV4 } from "ai/test";
 import { simulateReadableStream } from "ai";
-import { EMBEDDING_DIMENSIONS, identity, memories } from "@animus/db/schema";
+import { EMBEDDING_DIMENSIONS, epitaphs, identity, memories } from "@animus/db/schema";
 import { createBrain, type BrainEvent } from "../src/index.js";
 import { createTestDb, truncateAll } from "./db.js";
 
@@ -30,6 +30,20 @@ function genesisModel(result: { name: string; coreCharacter: string; birthStory:
       usage: NULL_USAGE,
       warnings: [],
     }),
+  });
+}
+
+function generateResult(text: string) {
+  return { content: [{ type: "text" as const, text }], finishReason: STOP, usage: NULL_USAGE, warnings: [] };
+}
+
+// Zwaar model voor een volledige levensloop: eerst de genesis, daarna de Afscheidsreflectie.
+function lifecycleModel(name: string, farewell: string) {
+  return new MockLanguageModelV4({
+    doGenerate: [
+      generateResult(JSON.stringify({ name, coreCharacter: "Speels.", birthStory: "Geboren uit ochtendnevel." })),
+      generateResult(farewell),
+    ],
   });
 }
 
@@ -640,6 +654,177 @@ describe("createBrain", () => {
     await collectText(brain.hear("Welke dag is het?"));
 
     expect(await db.select().from(memories)).toHaveLength(0);
+  });
+
+  it("doet niets bij delete() zonder de juiste naam als bevestiging", async () => {
+    const bornAt = new Date("2026-01-01T12:00:00.000Z");
+    const heavy = genesisModel({ name: "Nova", coreCharacter: "x", birthStory: "y" });
+    const brain = createBrain({
+      db,
+      embedder: embedModel(),
+      type1: type1Model(),
+      type2: { light: textModel(["Hoi."]), heavy },
+      now: () => bornAt,
+      random: () => 0,
+    });
+    await brain.boot();
+    await collectText(brain.hear("Mijn kat heet Mimi."));
+
+    expect(await brain.delete("Nora")).toBeNull();
+
+    expect(await db.select().from(identity)).toHaveLength(1);
+    expect(await db.select().from(memories)).toHaveLength(1);
+    expect(heavy.doGenerateCalls).toHaveLength(1); // enkel de genesis
+  });
+
+  it("schrijft bij delete() met de juiste naam een Grafschrift en wist identiteit en herinneringen", async () => {
+    const bornAt = new Date("2026-01-01T12:00:00.000Z");
+    const deletedAt = new Date("2026-01-11T12:00:00.000Z");
+    let clock = bornAt;
+    const heavy = lifecycleModel("Nova", "Dank je voor elk gesprek.");
+    const brain = createBrain({
+      db,
+      embedder: embedModel(),
+      type1: type1Model(),
+      type2: { light: textModel(["Hoi."]), heavy },
+      now: () => clock,
+      random: () => 0,
+    });
+    await brain.boot();
+    await collectText(brain.hear("Mijn kat heet Mimi."));
+    clock = deletedAt;
+
+    const returned = await brain.delete("Nova");
+
+    const [epitaph, ...rest] = await db.select().from(epitaphs);
+    expect(rest).toHaveLength(0);
+    expect(returned).toEqual(epitaph);
+    expect(epitaph).toMatchObject({ name: "Nova", bornAt, deletedAt, farewellReflection: "Dank je voor elk gesprek." });
+    expect(heavy.doGenerateCalls).toHaveLength(2); // genesis + aparte Afscheidsreflectie
+    expect(JSON.stringify(heavy.doGenerateCalls[1]?.prompt)).toContain("Nova");
+    expect(await db.select().from(identity)).toHaveLength(0);
+    expect(await db.select().from(memories)).toHaveLength(0);
+  });
+
+  it("laat na delete() een volledig nieuw wezen geboren worden dat niets van het Grafschrift ziet", async () => {
+    const bornAt = new Date("2026-01-01T12:00:00.000Z");
+    const heavy = new MockLanguageModelV4({
+      doGenerate: [
+        generateResult(JSON.stringify({ name: "Nova", coreCharacter: "Speels.", birthStory: "Ochtendnevel." })),
+        generateResult("Vaarwel, lieve Mimi-kenner."),
+        generateResult(JSON.stringify({ name: "Lumen", coreCharacter: "Rustig.", birthStory: "Maanlicht." })),
+      ],
+    });
+    const light = new MockLanguageModelV4({ doStream: [textStream("Hoi."), textStream("Hallo, ik ben Lumen.")] });
+    const brain = createBrain({
+      db,
+      embedder: embedModel(),
+      type1: type1Model(),
+      type2: { light, heavy },
+      now: () => bornAt,
+      random: () => 0,
+    });
+    await brain.boot();
+    await collectText(brain.hear("Mijn kat heet Mimi."));
+    await brain.delete("Nova");
+
+    const reborn = await brain.boot();
+    await collectText(brain.hear("Wie ben jij?"));
+
+    expect(reborn.name).toBe("Lumen");
+    expect(heavy.doGenerateCalls).toHaveLength(3); // genesis, afscheid, nieuwe genesis
+    const inputsAfterDeletion = JSON.stringify([heavy.doGenerateCalls[2]?.prompt, light.doStreamCalls[1]?.prompt]);
+    expect(inputsAfterDeletion).not.toContain("Nova");
+    expect(inputsAfterDeletion).not.toContain("Vaarwel");
+    expect(inputsAfterDeletion).not.toContain("Mimi");
+  });
+
+  it("maakt maar één Grafschrift als twee instanties hetzelfde wezen verwijderen", async () => {
+    const bornAt = new Date("2026-01-01T12:00:00.000Z");
+    const first = createBrain({
+      db,
+      embedder: embedModel(),
+      type1: type1Model(),
+      type2: { light: unusedModel(), heavy: lifecycleModel("Nova", "Vaarwel.") },
+      now: () => bornAt,
+      random: () => 0,
+    });
+    await first.boot();
+    const second = createBrain({
+      db,
+      embedder: embedModel(),
+      type1: type1Model(),
+      type2: { light: unusedModel(), heavy: new MockLanguageModelV4({ doGenerate: [generateResult("Ook vaarwel.")] }) },
+      now: () => bornAt,
+      random: () => 0,
+    });
+    await second.boot();
+
+    expect(await first.delete("Nova")).not.toBeNull();
+    expect(await second.delete("Nova")).toBeNull();
+    expect(await db.select().from(epitaphs)).toHaveLength(1);
+  });
+
+  it("weigert hear() in een instantie waarvan het wezen intussen verwijderd is", async () => {
+    const bornAt = new Date("2026-01-01T12:00:00.000Z");
+    const deleter = createBrain({
+      db,
+      embedder: embedModel(),
+      type1: type1Model(),
+      type2: { light: unusedModel(), heavy: lifecycleModel("Nova", "Vaarwel.") },
+      now: () => bornAt,
+      random: () => 0,
+    });
+    await deleter.boot();
+    const stale = createBrain({
+      db,
+      embedder: embedModel(),
+      type1: type1Model(),
+      type2: { light: textModel(["Hoi."]), heavy: unusedModel() },
+      now: () => bornAt,
+      random: () => 0,
+    });
+    await stale.boot();
+    await deleter.delete("Nova");
+
+    await expect(collectText(stale.hear("Mijn kat heet Mimi."))).rejects.toThrow(/verwijderd/);
+    expect(await db.select().from(memories)).toHaveLength(0);
+  });
+
+  it("vergeet in een verouderde instantie ook het werkgeheugen, zodat een nieuw wezen er niets van ziet", async () => {
+    const bornAt = new Date("2026-01-01T12:00:00.000Z");
+    const deleter = createBrain({
+      db,
+      embedder: embedModel(),
+      type1: type1Model(),
+      type2: { light: unusedModel(), heavy: lifecycleModel("Nova", "Vaarwel.") },
+      now: () => bornAt,
+      random: () => 0,
+    });
+    await deleter.boot();
+    const light = new MockLanguageModelV4({ doStream: [textStream("Leuke kat."), textStream("Hoi, ik ben Lumen.")] });
+    const stale = createBrain({
+      db,
+      embedder: embedModel(),
+      type1: type1Model(),
+      type2: {
+        light,
+        heavy: new MockLanguageModelV4({
+          doGenerate: [generateResult(JSON.stringify({ name: "Lumen", coreCharacter: "Rustig.", birthStory: "Maanlicht." }))],
+        }),
+      },
+      now: () => bornAt,
+      random: () => 0,
+    });
+    await stale.boot();
+    await collectText(stale.hear("Mijn kat heet Mimi."));
+    await deleter.delete("Nova");
+    await expect(collectText(stale.hear("Ben je er nog?"))).rejects.toThrow(/verwijderd/);
+
+    await stale.boot();
+    await collectText(stale.hear("Wie ben jij?"));
+
+    expect(JSON.stringify(light.doStreamCalls[1]?.prompt)).not.toContain("Mimi");
   });
 });
 

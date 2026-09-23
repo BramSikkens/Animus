@@ -33,3 +33,13 @@ export const memories = pgTable(
   },
   (table) => [index("memories_embedding_idx").using("hnsw", table.embedding.op("vector_cosine_ops"))],
 );
+
+// Grafschrift van een verwijderd wezen (ADR-0003). Bewust géén relatie met identity/memories,
+// en het brein leest deze tabel nooit — enkel het dashboard. Leeftijd = deleted_at − born_at (ADR-0002).
+export const epitaphs = pgTable("epitaphs", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  bornAt: timestamp("born_at", { withTimezone: true }).notNull(),
+  deletedAt: timestamp("deleted_at", { withTimezone: true }).notNull(),
+  farewellReflection: text("farewell_reflection").notNull(),
+});

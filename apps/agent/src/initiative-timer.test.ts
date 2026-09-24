@@ -6,6 +6,11 @@ describe("initiativeIntervalMs", () => {
     expect(initiativeIntervalMs({ sn: 0.5, jp: 0.5 }, 60_000)).toBeCloseTo(60_000);
   });
 
+  it("deelt het interval door de blij-factor, ook zonder assen", () => {
+    expect(initiativeIntervalMs({ sn: 0.5, jp: 0.5 }, 60_000, 2)).toBeCloseTo(30_000);
+    expect(initiativeIntervalMs(null, 60_000, 2)).toBeCloseTo(30_000);
+  });
+
   it("is korter bij sterk N/P en langer bij sterk S/J", () => {
     const np = initiativeIntervalMs({ sn: 1, jp: 1 }, 60_000);
     const sj = initiativeIntervalMs({ sn: 0, jp: 0 }, 60_000);

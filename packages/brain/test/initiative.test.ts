@@ -141,7 +141,7 @@ describe("considerInitiative(): Reflectie", () => {
               type: "text" as const,
               text: JSON.stringify({
                 evolvedCharacter: "Iets gegroeid.",
-                axisShifts: { ie: 0, sn: 0, tf: 0, jp: 0 },
+                axisShifts: { ie: 0, sn: 0, tf: 0, jp: 0, reactivity: 0, expressiveness: 0 },
                 drives: { add: [], closeGoals: [], adjust: [], drop: [] },
                 wakeMood: { emotion: "kalm", intensity: 0.3 },
                 dream: null,

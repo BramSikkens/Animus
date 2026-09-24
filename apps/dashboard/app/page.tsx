@@ -3,12 +3,16 @@ import { EMOTIONS } from "@animus/brain/emotion";
 import { formatAge } from "@animus/brain/age";
 import { moodOfRow } from "@animus/brain/mood";
 import { DRIVE_KINDS, DRIVE_LABELS, type DriveKind } from "@animus/brain/drives";
-import { AXES, AXIS_LETTERS, mbtiType, rowAxes } from "@animus/brain/personality";
+import { ARCHETYPES, getArchetype } from "@animus/brain/archetypes";
+import { AXES, AXIS_LABELS, AXIS_LETTERS, MBTI_AXES, mbtiType, rowAxes } from "@animus/brain/personality";
 import { speechProvider, voicesFor } from "@animus/brain/voice";
 import { dreams, drives, dynimos, epitaphs, memories } from "@animus/db/schema";
 import { db } from "../lib/db";
 import { ActionForm } from "./action-form";
-import { addMemory, bringToLife, forceMood, kill, removeMemory, setAxes, setMood, setVoice, sleep, wake } from "./actions";
+import { VoiceCatalog } from "./voice-catalog";
+import { VoiceDesign } from "./voice-design";
+import { getCatalog, getTier } from "../lib/voice-catalog";
+import { addMemory, bringToLife, forceMood, kill, removeMemory, setArchetype, setAxes, setMood, setVoice, sleep, wake } from "./actions";
 import { formatDate, formatDateTime } from "../lib/format";
 
 export const dynamic = "force-dynamic";
@@ -69,7 +73,17 @@ export default async function DashboardPage() {
     );
   }
   const { dynimoRows, recentMemories, recentDreams, epitaphRows, drivesByDynimo } = data;
-  const voices = voicesFor(speechProvider(process.env));
+  const provider = speechProvider(process.env);
+  const voices = voicesFor(provider);
+  // Catalogus alleen bij ElevenLabs; bij een API-fout melden en de vaste lijst tonen.
+  const catalog =
+    provider === "elevenlabs"
+      ? await getCatalog().then(
+          (list) => ({ list }),
+          (error: unknown) => ({ error: error instanceof Error ? error.message : "onbekende fout" }),
+        )
+      : null;
+  const freeTier = provider === "elevenlabs" && (await getTier()) === "free";
 
   return (
     <main>
@@ -100,13 +114,14 @@ export default async function DashboardPage() {
                       {Math.round(mood.intensity * 100)}%
                     </p>
                   )}
+                  <p>Archetype: {getArchetype(dynimo.archetype)?.name ?? "geen"}</p>
                   <p>Basisemotie: {dynimo.baseEmotion ?? "nog niet bepaald"}</p>
                   {axes ? (
                     <div className="personality">
                       <p>
                         Persoonlijkheid: <strong>{mbtiType(axes)}</strong>
                       </p>
-                      {AXES.map((axis) => {
+                      {MBTI_AXES.map((axis) => {
                         const percent = Math.round(axes[axis] * 100);
                         const [first, second] = AXIS_LETTERS[axis];
                         return (
@@ -172,21 +187,48 @@ export default async function DashboardPage() {
                   <ActionForm action={setAxes} label="Persoonlijkheid zetten" pendingLabel="Zet…" id={dynimo.id}>
                     {AXES.map((axis) => (
                       <label key={axis} className="slider">
-                        {AXIS_LETTERS[axis][0]}↔{AXIS_LETTERS[axis][1]}
+                        {AXIS_LABELS[axis]}
                         <input name={`axis_${axis}`} type="range" min={0} max={1} step={0.01} defaultValue={axes?.[axis] ?? 0.5} />
                       </label>
                     ))}
                   </ActionForm>
+                  <ActionForm action={setArchetype} label="Archetype toepassen (zet assen en basisemotie)" pendingLabel="Zet…" id={dynimo.id}>
+                    <select name="archetype" aria-label="Archetype" defaultValue={getArchetype(dynimo.archetype)?.id ?? ARCHETYPES[0]!.id}>
+                      {ARCHETYPES.map((archetype) => (
+                        <option key={archetype.id} value={archetype.id}>
+                          {archetype.name}
+                        </option>
+                      ))}
+                    </select>
+                  </ActionForm>
+                  {catalog && "list" in catalog ? (
+                    <VoiceCatalog
+                      id={dynimo.id}
+                      voices={catalog.list}
+                      current={dynimo.voice}
+                      description={dynimo.voiceDescription ?? ""}
+                      hint={getArchetype(dynimo.archetype)?.voiceHint ?? ""}
+                    />
+                  ) : (
+                    <>
+                      {catalog && <p role="alert" className="error">Stemcatalogus niet beschikbaar ({catalog.error}); vaste lijst getoond.</p>}
                   <ActionForm action={setVoice} label="Stem zetten" pendingLabel="Zet…" id={dynimo.id}>
-                    <select name="voice" aria-label="Stem" defaultValue={dynimo.voice && voices.includes(dynimo.voice) ? dynimo.voice : ""}>
+                    <select name="voice" aria-label="Stem" defaultValue={dynimo.voice ?? ""}>
                       <option value="">standaard</option>
+                      {provider === "elevenlabs" && dynimo.voice && !voices.includes(dynimo.voice) && <option value={dynimo.voice}>{dynimo.voice} (uit catalogus)</option>}
                       {voices.map((voice) => (
                         <option key={voice} value={voice}>
                           {voice}
                         </option>
                       ))}
                     </select>
+                    <input name="voiceDescription" aria-label="Stembeschrijving" placeholder="Stembeschrijving (bv. warm, laag, rustig)" maxLength={500} defaultValue={dynimo.voiceDescription ?? ""} />
                   </ActionForm>
+                    </>
+                  )}
+                  {provider === "elevenlabs" && (
+                    <VoiceDesign blocked={freeTier} id={dynimo.id} name={dynimo.name} description={dynimo.voiceDescription ?? getArchetype(dynimo.archetype)?.voiceHint ?? ""} />
+                  )}
                   <ActionForm action={kill} label="Doden" pendingLabel="Neemt afscheid…" id={dynimo.id} confirmName />
                   <details>
                     <summary>Details en herinneringen</summary>

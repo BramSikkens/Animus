@@ -4,6 +4,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./archetypes": "./src/archetypes.ts",
+    "./behavior": "./src/behavior.ts",
     "./age": "./src/age.ts",
     "./config": "./src/config.ts",
     "./emotion": "./src/emotion.ts",
@@ -12,7 +14,10 @@
     "./drives": "./src/drives.ts",
     "./mood": "./src/mood.ts",
     "./sound": "./src/sound.ts",
-    "./voice": "./src/voice.ts"
+    "./voice": "./src/voice.ts",
+    "./voice-catalog": "./src/voice-catalog.ts",
+    "./voice-design": "./src/voice-design.ts",
+    "./voice-emotion": "./src/voice-emotion.ts"
   },
   "scripts": {
     "test": "vitest run",

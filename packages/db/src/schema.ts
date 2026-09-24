@@ -33,8 +33,15 @@ export const dynimos = pgTable(
     axisSn: real("axis_sn"),
     axisTf: real("axis_tf"),
     axisJp: real("axis_jp"),
+    // Reactiviteit (#59): hoe hard emoties bewegen en hoe traag ze uitdoven. Expressiviteit: hoeveel emotie doorschemert.
+    axisReactivity: real("axis_reactivity").notNull().default(0.5),
+    axisExpressiveness: real("axis_expressiveness").notNull().default(0.5),
     // TTS-stem (model/stemnaam van de actieve spraakprovider). NULL = default van de agent.
     voice: text("voice"),
+    // Vrije stembeschrijving (#62), input voor Voice Design (#64). NULL = geen.
+    voiceDescription: text("voice_description"),
+    // Archetype (#60): id uit @animus/brain/archetypes; startpunt voor assen/spreekstijl, geen pinning. NULL = geen.
+    archetype: text("archetype"),
   },
   // Hooguit één Wakker: alle wakkere rijen delen dezelfde constante indexwaarde.
   (table) => [
@@ -56,6 +63,8 @@ export const dynimos = pgTable(
     check("dynimos_axis_sn_range", sql`${table.axisSn} between 0 and 1`),
     check("dynimos_axis_tf_range", sql`${table.axisTf} between 0 and 1`),
     check("dynimos_axis_jp_range", sql`${table.axisJp} between 0 and 1`),
+    check("dynimos_axis_reactivity_range", sql`${table.axisReactivity} between 0 and 1`),
+    check("dynimos_axis_expressiveness_range", sql`${table.axisExpressiveness} between 0 and 1`),
     uniqueIndex("dynimos_single_awake_idx").on(sql`(true)`).where(sql`${table.awakeSince} is not null`),
   ],
 );

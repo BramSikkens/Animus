@@ -1,11 +1,15 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { parseArchetypeId } from "@animus/brain/archetypes";
 import { isEmotion } from "@animus/brain/emotion";
 import { parseMoodValues } from "@animus/brain/mood";
 import { parseAxes } from "@animus/brain/personality";
-import { parseVoice, speechProvider } from "@animus/brain/voice";
+import { cloneVoice, designVoice, saveDesignedVoice, type DesignPreview } from "@animus/brain/voice-design";
+import { parseVoice, speechProvider, voiceInputError } from "@animus/brain/voice";
+import { unusableVoiceError } from "@animus/brain/voice-catalog";
 import { getBrain } from "../lib/brain";
+import { getCatalog } from "../lib/voice-catalog";
 
 export type ActionState = { error?: string };
 
@@ -90,13 +94,29 @@ export async function setAxes(_prev: ActionState, formData: FormData): Promise<A
   });
 }
 
+export async function setArchetype(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  return run(async () => {
+    const id = parseId(formData);
+    if (id === null) return INVALID_ID;
+    const archetype = parseArchetypeId(formData.get("archetype"));
+    if (!archetype) return "Ongeldig archetype.";
+    if (!(await getBrain().setArchetype(id, archetype))) return DYNIMO_GONE;
+  });
+}
+
 export async function setVoice(_prev: ActionState, formData: FormData): Promise<ActionState> {
   return run(async () => {
     const id = parseId(formData);
     if (id === null) return INVALID_ID;
     const parsed = parseVoice(speechProvider(process.env), formData.get("voice"));
     if (!parsed) return "Ongeldige stem.";
-    if (!(await getBrain().setVoice(id, parsed.voice))) return DYNIMO_GONE;
+    // Op een gratis account werken bibliotheekstemmen niet; de gecachete catalogus weet dat. Is die niet beschikbaar, dan blokkeert alleen de UI.
+    if (parsed.voice && speechProvider(process.env) === "elevenlabs") {
+      const blocked = await getCatalog().then((list) => unusableVoiceError(list, parsed.voice!), () => null);
+      if (blocked) return `Deze stem ${blocked}.`;
+    }
+    const description = String(formData.get("voiceDescription") ?? "").trim().slice(0, 500) || null;
+    if (!(await getBrain().setVoiceProfile(id, { voice: parsed.voice, description }))) return DYNIMO_GONE;
   });
 }
 
@@ -116,5 +136,49 @@ export async function removeMemory(_prev: ActionState, formData: FormData): Prom
     const memoryId = Number(formData.get("memoryId"));
     if (id === null || !Number.isInteger(memoryId)) return "Ongeldige Herinnering.";
     if (!(await getBrain().removeMemory(id, memoryId))) return "Deze Herinnering bestaat niet (meer).";
+  });
+}
+
+// Stemontwerp (ElevenLabs). De API-key blijft server-side in process.env.
+const elevenKey = () => process.env.ELEVENLABS_API_KEY ?? "";
+
+export type DesignState = ActionState & { previews?: DesignPreview[] };
+
+export async function designVoiceAction(_prev: DesignState, formData: FormData): Promise<DesignState> {
+  try {
+    const description = String(formData.get("description") ?? "");
+    const invalid = voiceInputError({ description });
+    if (invalid) return { error: invalid };
+    const previews = await designVoice(fetch, elevenKey(), description, String(formData.get("previewText") ?? ""));
+    return previews.length ? { previews } : { error: "ElevenLabs gaf geen previews terug." };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+export async function applyDesignedVoice(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  return run(async () => {
+    const id = parseId(formData);
+    if (id === null) return INVALID_ID;
+    const description = String(formData.get("description") ?? "").trim();
+    const name = String(formData.get("name") ?? "");
+    const generatedVoiceId = String(formData.get("generatedVoiceId") ?? "");
+    const invalid = voiceInputError({ name, description, generatedVoiceId });
+    if (invalid) return invalid;
+    const voice = await saveDesignedVoice(fetch, elevenKey(), { name, description, generatedVoiceId });
+    if (!(await getBrain().setVoiceProfile(id, { voice, description: description || null }))) return DYNIMO_GONE;
+  });
+}
+
+export async function cloneVoiceAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  return run(async () => {
+    const id = parseId(formData);
+    if (id === null) return INVALID_ID;
+    const files = formData.getAll("files").filter((f): f is File => f instanceof File && f.size > 0);
+    const name = String(formData.get("name") ?? "");
+    const invalid = voiceInputError({ name });
+    if (invalid) return invalid;
+    const voice = await cloneVoice(fetch, elevenKey(), { name, files, consent: formData.get("consent") === "on" });
+    if (!(await getBrain().setVoiceProfile(id, { voice, description: null }))) return DYNIMO_GONE;
   });
 }

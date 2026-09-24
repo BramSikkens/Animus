@@ -74,8 +74,12 @@ _Avoid_: basiskarakter, persoonlijkheid
 Vrije tekst naast het Kernkarakter, die elke Reflectie in kleine stappen herschrijft op basis van wat de Dynimo meemaakte.
 _Avoid_: groei, nieuw karakter
 
+**Archetype**:
+Een vooringesteld karakterpatroon (bv. schattig wezentje, robot, lieve oude dame, professor) met zes assen, Basisemotie, spreekstijl-instructies voor Type2 en een stemomschrijving. Bij genesis kiest Type2 er één uit een gevarieerd aanbod van vier (of geen); assen en Basisemotie worden daaruit voorgezet. Bewaard bij de Dynimo; in het dashboard te wijzigen, wat assen en Basisemotie opnieuw als startpunt zet — geen pinning, de assen schuiven daarna vrij.
+_Avoid_: rol, persona, type (dat is Type1/Type2)
+
 **Persoonlijkheid**:
-Het MBTI-type van een Dynimo, afgeleid uit vier assen (I↔E, S↔N, T↔F, J↔P) die elk een getal van 0 tot 1 zijn; de letter volgt uit de kant van het midden. De assen verschuiven traag via Reflecties. Spraakzaamheid volgt uit de I↔E-as.
+Het MBTI-type van een Dynimo, afgeleid uit vier assen (I↔E, S↔N, T↔F, J↔P) die elk een getal van 0 tot 1 zijn; de letter volgt uit de kant van het midden. Daarnaast twee losse assen (0–1, standaard 0.5, buiten het MBTI-type): **reactiviteit** (hoe hard Emoties bewegen: schaalt de Type1-delta's en de uitdoofsnelheid van de Stemming) en **expressiviteit** (hoeveel emotie in taal, stem en gezicht doorschemert). Alle zes verschuiven traag via Reflecties en zijn instelbaar in het dashboard. Type2 krijgt per as-uiteinde concrete gedragsregels (sterk vanaf <0.25 / >0.75, zacht vanaf <0.4 / >0.6, daartussen niets); spraakzaamheid volgt uit de I↔E-as. Zie [ADR-0013](docs/adr/0013-reactiviteit-en-expressiviteit.md).
 _Avoid_: karakter (dat is de vrije tekst), Big Five
 
 **Drijfveer**:
@@ -99,6 +103,10 @@ _Avoid_: sentiment
 **Stemming**:
 De emotionele toestand van een Dynimo die over beurten heen blijft hangen: een vector met voor elke Emotie een waarde 0–100, plus een tijdstip. De Type1-delta's van een uiting worden opgeteld en geclampt op 0–100; tussendoor dooft elke waarde exponentieel uit naar haar ruststand (halveringstijd 3 minuten). De zichtbare, dominante Emotie is de hoogste waarde (bij gelijkstand de Basisemotie, anders de eerste in de set); het gezichtje en de toon van Type2 volgen die. Zie [ADR-0012](docs/adr/0012-stemming-als-vector.md).
 _Avoid_: humeur, emotie (voor de blijvende toestand)
+
+**Gedrag**:
+Hoe een Dynimo een beurt van de Gesprekspartner beantwoordt, per beurt gekozen uit normaal, kort, lang of negeren door een pure beslisfunctie (`decideBehavior`) op basis van de Stemming, de Persoonlijkheidsassen en een rng. Zeer boos (dominant, ≥70) geeft kans op negeren of kortaf (geschaald door reactiviteit, gedempt door F op T↔F); zeer blij (≥70) geeft kans op lange antwoorden en vaker eigen initiatief; bang of verveeld (≥60) geeft kans op kort. Een robot (reactiviteit 0) is altijd normaal. Negeren gebeurt nooit twee beurten achter elkaar en nooit bij een initiatief-uiting; het gezichtje toont dan alleen de (boze) Stemming plus een geluid, er komt geen antwoord. De Herinnering wordt wel opgeslagen.
+_Avoid_: reactie (te vaag), weigeren
 
 **Basisemotie**:
 De Emotie die in de ruststand van de Stemming op 30 staat, terwijl alle andere Emoties op 0 rusten; de Stemming dooft er dus naartoe uit. Bij genesis door Type2 gekozen als deel van het temperament en daarna vrijwel onveranderlijk.

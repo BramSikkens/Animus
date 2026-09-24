@@ -14,6 +14,7 @@
     "@animus/db": "workspace:*",
     "@livekit/agents": "1.9.0",
     "@livekit/agents-plugin-deepgram": "1.9.0",
+    "@livekit/agents-plugin-elevenlabs": "1.9.0",
     "@livekit/agents-plugin-livekit": "1.9.0",
     "@livekit/agents-plugin-openai": "1.9.0",
     "@livekit/agents-plugin-silero": "1.9.0",

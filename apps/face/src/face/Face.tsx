@@ -1,6 +1,7 @@
 import { motion, useAnimationFrame, useMotionValue, type MotionValue } from "motion/react";
 import type { DisplayState } from "@animus/brain/display";
 import type { Emotion } from "@animus/brain/emotion";
+import { doodlePath } from "./doodle.js";
 import { idleOffsets } from "./idle.js";
 import { frameForDisplay } from "./interpolate.js";
 import type { Keyframe } from "./keyframes.js";
@@ -12,6 +13,8 @@ const FACE_COLOR = "#f4efe3";
 const TRANSITION = { duration: 0.4, ease: "easeInOut" } as const;
 // Tijdens spreekt volgt de mond het volume; een korte tween houdt hem vloeiend zonder te laten achterlopen.
 const MOUTH_SPEAK_TRANSITION = { duration: 0.08, ease: "linear" } as const;
+
+const DOODLE_SEED = 1;
 
 const EYE_X = { left: 72, right: 128 } as const;
 const EYE_Y = 85;
@@ -109,6 +112,8 @@ function Brow({ cx, side, brow, browY }: BrowProps) {
 }
 
 export type FaceProps = {
+  /** Lange stilte: toon de doodle i.p.v. het gezicht. */
+  doodle?: boolean;
   display: DisplayState;
   emotion: Emotion;
   intensity: number;
@@ -117,7 +122,7 @@ export type FaceProps = {
 };
 
 /** Het gezichtje: achtergrond + ogen + mond + wenkbrauwen, getweend tussen emoties en de slaapstand (~300-500ms). */
-export function Face({ display, emotion, intensity, mouthVolume = 0 }: FaceProps) {
+export function Face({ doodle = false, display, emotion, intensity, mouthVolume = 0 }: FaceProps) {
   const frame = frameForDisplay(display, emotion, intensity);
   const speaking = display === "spreekt";
   const mouth = speaking ? { ...frame.mouth, open: Math.max(frame.mouth.open, mouthOpenForVolume(mouthVolume)) } : frame.mouth;
@@ -137,6 +142,10 @@ export function Face({ display, emotion, intensity, mouthVolume = 0 }: FaceProps
     breathScale.set(o.breathScale);
     breathY.set(o.breathY);
   });
+  const doodleD = useMotionValue(doodlePath(0, DOODLE_SEED));
+  useAnimationFrame((timeMs) => {
+    if (doodle) doodleD.set(doodlePath(timeMs / 1000, DOODLE_SEED));
+  });
   const idle = { blink, pupilX, pupilY, browY };
   return (
     <div className="face-stage">
@@ -149,6 +158,9 @@ export function Face({ display, emotion, intensity, mouthVolume = 0 }: FaceProps
       <svg className="face-svg" viewBox="0 0 200 200" role="img" aria-label={
           display === "slapend" ? "Animus slaapt" : display === "reflecterend" ? "Animus denkt na" : `Animus voelt zich ${emotion}`
         }>
+        {doodle ? (
+          <motion.path d={doodleD} fill="none" stroke={FACE_COLOR} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+        ) : (
         <motion.g style={{ scale: breathScale, y: breathY, transformBox: "view-box", transformOrigin: "100px 100px" }}>
           <Eye cx={EYE_X.left} eye={frame.eyes.left} background={frame.background} idle={idle} />
           <Eye cx={EYE_X.right} eye={frame.eyes.right} background={frame.background} idle={idle} />
@@ -156,6 +168,7 @@ export function Face({ display, emotion, intensity, mouthVolume = 0 }: FaceProps
           <Brow cx={EYE_X.right} side="right" brow={frame.brow} browY={browY} />
           <motion.path initial={false} animate={{ d: mouthPath(mouth) }} transition={speaking ? MOUTH_SPEAK_TRANSITION : TRANSITION} fill={FACE_COLOR} />
         </motion.g>
+        )}
       </svg>
     </div>
   );

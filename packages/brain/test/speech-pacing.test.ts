@@ -84,21 +84,33 @@ describe("createPacer (streaming)", () => {
   };
   const TEXT = "Als ik er goed over nadenk, dan denk ik van wel. Bijv. dit ook. Zeker weten! En nog iets.";
 
-  it("geeft bij elke chunkverdeling hetzelfde als applyPauses over het geheel", () => {
+  it("geeft bij elke chunkverdeling hetzelfde resultaat, met pauzes alleen vanaf de tweede zin", () => {
     for (const level of [1, 2] as const) {
-      for (const size of [1, 2, 3, 7, 20, TEXT.length]) {
+      const whole = run([TEXT], level, level === 1).join("");
+      expect(whole.replaceAll(" … ", " ")).toBe(TEXT);
+      expect(whole.startsWith("Als ik er goed over nadenk, dan denk ik van wel. Bijv.")).toBe(true);
+      for (const size of [1, 2, 3, 7, 20]) {
         const chunks = TEXT.match(new RegExp(`[^]{1,${size}}`, "g"))!;
-        expect(run(chunks, level, level === 1).join("")).toBe(applyPauses(TEXT, level, level === 1));
+        expect(run(chunks, level, level === 1).join("")).toBe(whole);
       }
+    }
+  });
+  it("laat de eerste zin ongebufferd en zonder pauze door", () => {
+    for (const level of [1, 2] as const) {
+      const p = createPacer(level, true);
+      expect(p.push("Hoi")).toBe("Hoi");
+      expect(p.push(" daar, jij")).toBe(" daar, jij");
+      expect(p.push(". Nog")).toBe(". "); // tot en met de spatie ná het zinseinde; "Nog" wordt vastgehouden
     }
   });
   it("laat niveau 0 direct en ongewijzigd door", () => {
     expect(run(["Hoi. ", "Daar."], 0)).toEqual(["Hoi. ", "Daar.", ""]);
   });
-  it("geeft een eerste zin vrij zodra de volgende begint, niet pas aan het einde", () => {
-    const out = run(["Hoi daar. ", "Wat ", "leuk."], 2);
-    expect(out[0]).toBe("");
-    expect(out[1]).toBe("Hoi daar. … ");
+  it("bufferd vanaf de tweede zin per zin", () => {
+    const out = run(["Hoi daar. ", "Wat leuk. ", "Ja ", "echt."], 2);
+    expect(out[0]).toBe("Hoi daar. ");
+    expect(out[1]).toBe("");
+    expect(out[2]).toBe("Wat leuk. … ");
   });
 });
 

@@ -20,7 +20,7 @@ import { archetypeOfferText, getArchetype, pickOffer } from "./archetypes.js";
 import { DRIVE_DESCRIPTIONS, DRIVE_KINDS, drivesPromptBlock, isActiveDrive, type DriveRow } from "./drives.js";
 import { decideBehavior, type Behavior } from "./behavior.js";
 import { decideOpinion, matchDrives, opinionPrompt, OPINION_BOOS_DELTA } from "./opinion.js";
-import { pickSpeechSound, SPEECH_SOUND_MIN_LENGTH } from "./speech-sounds.js";
+import { pickSpeechSound } from "./speech-sounds.js";
 import { createPacer, pacingFor } from "./speech-pacing.js";
 import { pickDreamToTell, DREAM_MAX_AGE_MS } from "./dream-tell.js";
 import { pickSpontaneousMemory, SPONTANEOUS_INITIATIVE_CHANCE, SPONTANEOUS_MIN_AGE_MS, SPONTANEOUS_MIN_IMPRESSION, SPONTANEOUS_TURN_CHANCE, type SpontaneousCandidate } from "./recall-spontaneous.js";
@@ -1092,23 +1092,23 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     });
 
     let full = "";
-    // Spraakgeluid: de eerste tekst wordt vastgehouden tot de lengte bekend is (of de stream eindigt), en dan met
-    // eventueel een geluid ervoor doorgegeven aan TTS. `full` (Herinnering/Werkgeheugen) blijft de schone tekst.
-    let pending = "";
+    // Spraakgeluid: vooraf gekozen en als directe eerste mini-chunk verstuurd (geen wachten op tekstlengte);
+    // `full` (Herinnering/Werkgeheugen) blijft de schone tekst.
     let soundDecided = false;
-    // Pauzes (interpunctie) per zin, na het Spraakgeluid; verwerkt streaming, dus geen extra wachttijd bij niveau 0.
+    // Pauzes (interpunctie) per zin vanaf de tweede zin; de eerste zin gaat ongebufferd door.
     const pacing = axes ? pacingFor({ values: mood.values, expressiveness: axes.expressiveness }) : null;
     const pacer = createPacer(pacing?.pauseLevel ?? 0, pacing?.halting);
     function* emitText(delta: string): Generator<BrainEvent> {
       const paced = pacer.push(delta);
       if (paced) yield { type: "text", delta: paced };
     }
-    function* flushPending(): Generator<BrainEvent> {
+    function* soundFirst(): Generator<BrainEvent> {
       if (soundDecided) return;
       soundDecided = true;
-      const sound = axes ? pickSpeechSound({ textLength: pending.length, values: mood.values, axes, rng: random, isShort: behavior === "kort", previous: lastSpeechSound }) : null;
-      if (sound) lastSpeechSound = sound;
-      if (pending) yield* emitText(sound ? `${sound} ${pending}` : pending);
+      const sound = axes ? pickSpeechSound({ values: mood.values, axes, rng: random, isShort: behavior === "kort", previous: lastSpeechSound }) : null;
+      if (!sound) return;
+      lastSpeechSound = sound;
+      yield { type: "text", delta: `${sound} ` };
     }
     function* flushPacer(): Generator<BrainEvent> {
       const rest = pacer.flush();
@@ -1123,14 +1123,10 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
         if (part.type === "error") throw part.error;
         if (part.type === "text-delta") {
           full += part.text;
-          if (soundDecided) yield* emitText(part.text);
-          else {
-            pending += part.text;
-            if (pending.length >= SPEECH_SOUND_MIN_LENGTH) yield* flushPending();
-          }
+          yield* soundFirst();
+          yield* emitText(part.text);
         }
         if (part.type === "tool-call") {
-          yield* flushPending();
           yield* flushPacer();
           yield { type: "tool-call", toolName: part.toolName, input: part.input };
         }
@@ -1140,7 +1136,6 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
           yield { type: "tool-result", toolName: part.toolName, output: { error: message } };
         }
       }
-      yield* flushPending();
       yield* flushPacer();
       outcome = "completed";
     } catch (error) {

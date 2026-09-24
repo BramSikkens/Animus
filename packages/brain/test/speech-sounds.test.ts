@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { injectSpeechSounds } from "../src/speech-sounds.js";
+import { injectSpeechSounds, pickSpeechSound } from "../src/speech-sounds.js";
 import { singleEmotionValues } from "../src/mood.js";
 import type { Axes } from "../src/personality.js";
 
@@ -40,8 +40,11 @@ describe("injectSpeechSounds: kans en uitzonderingen", () => {
     expect(injectSpeechSounds({ text: TEXT, values: blij, axes: axes({ expressiveness: 0.5 }), rng: rng(0.3) })).toBe(TEXT);
     expect(injectSpeechSounds({ text: TEXT, values: singleEmotionValues("blij", 0.5), axes: axes(), rng: rng(0.3) })).toBe(TEXT);
   });
-  it("korte antwoorden en isShort: geen geluid", () => {
-    expect(injectSpeechSounds({ text: "Ja, hoor.", values: blij, axes: axes(), rng: rng(0) })).toBe("Ja, hoor.");
+  it("geen minimumlengte: het geluid wordt vooraf gekozen, ook vóór een heel kort antwoord", () => {
+    expect(pickSpeechSound({ values: blij, axes: axes(), rng: rng(0) })).toBe("ha ha");
+    expect(injectSpeechSounds({ text: "Ja.", values: blij, axes: axes(), rng: rng(0) })).toBe("ha ha Ja.");
+  });
+  it("isShort (behavior kort): geen geluid", () => {
     expect(injectSpeechSounds({ text: TEXT, values: blij, axes: axes(), rng: rng(0), isShort: true })).toBe(TEXT);
   });
   it("niet twee beurten achter elkaar hetzelfde geluid", () => {

@@ -79,10 +79,12 @@ export function applyPauses(text: string, pauseLevel: 0 | 1 | 2, halting = false
   return pauseLevel === 0 ? text : pace(text, pauseLevel, halting, true, { sentence: 0, clause: 0 }).out;
 }
 
-/** Streaming-variant: `push` geeft direct vrij wat definitief is (tot het laatste zinseinde/komma + eerstvolgende letter), `flush` de rest. Niveau 0 = doorgeven. */
+/** Streaming-variant: de eerste zin gaat direct en zonder pauze door (latentie: geen buffer vóór de eerste audio); daarna geeft `push` vrij wat definitief is (tot het laatste zinseinde/komma + eerstvolgende letter), `flush` de rest. Niveau 0 = doorgeven. */
 export function createPacer(pauseLevel: 0 | 1 | 2, halting = false): { push(delta: string): string; flush(): string } {
   let buffer = "";
   let carry: Carry = { sentence: 0, clause: 0 };
+  let first = ""; // de tot nu toe doorgegeven eerste zin; "" zodra die klaar is (ponytail: afkortingen tellen als zinseinde, kost hooguit één pauze)
+  let inFirst = true;
   const step = (final: boolean): string => {
     const r = pace(buffer, pauseLevel as 1 | 2, halting, final, carry);
     buffer = buffer.slice(r.used);
@@ -90,7 +92,23 @@ export function createPacer(pauseLevel: 0 | 1 | 2, halting = false): { push(delt
     return r.out;
   };
   if (pauseLevel === 0) return { push: (delta) => delta, flush: () => "" };
-  return { push: (delta) => ((buffer += delta), step(false)), flush: () => step(true) };
+  return {
+    push(delta) {
+      if (inFirst) {
+        const before = first.length;
+        first += delta;
+        const m = /[.!?]\s+/.exec(first);
+        if (!m) return delta;
+        inFirst = false;
+        const cut = m.index + m[0].length - before;
+        buffer = delta.slice(cut);
+        return delta.slice(0, cut) + step(false);
+      }
+      buffer += delta;
+      return step(false);
+    },
+    flush: () => step(true),
+  };
 }
 
 /** Vermenigvuldigt `speed` met de tempo-factor (ElevenLabs-limiet 0.7-1.2); de afronding/dedupe gebeurt in applyTtsEmotion. */

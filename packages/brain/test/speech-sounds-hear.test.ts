@@ -114,8 +114,43 @@ describe("hear(): Spraakgeluiden", () => {
   });
 });
 
+describe("hear(): latentie", () => {
+  it("levert geluid en eerste tekst direct, zonder te wachten op verdere tokens", async () => {
+    await insertDynimo("blij");
+    // Stream die na twee tokens nooit meer iets geeft: alles wat uitkomt, kwam dus zonder wachten uit.
+    const hanging = new MockLanguageModelV4({
+      doStream: async () => ({
+        stream: new ReadableStream({
+          start(controller) {
+            for (const chunk of [
+              { type: "stream-start", warnings: [] },
+              { type: "text-start", id: "1" },
+              { type: "text-delta", id: "1", delta: "Hoi" },
+              { type: "text-delta", id: "1", delta: " daar," },
+            ]) controller.enqueue(chunk);
+          },
+        }),
+      }),
+    });
+    const iterator = brainWith(hanging).hear("Hallo")[Symbol.asyncIterator]();
+
+    const texts: BrainEvent[] = [];
+    while (texts.length < 3) {
+      const { value } = await iterator.next();
+      if (value.type === "text") texts.push(value);
+    }
+    await iterator.return?.();
+
+    expect(texts).toEqual([
+      { type: "text", delta: "ha ha " },
+      { type: "text", delta: "Hoi" },
+      { type: "text", delta: " daar," },
+    ]);
+  });
+});
+
 describe("hear(): spraakpauzes", () => {
-  const TWO = "Wat leuk dat je er bent, vertel me alles over jezelf. Ik ben zo benieuwd naar je!";
+  const TWO = "Wat leuk dat je er bent, vertel me alles over jezelf. Ik ben zo benieuwd naar je! Echt waar.";
   const twoSentences = () =>
     new MockLanguageModelV4({
       doStream: async () => ({
@@ -135,7 +170,8 @@ describe("hear(): spraakpauzes", () => {
     await insertDynimo("droevig");
     const events = await collect(brainWith(twoSentences()).hear("Hallo"));
 
-    expect(textOf(events)).toContain("jezelf. … Ik ben");
+    expect(textOf(events)).not.toContain("jezelf. …"); // eerste zin zonder pauze
+    expect(textOf(events)).toContain("naar je! … Echt");
     const stored = await db.select().from(memories);
     expect(stored[0]!.text).toContain(TWO);
     expect(stored[0]!.text).not.toContain("…");

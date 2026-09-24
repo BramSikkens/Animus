@@ -3,14 +3,16 @@ export type SpeechProvider = "elevenlabs" | "deepgram" | "openai";
 
 // Vaste lijsten (geen live API-call). Eerste = huidige default van de agent.
 export const VOICES: Record<SpeechProvider, readonly string[]> = {
-  // Premade-stemmen (voice-ids). De uitgebreide catalogus volgt in #64.
+  // Premade-stemmen: die werken ook op de gratis ElevenLabs-tier (bibliotheekstemmen niet). Eerste = default.
   elevenlabs: [
-    "21m00Tcm4TlvDq8ikWAM", // Rachel
-    "pNInz6obpgDQGcFmaJgB", // Adam
-    "EXAVITQu4vr4xnSDxMaL", // Bella
-    "ErXwobaYiN019PkySvjV", // Antoni
-    "TxGEqnHWrfWFTfGW9XjX", // Josh
-    "AZnzlk1XvdvUeBnXmlld", // Domi
+    "EXAVITQu4vr4xnSDxMaL", // Sarah
+    "CwhRBWXzGAHq8TQ4Fs17", // Roger
+    "FGY2WhTYpPnrIDTdsKH5", // Laura
+    "IKne3meq5aSn9XLyUdCD", // Charlie
+    "JBFqnCBsd6RMkjVDRZzb", // George
+    "N2lVS1w4EtoT3dr4eOWO", // Callum
+    "SAz9YHcvj6GT2YYXdXww", // River
+    "SOYHLrjzK2X1ezoPC6cr", // Harry
   ],
   deepgram: [
     "aura-2-beatrix-nl",

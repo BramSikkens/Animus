@@ -37,9 +37,14 @@ describe("parseVoice", () => {
 });
 
 describe("elevenlabs", () => {
-  it("kent een startlijst met Rachel als default", () => {
-    expect(voicesFor("elevenlabs")[0]).toBe("21m00Tcm4TlvDq8ikWAM");
-    expect(resolveVoice("elevenlabs", null)).toBe("21m00Tcm4TlvDq8ikWAM");
+  it("kent een startlijst van 8 premade-stemmen (werken op de gratis tier) met Sarah als default", () => {
+    expect(voicesFor("elevenlabs")).toHaveLength(8);
+    expect(voicesFor("elevenlabs")[0]).toBe("EXAVITQu4vr4xnSDxMaL");
+    expect(resolveVoice("elevenlabs", null)).toBe("EXAVITQu4vr4xnSDxMaL");
+  });
+
+  it("houdt een eerder opgeslagen stem-id geldig, ook als die niet meer in de startlijst staat", () => {
+    expect(resolveVoice("elevenlabs", "21m00Tcm4TlvDq8ikWAM")).toBe("21m00Tcm4TlvDq8ikWAM");
   });
 
   it("gebruikt een meegegeven default (env ELEVENLABS_DEFAULT_VOICE_ID) bij null", () => {

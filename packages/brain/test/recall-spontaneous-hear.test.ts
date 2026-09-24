@@ -172,3 +172,19 @@ describe("Spontane herinnering: geen query op het kritieke pad zonder kans", () 
     expect(await selectCount(() => 0)).toBe(1);
   });
 });
+
+describe("Spontane herinnering en wisselen van Dynimo", () => {
+  it("een voorbereide Spontane herinnering van de vorige Dynimo wordt niet alsnog gemarkeerd", async () => {
+    const first = await insertDynimo();
+    const memory = await insertMemory(first.id);
+    const brain = brainWith(type2().model, () => 0);
+
+    await brain.considerInitiative(); // zet pendingSpontaneousId voor `first`
+    await db.update(dynimos).set({ awakeSince: null }).where(eq(dynimos.id, first.id));
+    await db.insert(dynimos).values({ name: "Ben", coreCharacter: "Druk.", birthStory: "Geboren.", seed: "z", bornAt, awakeSince: bornAt, baseEmotion: "kalm", axisIe: 0.5, axisSn: 0.5, axisTf: 0.5, axisJp: 0.5 });
+    await drain(brain.hear("Hoi", { initiatief: true }));
+
+    const [row] = await db.select().from(memories).where(eq(memories.id, memory.id));
+    expect(row!.lastRecalledAt).toBeNull();
+  });
+});

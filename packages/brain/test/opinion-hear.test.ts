@@ -1,3 +1,4 @@
+import { eq } from "drizzle-orm";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { MockEmbeddingModelV4, MockLanguageModelV4, Experimental_EvaluationMockModelV4 } from "ai/test";
 import { simulateReadableStream } from "ai";
@@ -125,5 +126,18 @@ describe("Standpunt in hear()", () => {
     for (let turn = 0; turn < 5; turn++) await hear(brain, "mensen die laat komen, zo vervelend");
 
     expect(t2.prompts.map((p) => p.includes("Dit raakt aan je"))).toEqual([true, false, false, false, true]);
+  });
+
+  it("cooldown geldt per Dynimo: na wisselen van Wakker Dynimo begint hij opnieuw", async () => {
+    const first = await setup("ergernis", "mensen die te laat komen", tJ);
+    const t2 = type2();
+    const brain = brainWith(t2.model);
+
+    await hear(brain, "mensen die laat komen, zo vervelend");
+    await db.update(dynimos).set({ awakeSince: null }).where(eq(dynimos.id, first.id));
+    await setup("ergernis", "mensen die te laat komen", tJ);
+    await hear(brain, "mensen die laat komen, zo vervelend");
+
+    expect(t2.prompts.map((p) => p.includes("Dit raakt aan je"))).toEqual([true, true]);
   });
 });

@@ -632,11 +632,21 @@ ${fresh.map((memory) => `- (indruk ${memory.impression}) ${memory.text}`).join("
     }
   }
 
+  // Per-Dynimo sessiestaat: mag niet doorsijpelen naar een ander (of nieuw) wezen.
+  function resetSession(): void {
+    lastSpeechSound = undefined;
+    workingMemory.length = 0;
+    sessionMemoryIds.length = 0;
+    turnCount = 0;
+    lastOpinionTurn = undefined;
+    pendingSpontaneousId = undefined;
+    pendingDreamId = undefined;
+  }
+
   // Een andere Wakker-generatie (andere Dynimo of nieuwe awake_since) is een nieuwe sessie.
   function adopt(row: Dynimo): Dynimo {
     if (current?.id !== row.id || current.awakeSince?.getTime() !== row.awakeSince?.getTime()) {
-      workingMemory.length = 0;
-      sessionMemoryIds.length = 0;
+      resetSession();
       current = row;
     }
     return current;
@@ -1169,9 +1179,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
   function forgetBeing(): void {
     current = undefined;
     lastIgnored = false;
-    lastSpeechSound = undefined;
-    workingMemory.length = 0;
-    sessionMemoryIds.length = 0;
+    resetSession();
   }
 
   async function kill(id: number, confirmedName: string): Promise<Epitaph | null> {
@@ -1212,6 +1220,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     if (reflecting > 0) return null;
     const [awake] = await deps.db.select().from(dynimos).where(isNotNull(dynimos.awakeSince));
     if (!awake) return null;
+    adopt(awake); // wisselen wist de pending-ids van de vorige Dynimo vóór we die van deze zetten
     try {
       const driveRows = await loadDrives(awake.id);
       const mood = moodOfRow(awake, now());

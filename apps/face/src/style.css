@@ -43,6 +43,7 @@ body {
   gap: 0.5rem;
   text-align: center;
   opacity: 0.75;
+  z-index: 2;
 }
 
 button {
@@ -145,4 +146,60 @@ button:hover {
 .emotion-bars .bar div {
   height: 100%;
   background: #f4efe3;
+}
+
+/* Galerij: raster van vierkanten, monochroom als het gezicht. */
+.gallery {
+  position: fixed;
+  inset: 0;
+  overflow-y: auto;
+  padding: 2rem 1rem 5rem;
+  background: #111;
+  z-index: 1;
+  box-sizing: border-box;
+}
+
+.gallery ul {
+  list-style: none;
+  margin: 0 auto;
+  padding: 0;
+  max-width: 60rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(9rem, 40vw), 1fr));
+  gap: 1rem;
+}
+
+.gallery .tile {
+  width: 100%;
+  aspect-ratio: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border-radius: 1rem;
+  font-size: 1rem;
+  transition: background 0.2s, color 0.2s;
+}
+
+.gallery .tile:hover .tile-face path {
+  stroke: #111;
+}
+
+.tile-face {
+  width: 60%;
+}
+
+.gallery-empty {
+  margin: 30vh auto 0;
+  max-width: 24rem;
+  text-align: center;
+  opacity: 0.7;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gallery .tile {
+    transition: none;
+  }
 }

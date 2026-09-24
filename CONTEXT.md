@@ -46,6 +46,9 @@ _Avoid_: database, archief (dat is het Grafschrift)
 Eén wezentje dat in Animus leeft, van genesis tot dood, met een eigen naam, Langetermijngeheugen, persoonlijkheid en Drijfveren. Er kunnen er meerdere bestaan; ze weten niet van elkaars bestaan en delen niets. Meervoud: Dynimo's.
 _Avoid_: wezen, robotje, identiteit, creature
 
+**Galerij**:
+Het startscherm van het gezichtje (na 'Praat met Animus'): een raster van vierkanten, één per levende Dynimo, met naam en een slapend miniatuurgezichtje. Klikken wekt die Dynimo en toont zijn gezicht; 'Terug' laat hem slapen en toont de Galerij weer. De agent publiceert de lijst (id, naam, wakker) en ontvangt wake/sleep-commando's van het gezichtje (dev-only, zonder auth, gevalideerd in de agent); de Galerij volgt live het dashboard.
+
 **Wakker / Slapend**:
 De twee toestanden van een levende Dynimo. Hooguit één Dynimo is wakker en praat via het gezichtje; alle anderen slapen. Na een herstart van Animus slapen ze allemaal. Slapen is een toestand binnen een draaiend Animus, geen gestopt proces. Laten slapen triggert een Reflectie en wist het Werkgeheugen; de Herinneringen blijven. Bij het wekken begint de Stemming bij wat de laatste Reflectie klaarzette.
 _Avoid_: aan/uit, actief/inactief

@@ -10,6 +10,8 @@ import {
 } from "@livekit/components-react";
 import { ConnectionState } from "livekit-client";
 import { DISPLAY_STATES, DISPLAY_TOPIC, isDisplayState, type DisplayState } from "@animus/brain/display";
+import { GALLERY_TOPIC, galleryView, type GalleryBeing } from "@animus/brain/gallery";
+import { BackButton, Gallery } from "./Gallery.js";
 import { EMOTION_TOPIC, EMOTIONS, isEmotion, type Emotion, type EmotionMessage } from "@animus/brain/emotion";
 import { doodleActive } from "./face/doodle.js";
 import { isSoundKind, SOUND_TOPIC } from "@animus/brain/sound";
@@ -97,6 +99,28 @@ function DisplayListener({ onDisplay, onName }: { onDisplay: (state: DisplayStat
   return null;
 }
 
+// Decodeert Galerij-berichten van de agent (GalleryMessage op GALLERY_TOPIC): id, naam en wakker per Dynimo.
+function GalleryListener({ onGallery }: { onGallery: (beings: GalleryBeing[]) => void }) {
+  useDataChannel(GALLERY_TOPIC, (msg) => {
+    if (!msg.from?.isAgent) return;
+    try {
+      const payload: unknown = JSON.parse(new TextDecoder().decode(msg.payload));
+      const beings = payload !== null && typeof payload === "object" && "beings" in payload ? payload.beings : undefined;
+      if (
+        Array.isArray(beings) &&
+        beings.every((b) => b && typeof b.id === "number" && typeof b.name === "string" && typeof b.awake === "boolean")
+      ) {
+        onGallery(beings.map((b) => ({ id: b.id, name: b.name, awake: b.awake })));
+      } else {
+        console.error("Galerij-event heeft onverwachte vorm:", payload);
+      }
+    } catch (error) {
+      console.error("Galerij-event kon niet verwerkt worden:", error instanceof Error ? error.message : error);
+    }
+  });
+  return null;
+}
+
 // Leest het volume van de agent-audiotrack (buiten de room is er geen track, dus volume 0).
 function MouthVolumeListener({ onVolume }: { onVolume: (volume: number) => void }) {
   const { audioTrack } = useVoiceAssistant();
@@ -177,6 +201,7 @@ export function App() {
   const [emotionState, setEmotionState] = useState<EmotionState>(NEUTRAL_STATE);
   const [displayState, setDisplayState] = useState<DisplayState>(DEFAULT_DISPLAY);
   const [name, setName] = useState<string | null>(null);
+  const [beings, setBeings] = useState<GalleryBeing[] | null>(null);
   const [mouthVolume, setMouthVolume] = useState(0);
   const [doodle, setDoodle] = useState(false);
   const lastActivity = useRef(Date.now());
@@ -220,11 +245,16 @@ export function App() {
     setEmotionState(NEUTRAL_STATE);
     setDisplayState(DEFAULT_DISPLAY);
     setName(null);
+    setBeings(null);
     setMouthVolume(0);
   }
 
+  // Verbonden en de lijst bekend: Galerij als niemand wakker is, anders het gezicht van de wakkere.
+  const view = session ? galleryView(beings) : { screen: "laden" as const };
+
   return (
     <>
+      {view.screen !== "galerij" && <>
       <Face doodle={doodle} display={displayState} emotion={emotionState.emotion} intensity={emotionState.intensity} mouthVolume={mouthVolume} />
 
       {name && <p className="dynimo-name">{name}</p>}
@@ -244,6 +274,7 @@ export function App() {
           ))}
         </ul>
       )}
+      </>}
 
       <main className="screen">
         {!session ? (
@@ -265,10 +296,13 @@ export function App() {
             <EmotionListener onEmotion={onEmotion} />
             <DisplayListener onDisplay={onDisplay} onName={setName} />
             <MouthVolumeListener onVolume={setMouthVolume} />
+            <GalleryListener onGallery={setBeings} />
             <SoundListener display={displayState} onSound={touch} />
             <ConnectionStatus />
             <RoomAudioRenderer />
             <StartAudio label="Zet geluid aan" />
+            {view.screen === "galerij" && <Gallery beings={view.beings} />}
+            {view.screen === "gezicht" && <BackButton id={view.awake.id} />}
             <button type="button" onClick={stop}>
               Stop
             </button>

@@ -62,6 +62,18 @@ export type Brain = {
    * niet als er niets te reflecteren valt. Geeft true bij een toegepaste Reflectie, anders false; gooit nooit.
    */
   reflect(hooks?: { onStart?: () => void }): Promise<boolean>;
+  /**
+   * Dashboard-override: zet de Stemming van deze Dynimo direct (ook lager dan de huidige); ze dooft daarna
+   * gewoon uit, de Basisemotie blijft ongewijzigd. False bij een onbekende id; gooit bij een ongeldige intensiteit.
+   */
+  forceMood(id: number, emotion: Emotion, intensity: number): Promise<boolean>;
+  /**
+   * Dashboard-override: voegt een Herinnering toe met dezelfde embed-stap als een normale beurt en de neutrale
+   * Indruk 0.5. False bij een onbekende id; gooit als het embedden of opslaan faalt.
+   */
+  addMemory(id: number, text: string): Promise<boolean>;
+  /** Dashboard-override: verwijdert een Herinnering hard, enkel als die van deze Dynimo is. False als er niets verwijderd is. */
+  removeMemory(id: number, memoryId: number): Promise<boolean>;
   /** Praat met de Wakker Dynimo (elke beurt uit de database gelezen). Niemand wakker: geen events. */
   hear(text: string): AsyncIterable<BrainEvent>;
 };
@@ -678,16 +690,20 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     }
   }
 
+  async function insertMemory(memoryText: string, dynimoId: number, impression: number): Promise<number> {
+    const { embedding } = await embed({ model: deps.embedder, value: memoryText });
+    const [row] = await deps.db
+      .insert(memories)
+      .values({ dynimoId, text: memoryText, embedding, createdAt: now(), impression })
+      .returning({ id: memories.id });
+    return row!.id;
+  }
+
   // De expliciete onthoud-tool geeft de neutrale Indruk 0.5; de eindremember van `hear` geeft die van Type1 mee.
   async function remember(memoryText: string, dynimoId = current?.id, impression = 0.5): Promise<boolean> {
     if (dynimoId === undefined) return false;
     try {
-      const { embedding } = await embed({ model: deps.embedder, value: memoryText });
-      const [row] = await deps.db
-        .insert(memories)
-        .values({ dynimoId, text: memoryText, embedding, createdAt: now(), impression })
-        .returning({ id: memories.id });
-      sessionMemoryIds.push(row!.id);
+      sessionMemoryIds.push(await insertMemory(memoryText, dynimoId, impression));
       return true;
     } catch (error) {
       console.warn("Herinnering opslaan faalde:", error instanceof Error ? error.message : error);
@@ -706,6 +722,36 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     if (!isBirthday(row.bornAt, now())) return [];
     const years = Number(dayOf(now()).slice(0, 4)) - Number(dayOf(row.bornAt).slice(0, 4));
     return [{ role: "system", content: `Vandaag is je verjaardag: je bent nu ${years} jaar oud. Jij beslist of en hoe je dat vermeldt.` }];
+  }
+
+  // Anders dan remember() géén sessionMemoryIds: een handmatig toegevoegde Herinnering moet meteen vindbaar zijn.
+  async function addMemory(id: number, text: string): Promise<boolean> {
+    const [being] = await deps.db.select({ id: dynimos.id }).from(dynimos).where(eq(dynimos.id, id));
+    if (!being) return false;
+    await insertMemory(text, id, 0.5);
+    return true;
+  }
+
+  async function removeMemory(id: number, memoryId: number): Promise<boolean> {
+    // Scoped op dynimo_id: een memoryId van een andere Dynimo matcht niet.
+    const deleted = await deps.db
+      .delete(memories)
+      .where(and(eq(memories.id, memoryId), eq(memories.dynimoId, id)))
+      .returning({ id: memories.id });
+    return deleted.length > 0;
+  }
+
+  async function forceMood(id: number, emotion: Emotion, intensity: number): Promise<boolean> {
+    return deps.db.transaction(async (tx) => {
+      const updated = await tx
+        .update(dynimos)
+        .set({ moodEmotion: emotion, moodIntensity: intensity, moodAt: now() })
+        .where(eq(dynimos.id, id))
+        .returning({ id: dynimos.id });
+      // Payload "mood:" laat de agent enkel het gezichtje verversen, zonder het lopende antwoord af te breken.
+      if (updated.length > 0) await notifyStateChange(tx, `mood:${id}`);
+      return updated.length > 0;
+    });
   }
 
   async function* hear(text: string): AsyncIterable<BrainEvent> {
@@ -857,5 +903,5 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     return epitaph;
   }
 
-  return { bringToLife, wake, sleep, kill, list, backfill, reflect, hear };
+  return { bringToLife, wake, sleep, kill, list, backfill, reflect, hear, forceMood, addMemory, removeMemory };
 }

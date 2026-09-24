@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, type ReactNode } from "react";
 import type { ActionState } from "./actions";
 
 // Eén formulier voor alle acties: pending-staat op de knop (genesis en afscheid duren seconden)
@@ -11,12 +11,15 @@ export function ActionForm({
   pendingLabel,
   id,
   confirmName,
+  children,
 }: {
   action: (prev: ActionState, formData: FormData) => Promise<ActionState>;
   label: string;
   pendingLabel: string;
   id?: number;
   confirmName?: boolean;
+  /** Extra velden van de actie (boven de knop). */
+  children?: ReactNode;
 }) {
   const [state, formAction, pending] = useActionState(action, {});
   return (
@@ -25,6 +28,7 @@ export function ActionForm({
       {confirmName && (
         <input name="name" placeholder="Typ de exacte naam" aria-label="Naam ter bevestiging" required />
       )}
+      {children}
       <button type="submit" disabled={pending}>
         {pending ? pendingLabel : label}
       </button>

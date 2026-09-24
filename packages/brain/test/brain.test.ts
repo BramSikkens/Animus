@@ -4,6 +4,7 @@ import { simulateReadableStream } from "ai";
 import { eq, isNotNull } from "drizzle-orm";
 import { EMBEDDING_DIMENSIONS, drives, dynimos, epitaphs, memories } from "@animus/db/schema";
 import postgres from "postgres";
+import { moodOfRow } from "../src/mood.js";
 import { createBrain, STATE_CHANNEL, type BrainEvent } from "../src/index.js";
 import { createTestDb, databaseUrl, TEST_DB_NAME, truncateAll } from "./db.js";
 
@@ -3020,6 +3021,178 @@ describe("createBrain", () => {
       expect(prompt).toContain("herinnering-100");
       expect(prompt).not.toContain("herinnering-101");
       expect((await rowOf(vero.id)).lastReflectedAt).toEqual(new Date(bornAt.getTime() + 100 * MIN));
+    });
+  });
+
+  describe("Dashboard-overrides", () => {
+    const bornAt = new Date("2026-01-01T12:00:00.000Z");
+    const MIN = 60_000;
+
+    function brainWith(options: { light?: MockLanguageModelV4; heavy?: MockLanguageModelV4; now?: () => Date } = {}) {
+      return createBrain({
+        db,
+        embedder: embedModel(),
+        type1: type1Model(),
+        type2: { light: options.light ?? unusedModel(), heavy: options.heavy ?? unusedModel() },
+        now: options.now ?? (() => bornAt),
+        random: () => 0,
+      });
+    }
+
+    async function insertDynimo(extra: Partial<typeof dynimos.$inferInsert> = {}) {
+      const [row] = await db
+        .insert(dynimos)
+        .values({
+          name: "Vero",
+          coreCharacter: "Rustig.",
+          birthStory: "Geboren.",
+          seed: "z",
+          bornAt,
+          awakeSince: bornAt,
+          baseEmotion: "kalm",
+          axisIe: 0.5,
+          axisSn: 0.5,
+          axisTf: 0.5,
+          axisJp: 0.5,
+          ...extra,
+        })
+        .returning();
+      return row!;
+    }
+
+    const rowOf = async (id: number) => (await db.select().from(dynimos).where(eq(dynimos.id, id)))[0]!;
+
+    describe("addMemory", () => {
+      it("maakt een Herinnering met embedding en neutrale Indruk", async () => {
+        const vero = await insertDynimo();
+
+        expect(await brainWith().addMemory(vero.id, "De kat heet Pluis")).toBe(true);
+
+        const [row] = await db.select().from(memories).where(eq(memories.dynimoId, vero.id));
+        expect(row).toMatchObject({ text: "De kat heet Pluis", impression: 0.5, createdAt: bornAt });
+        expect(row!.embedding).toEqual(fakeVector("De kat heet Pluis"));
+      });
+
+      it("wordt bij een volgende uiting teruggevonden (recall)", async () => {
+        const vero = await insertDynimo();
+        const light = textModel(["ok"]);
+        const brain = brainWith({ light });
+
+        await brain.addMemory(vero.id, "De kat heet Pluis");
+        await collectText(brain.hear("Weet je nog mijn kat?"));
+
+        expect(JSON.stringify(light.doStreamCalls[0]?.prompt)).toContain("De kat heet Pluis");
+      });
+
+      it("geeft false en bewaart niets bij een onbekende Dynimo", async () => {
+        expect(await brainWith().addMemory(999, "De kat heet Pluis")).toBe(false);
+        expect(await db.select().from(memories)).toHaveLength(0);
+      });
+
+      // ADD-APPEND
+    });
+
+    describe("removeMemory", () => {
+      const memoryOf = async (dynimoId: number, text: string, minutes = 1) => {
+        const [row] = await db
+          .insert(memories)
+          .values({ dynimoId, text, embedding: fakeVector(text), createdAt: new Date(bornAt.getTime() + minutes * MIN), impression: 0.5 })
+          .returning();
+        return row!;
+      };
+
+      it("verwijdert de Herinnering hard en laat andere Herinneringen van dezelfde Dynimo staan", async () => {
+        const vero = await insertDynimo();
+        const weg = await memoryOf(vero.id, "Weg ermee");
+        await memoryOf(vero.id, "Blijft", 2);
+
+        expect(await brainWith().removeMemory(vero.id, weg.id)).toBe(true);
+
+        expect((await db.select().from(memories)).map((row) => row.text)).toEqual(["Blijft"]);
+      });
+
+      it("verwijdert niets van een andere Dynimo en geeft dan false", async () => {
+        const vero = await insertDynimo();
+        const nova = await insertDynimo({ name: "Nova", awakeSince: null });
+        const novasMemory = await memoryOf(nova.id, "Van Nova");
+
+        expect(await brainWith().removeMemory(vero.id, novasMemory.id)).toBe(false);
+
+        expect(await db.select().from(memories)).toHaveLength(1);
+      });
+
+      it("geeft false bij een onbekende Herinnering", async () => {
+        const vero = await insertDynimo();
+
+        expect(await brainWith().removeMemory(vero.id, 999)).toBe(false);
+      });
+
+      it("telt de verwijderde Herinnering niet meer mee in de volgende Reflectie", async () => {
+        const vero = await insertDynimo();
+        const weg = await memoryOf(vero.id, "Geheim-verkeerd-onthouden", 1);
+        await memoryOf(vero.id, "Gewone-herinnering", 2);
+        const heavy = new MockLanguageModelV4({
+          doGenerate: async () =>
+            generateResult(
+              JSON.stringify({
+                evolvedCharacter: "x",
+                axisShifts: { ie: 0, sn: 0, tf: 0, jp: 0 },
+                drives: { add: [], closeGoals: [], adjust: [], drop: [] },
+                wakeMood: { emotion: "kalm", intensity: 0.4 },
+              }),
+            ),
+        });
+        const brain = brainWith({ heavy });
+
+        await brain.removeMemory(vero.id, weg.id);
+        await brain.sleep();
+
+        const prompt = JSON.stringify(heavy.doGenerateCalls[0]?.prompt);
+        expect(prompt).toContain("Gewone-herinnering");
+        expect(prompt).not.toContain("Geheim-verkeerd-onthouden");
+      });
+    });
+
+    describe("forceMood", () => {
+      it("zet de Stemming direct, ook onder de huidige intensiteit, en laat de Basisemotie ongemoeid", async () => {
+        const vero = await insertDynimo({ moodEmotion: "boos", moodIntensity: 0.9, moodAt: bornAt });
+
+        expect(await brainWith().forceMood(vero.id, "blij", 0.4)).toBe(true);
+
+        expect(await rowOf(vero.id)).toMatchObject({ moodEmotion: "blij", moodIntensity: 0.4, moodAt: bornAt, baseEmotion: "kalm" });
+      });
+
+      it("dooft de geforceerde Stemming daarna normaal uit (niet gepind)", async () => {
+        const vero = await insertDynimo();
+        await brainWith().forceMood(vero.id, "boos", 0.8);
+
+        const row = await rowOf(vero.id);
+        expect(moodOfRow(row, new Date(bornAt.getTime() + 10 * MIN))).toMatchObject({ emotion: "boos", intensity: 0.4 });
+        expect(moodOfRow(row, new Date(bornAt.getTime() + 60 * MIN))).toMatchObject({ emotion: "kalm", intensity: 0.3 });
+      });
+
+      it("geeft false en wijzigt niets bij een onbekende Dynimo", async () => {
+        const vero = await insertDynimo();
+
+        expect(await brainWith().forceMood(vero.id + 999, "boos", 0.8)).toBe(false);
+        expect((await rowOf(vero.id)).moodEmotion).toBeNull();
+      });
+
+      it("meldt de nieuwe Stemming op het toestandskanaal, zodat de agent hem publiceert", async () => {
+        const vero = await insertDynimo();
+        const client = postgres(databaseUrl(TEST_DB_NAME), { onnotice: () => {} });
+        const received: string[] = [];
+        await client.listen(STATE_CHANNEL, (payload) => received.push(payload));
+        try {
+          await brainWith().forceMood(vero.id, "boos", 0.8);
+          await new Promise((resolve) => setTimeout(resolve, 150));
+          expect(received).toEqual([`mood:${vero.id}`]);
+        } finally {
+          await client.end();
+        }
+      });
+
+      // OVERRIDES-APPEND
     });
   });
 });

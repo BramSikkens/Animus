@@ -26,6 +26,9 @@ describe("soundKindFor", () => {
     expect(soundKindFor("bang")).toBe("zuchten");
     expect(soundKindFor("verveeld")).toBe("zuchten");
     expect(soundKindFor("kalm")).toBe("zuchten");
+    expect(soundKindFor("droevig")).toBe("zuchten");
+    expect(soundKindFor("vredig")).toBe("zuchten");
+    expect(soundKindFor("druk")).toBeNull();
   });
   it("maakt geen geluid bij neutraal", () => {
     expect(soundKindFor("neutraal")).toBeNull();

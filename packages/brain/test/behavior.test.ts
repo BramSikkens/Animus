@@ -65,3 +65,13 @@ describe("initiativeFactor", () => {
     expect(initiativeFactor(singleEmotionValues("blij", 0.9), axes({ expressiveness: 0 }))).toBe(1);
   });
 });
+
+describe("decideBehavior: nieuwe emoties", () => {
+  it("droevig, vredig en druk worden nooit genegeerd of kort/lang", () => {
+    for (const emotion of ["droevig", "vredig", "druk"] as const) {
+      const values = singleEmotionValues(emotion, 1);
+      for (const roll of [0, 0.5, 0.99]) expect(decideBehavior({ values, axes: axes(), rng: rng(roll) })).toBe("normaal");
+      expect(initiativeFactor(values, axes())).toBe(1);
+    }
+  });
+});

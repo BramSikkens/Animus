@@ -39,6 +39,25 @@ describe("voiceSettingsFor", () => {
     }
   });
 
+  it("droevig: langzaam, hogere stability, lage style", () => {
+    const s = at("droevig");
+    expect(s.speed).toBeLessThan(1);
+    expect(s.stability).toBeGreaterThan(0.5);
+    expect(s.style).toBeLessThan(0.1);
+  });
+
+  it("vredig: langzaam, hoge stability", () => {
+    const s = at("vredig");
+    expect(s.speed).toBeLessThan(1);
+    expect(s.stability).toBeGreaterThan(0.7);
+  });
+
+  it("druk: snel, lage stability", () => {
+    const s = at("druk");
+    expect(s.speed).toBeGreaterThan(1.05);
+    expect(s.stability).toBeLessThan(0.4);
+  });
+
   it("verrast en nieuwsgierig: matige style", () => {
     for (const emotion of ["verrast", "nieuwsgierig"] as const) {
       const s = at(emotion);
@@ -60,12 +79,12 @@ describe("voiceSettingsFor", () => {
   });
 
   it("clampt binnen geldige ranges bij een extreme vector", () => {
-    const values = { blij: 100, boos: 100, verrast: 100, kalm: 0, verveeld: 0, nieuwsgierig: 100, bang: 100, neutraal: 0 };
+    const values = { blij: 100, boos: 100, verrast: 100, kalm: 0, verveeld: 0, nieuwsgierig: 100, bang: 100, neutraal: 0, droevig: 0, vredig: 0, druk: 100 };
     const s = voiceSettingsFor({ values, expressiveness: 1 });
     expect(s.style).toBeLessThanOrEqual(1);
     expect(s.stability).toBeGreaterThanOrEqual(0);
     expect(s.speed).toBeLessThanOrEqual(1.2);
-    const slow = voiceSettingsFor({ values: { ...values, blij: 0, boos: 0, verrast: 0, nieuwsgierig: 0, bang: 0, verveeld: 100, kalm: 100 }, expressiveness: 1 });
+    const slow = voiceSettingsFor({ values: { ...values, blij: 0, boos: 0, verrast: 0, nieuwsgierig: 0, bang: 0, verveeld: 100, kalm: 100, druk: 0, droevig: 100, vredig: 100 }, expressiveness: 1 });
     expect(slow.speed).toBeGreaterThanOrEqual(0.7);
     expect(slow.stability).toBeLessThanOrEqual(1);
   });

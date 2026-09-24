@@ -36,8 +36,11 @@ export function soundKindFor(emotion: Emotion): SoundKind | null {
     case "bang":
     case "verveeld":
     case "kalm":
+    case "droevig":
+    case "vredig":
       return "zuchten";
     case "neutraal":
+    case "druk":
       return null;
   }
 }

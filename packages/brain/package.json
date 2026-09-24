@@ -15,6 +15,7 @@
     "./drives": "./src/drives.ts",
     "./mood": "./src/mood.ts",
     "./sound": "./src/sound.ts",
+    "./speech-pacing": "./src/speech-pacing.ts",
     "./speech-sounds": "./src/speech-sounds.ts",
     "./voice": "./src/voice.ts",
     "./voice-catalog": "./src/voice-catalog.ts",

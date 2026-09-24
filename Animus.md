@@ -167,15 +167,15 @@ Er kunnen meerdere wezens naast elkaar bestaan, elk met een eigen identiteit, ge
 
 ### Verjaardag
 
-Afgeleid van `born_at`: een dagelijkse check vergelijkt de huidige datum met de geboortedag. Op die dag: aangepaste system-prompt-flag ("het is vandaag je verjaardag, je bent nu X jaar"), blijere emotie-baseline, en het robotje beslist zelf of/hoe het dit vermeldt.
+Afgeleid van `born_at`: een dagelijkse check vergelijkt de huidige datum met de geboortedag. Op die dag: aangepaste system-prompt-flag ("het is vandaag je verjaardag, je bent nu X jaar"), en het robotje beslist zelf of/hoe het dit vermeldt. De "blijere baseline" is een tijdelijke Stemmingsboost bij het eerste contact die dag (een sterke "blij"-Emotie, bestaand uitdoofmechanisme) — de Basisemotie zelf verandert niet.
 
 ### Nieuwsgierigheid/initiatief
 
-Type1 doet een periodieke of event-getriggerde check ("is er nu iets de moeite waard om spontaan iets over te zeggen?", bv. na X minuten stilte, of vanaf fase 3 een onbekend object in beeld). Enkel bij een positieve trigger wordt Type2 opgeroepen om er iets concreets mee te doen — houdt de kost laag (zie Kostenbeheersing).
+Type1 doet een periodieke of event-getriggerde check ("is er nu iets de moeite waard om spontaan iets over te zeggen?", bv. na X minuten stilte, of vanaf fase 3 een onbekend object in beeld). Enkel bij een positieve trigger wordt Type2 opgeroepen om er iets concreets mee te doen — houdt de kost laag (zie Kostenbeheersing). Initiatief is geen eigen as: het volgt uit de N/P-kant van Persoonlijkheid (een INTP antwoordt kort maar komt geregeld zelf terug met een vraag), zodat Reflectie geen vijfde getal hoeft bij te stellen.
 
 ### Dromen
 
-Een geplande job (bv. nachtelijk of na lange idle-tijd) laat Type2 een korte, associatieve/surrealistische reflectietekst genereren op basis van recente ervaringen + karakterprofiel + Drijfveren (vooral Toekomstdromen, Wensen en Ergernissen). Opslag in een aparte `dreams`-tabel. Wordt zeldzaam (niet elke keer) aangehaald in gesprek om speciaal te blijven.
+Onderdeel van de bestaande Reflectie-bij-het-slapen (geen apart schema of scheduler): Type2 genereert er een korte, associatieve/surrealistische Droom bij op basis van recente Herinneringen, Persoonlijkheid en Drijfveren (vooral Toekomstdromen, Wensen en Ergernissen). Opslag in een aparte `dreams`-tabel. Wordt zeldzaam (niet elke keer) aangehaald in gesprek om speciaal te blijven. Een Droom overschrijft de Ontwaakstemming die de Reflectie klaarzet enkel als hij intenser is — zelfde regel als een gewone Emotie tegenover de Stemming.
 
 ## Emoties & het gezicht
 
@@ -203,12 +203,16 @@ Een geplande job (bv. nachtelijk of na lange idle-tijd) laat Type2 een korte, as
 
 - Type1 (Jev) bepaalt continu `{emotion, intensity}` uit toon/context, doorgestuurd via WebSocket of een LiveKit data channel naar het gezichtje — dit hoeft niet te wachten op de volledige Type2-redenering
 
-**Levendigheid — idle-animatie en toestanden (fase 2b):** het gezicht mag nooit een stilstaand plaatje zijn. Naast de emotiekeyframes komt een continue idle-laag (knipperen, een subtiele ademhaling in schaal/positie, lichte pupilverschuiving) die altijd doorloopt, ook zonder emotie-event. Daarbovenop krijgt elke weergavetoestand een eigen, herkenbare beweging in plaats van een statische pose: een nieuwe **luisterend**-toestand (naast de bestaande *wakker*/*reflecterend*/*slapend*) terwijl er spraak binnenkomt, een eigen beweging voor *reflecterend*, en de idle-laag zelf voor stilte zonder gesprek.
+**Levendigheid — idle-animatie en toestanden (fase 2b):** het gezicht mag nooit een stilstaand plaatje zijn. Drie lagen, los van elkaar en los van de Emotiekeyframes (die ongewijzigd blijven):
+
+- **Altijd-aan idle-animatie** — knipperen, een subtiele ademhaling in schaal/positie, lichte pupilverschuiving en een subtiele wenkbrauwbeweging; blijft in élke Weergavetoestand doorlopen, ook zonder emotie-event.
+- **Mondbeweging op audio** — tijdens *spreekt* stuurt het live audioniveau van de Dynimo's TTS-output de mondbeweging, niet de tekst.
+- **Weergavetoestand als eigen beweging** — vijf toestanden: *slapend*, *wakker* (idle-animatie), **luisterend** (nieuw — de Gesprekspartner praat), **spreekt** (nieuw — de Dynimo praat, mondbeweging uit de vorige laag) en *reflecterend*. Elke toestand krijgt een eigen, herkenbare beweging i.p.v. een statische pose.
 
 **Extra expressiemodi:**
 
-- **Zelf geluiden maken** — korte audioclips (kirren, zuchten, brommen) getriggerd door emotiewissels, geen LLM-call nodig
-- **Doodle-modus** — bij lange idle-tijd schakelt het canvas over naar een genererende/procedurele tekening in dezelfde monochrome stijl, puur lokale animatie
+- **Zelf geluiden maken** — korte audioclips (kirren, zuchten, brommen) getriggerd door een zichtbare **Stemmingsverandering** (niet elke onderliggende Emotie — anders klinkt het te druk), geen LLM-call nodig
+- **Doodle-modus** — bij lange idle-tijd (eigen, mogelijk kortere drempel dan de 30-minuten-stiltedrempel van Reflectie) schakelt het canvas over naar een genererende/procedurele tekening in dezelfde monochrome stijl, puur lokale animatie; loopt de stilte-Reflectie (#28), dan wint *reflecterend* — twee onafhankelijke drempels, geen gedeelde config
 
 ## Spraak
 
@@ -236,7 +240,7 @@ Twee sporen, te combineren:
 
 *(Dromen, verjaardag en nieuwsgierigheid staan uitgewerkt onder Identiteit & karakter; hoofdvolggedrag, zelf geluiden en doodle-modus onder Zicht/camera en Emoties & het gezicht.)*
 
-**Klein dashboard:** een Next.js-pagina die rechtstreeks connecteert met dezelfde Postgres-database — toont karakterprofiel (kern + geëvolueerd deel), recente geheugens/dromen, huidige emotie/energie, leeftijd, activiteitenlog. Later ook een handmatige "override"-plek (emotie forceren, herinnering toevoegen/verwijderen) en het Langfuse-kostendashboard (zie Kostenbeheersing). Vanaf fase 2 ook het beheer van meerdere wezens (zie *Meerdere wezens*).
+**Klein dashboard:** een Next.js-pagina die rechtstreeks connecteert met dezelfde Postgres-database — toont karakterprofiel (kern + geëvolueerd deel), recente geheugens/dromen, huidige emotie/energie, leeftijd, activiteitenlog. Later ook een handmatige "override"-plek (fase 2b) — **emotie forceren** zet de Stemming (die daarna gewoon met de bestaande halfwaardetijd uitdooft, geen apart "gepind"-concept), **herinnering toevoegen** krijgt dezelfde synchrone embed-stap als een normale Herinnering, anders zou hij nooit teruggevonden worden — en het Langfuse-kostendashboard (zie Kostenbeheersing). Vanaf fase 2 ook het beheer van meerdere wezens (zie *Meerdere wezens*).
 
 **Modelwissel-experiment:** een dropdown in het dashboard om het actieve Type2-model tijdens een sessie te wisselen (Claude/Gemini/OpenAI/lokaal), om te observeren hoe het karakter subtiel verschuift per onderliggend model — meteen ook een test of de architectuur écht modelonafhankelijk is. Kost = enkel tijdens bewust testen, geen doorlopende productiekost.
 
@@ -284,7 +288,7 @@ Twee sporen, te combineren:
 
 **Fase 1 — computer-prototype:** Type2-brein (wisselbaar via Vercel AI SDK) + genesis-flow (naam/karakter) + basisgeheugen (pgvector) + tools + gezichtje op scherm (React/SVG) + STT/TTS via LiveKit + Type1-router (Jev) voor emotie/turn-taking + dashboard + volledig verwijderen (met grafschrift en afscheidsreflectie — nodig om de genesis-flow herhaald te kunnen testen). Nog geen camera/motoren — puur om de "geest" en het karakter te valideren.
 
-**Fase 2 — uitbreiding op de computer:** volledige feature-set (dromen, verjaardag, nieuwsgierigheid, zelf geluiden, doodle-modus) + karakterevolutie via de reflectie-loop (basis voor de dromen), inclusief een MBTI-persoonlijkheid met traag verschuivende assen (spraakzaamheid via I/E, initiatief als aparte knop) + Langfuse-kostenmonitoring + modelwissel-experiment en handmatige overrides (emotie forceren, herinnering toevoegen/verwijderen) in het dashboard + meerdere wezens, te beheren via het dashboard (tot leven wekken, wakker maken, laten slapen, doden) + Drijfveren (wensen, doelen, toekomstdromen, afkeren, ergernissen) + emotie als reactie van het wezen, met een uitdovende stemming die de toon van Type2 kleurt.
+**Fase 2 — uitbreiding op de computer:** volledige feature-set (dromen, verjaardag, nieuwsgierigheid, zelf geluiden, doodle-modus, levendige idle-animatie) + karakterevolutie via de reflectie-loop (basis voor de dromen), inclusief een MBTI-persoonlijkheid met traag verschuivende assen (spraakzaamheid via I/E, initiatief afgeleid van N/P) + Langfuse-kostenmonitoring + handmatige overrides (emotie forceren, herinnering toevoegen/verwijderen) in het dashboard + meerdere wezens, te beheren via het dashboard (tot leven wekken, wakker maken, laten slapen, doden) + Drijfveren (wensen, doelen, toekomstdromen, afkeren, ergernissen) + emotie als reactie van het wezen, met een uitdovende stemming die de toon van Type2 kleurt.
 
 **Fase 3 — Raspberry Pi + motoren:** Alles porteren naar de Pi, camera + MediaPipe (Type1-perceptie) en multimodale Type2-vision (verschoven uit fase 2: de camera hoort bij de hardware en het hoofdvolggedrag), motoraansturing (johnny-five) gekoppeld aan de tool-laag, hoofdvolggedrag via servo's, schermpje in kiosk-mode voor het gezichtje, ervaringsgeheugen voor fysieke acties, veiligheidslaag (Type1) voor motorbewegingen, privacy-maatregelen (mute-knop, luister-indicator, wake-word), optioneel per-persoon-geheugen (stem/gezicht-herkenning).
 
@@ -304,5 +308,7 @@ Beslist tijdens de `/grill-with-docs`-sessies (fase 1 en fase 2a) — zie [CONTE
 - [x] **Doelen — actief nastreven:** in 2a verandert de status enkel bij Reflectie; actief nastreven hoort bij initiatief (2b).
 - [x] **Meerdere wezens — wisselen:** het lopende antwoord wordt meteen onderbroken, de huidige Dynimo gaat slapen (met Reflectie), daarna wordt de andere wakker.
 - [x] **Meerdere wezens — maximum:** geen grens.
-- [ ] **Initiatief:** bevestigen dat het van de N- en P-kant afgeleid wordt (voorstel), of een eigen as/knop krijgt.
-- [ ] **Levendigheid/idle-animatie:** vorm van de continue idle-laag (knipperen, ademhaling, pupilverschuiving) en een aparte *luisterend*-weergavetoestand, los van de emotiekeyframes — fase 2b.
+- [x] **Initiatief:** afgeleid van de N- en P-kant van Persoonlijkheid, geen eigen as/knop.
+- [x] **Levendigheid/idle-animatie — lagen en toestanden:** drie lagen (altijd-aan idle-animatie, mondbeweging op audio tijdens *spreekt*, eigen beweging per Weergavetoestand) en vijf toestanden (*slapend*/*wakker*/**luisterend**/**spreekt**/*reflecterend*), los van de Emotiekeyframes.
+- [ ] **Levendigheid/idle-animatie — technische koppeling:** of *luisterend*/*spreekt* op LiveKit's ingebouwde `AgentState`/`UserState` leunen i.p.v. een eigen state-uitbreiding, en hoe de mondbeweging het audioniveau uitleest — fase 2b, vervolgronde.
+- [ ] **Modelwissel-experiment:** uit `Animus.md` verwijderd wegens niet uitgewerkt/onduidelijk doel; zeg het als dit toch bij fase 2b hoort.

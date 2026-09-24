@@ -86,6 +86,10 @@ _Avoid_: voorkeur, interesse; een Toekomstdroom is geen Droom (de nachtelijke dr
 Een Type2-verwerking van recente ervaringen die het geëvolueerde karakter, de persoonlijkheidsassen en de Drijfveren van een Dynimo bijstelt, telkens met een grens op hoeveel er mag verschuiven. Draait wanneer de Dynimo gaat slapen, en bij lange stilte terwijl hij wakker is; dat laatste is zichtbaar aan het gezichtje (reflecterend), maar zegt de Gesprekspartner iets, dan antwoordt de Dynimo gewoon en loopt de Reflectie op de achtergrond verder.
 _Avoid_: samenvatting, evaluatie; niet te verwarren met de Afscheidsreflectie
 
+**Droom** (fase 2b):
+Een korte, associatieve tekst die Type2 genereert als onderdeel van de Reflectie-bij-het-slapen, op basis van recente Herinneringen, Drijfveren en Persoonlijkheid. Bewaard in een eigen tabel, zeldzaam aangehaald in gesprek. Overschrijft de Ontwaakstemming enkel als hij intenser is dan wat de Reflectie anders zou klaarzetten.
+_Avoid_: niet te verwarren met een Toekomstdroom (een Drijfveer, geen nachtelijke tekst)
+
 ### Expressie
 
 **Emotie**:
@@ -103,3 +107,11 @@ _Avoid_: default-emotie, rustemotie
 **Emotiekeyframe**:
 De visuele definitie van één emotie: oogvorm/scale/pupil-offset, mondkromming (bezier), achtergrondkleur en, voor een subset van emoties (verrast, boos, bang), een wenkbrauwstand — de overige emoties gebruiken een neutraal-rechte wenkbrauw. Bij een emotiewissel wordt hiertussen getweend.
 _Avoid_: expressie-state, animatie (te generiek)
+
+**Weergavetoestand** (fase 2b):
+De niet-emotionele modus van het gezichtje, los van de Emotiekeyframes: *slapend*, *wakker*, *luisterend* (de Gesprekspartner praat), *spreekt* (de Dynimo praat) of *reflecterend*. Bepaalt welke animatielaag toont, niet welke emotie.
+_Avoid_: mode, view-state, display-state (in proza toegestaan, niet als term)
+
+**Idle-animatie** (fase 2b):
+De continue microbeweging (knipperen, ademhaling, pupilverschuiving, subtiele wenkbrauwbeweging) die in elke Weergavetoestand blijft doorlopen, los van een Emotiekeyframe-wissel — zodat het gezicht nooit stilstaat. Tijdens *spreekt* stuurt de audio van de Dynimo bovendien de mondbeweging.
+_Avoid_: ademhaling (dat is er één onderdeel van), micro-animatie

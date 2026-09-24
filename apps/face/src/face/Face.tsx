@@ -53,7 +53,7 @@ type EyeProps = { cx: number; eye: Keyframe["eyes"]["left"]; background: string;
 
 function Eye({ cx, eye, background, idle }: EyeProps) {
   return (
-    <motion.g style={{ scaleY: idle.blink, transformOrigin: `${cx}px ${EYE_Y}px` }}>
+    <motion.g style={{ scaleY: idle.blink, transformBox: "view-box", transformOrigin: `${cx}px ${EYE_Y}px` }}>
       <motion.ellipse
         initial={false}
         animate={{ cx, cy: EYE_Y, rx: EYE_BASE_R * eye.scale, ry: EYE_BASE_R * eye.scale * Math.max(eye.open, 0.05) }}
@@ -138,7 +138,7 @@ export function Face({ display, emotion, intensity }: FaceProps) {
       <svg className="face-svg" viewBox="0 0 200 200" role="img" aria-label={
           display === "slapend" ? "Animus slaapt" : display === "reflecterend" ? "Animus denkt na" : `Animus voelt zich ${emotion}`
         }>
-        <motion.g style={{ scale: breathScale, y: breathY, transformOrigin: "100px 100px" }}>
+        <motion.g style={{ scale: breathScale, y: breathY, transformBox: "view-box", transformOrigin: "100px 100px" }}>
           <Eye cx={EYE_X.left} eye={frame.eyes.left} background={frame.background} idle={idle} />
           <Eye cx={EYE_X.right} eye={frame.eyes.right} background={frame.background} idle={idle} />
           <Brow cx={EYE_X.left} side="left" brow={frame.brow} browY={browY} />

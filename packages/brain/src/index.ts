@@ -25,6 +25,7 @@ import { AXIS_DESCRIPTIONS, type Axes, axisGuidelines, mbtiType, rowAxes } from 
 import { EMOTIONS, oppositeOf, type Emotion } from "./emotion.js";
 import { SEEDS } from "./seeds.js";
 import { createTools } from "./tools.js";
+import { chooseGenesisVoice, elevenLabsGenesisVoices, type GenesisVoiceDeps } from "./genesis-voice.js";
 
 export { EMOTIONS, type Emotion };
 export { formatAge };
@@ -146,6 +147,8 @@ export const genesisSchema = z.object({
   drives: drivesSchema,
   baseEmotion: z.enum(EMOTIONS),
   archetype: z.string().nullable(),
+  voiceDescription: z.string(),
+  voiceSearchTerms: z.array(z.string()),
 });
 
 const BASE_EMOTION_DESCRIPTION = `De Basisemotie is het temperament van het wezen: de emotie waar zijn stemming naartoe uitdooft als er niets gebeurt. Kies er één uit: ${EMOTIONS.join(", ")}.`;
@@ -209,6 +212,7 @@ Kies ook je Drijfveren: per soort 1 of 2 items, passend bij de Seed én bij de p
 ${DRIVE_DESCRIPTIONS}
 Doelen starten actief.
 ${BASE_EMOTION_DESCRIPTION} Kies ze passend bij je persoonlijkheid en de Seed.
+Beschrijf ook je stem in het veld "voiceDescription": een korte Nederlandse stembeschrijving (bv. "oude man, hees, langzaam" of "robotachtig, metaalachtig"). Geef in "voiceSearchTerms" 3 tot 6 Engelse zoektermen voor die stem (bv. "old man", "raspy", "robotic", "alien").
 Antwoord in het Nederlands.`;
 
 function genesisArchetypeInstructions(offer: string): string {
@@ -354,9 +358,12 @@ export function createBrain(deps: {
   embedder: EmbeddingModel;
   now?: () => Date;
   random?: () => number;
+  /** Stemkeuze bij genesis; default: echte ElevenLabs als ELEVENLABS_API_KEY gezet is, anders geen stemkeuze. */
+  voices?: GenesisVoiceDeps;
 }): Brain {
   const now = deps.now ?? (() => new Date());
   const random = deps.random ?? Math.random;
+  const voices = deps.voices ?? elevenLabsGenesisVoices(process.env);
   let lastIgnored = false; // vorige beurt genegeerd? Voorkomt twee keer achter elkaar negeren.
   let current: Dynimo | undefined;
   const tools = createTools({ now, remember });
@@ -364,7 +371,7 @@ export function createBrain(deps: {
   // Herinneringen uit deze sessie staan al in het werkgeheugen; niet dubbel ophalen.
   const sessionMemoryIds: number[] = [];
 
-  async function genesis(): Promise<{ dynimo: typeof dynimos.$inferInsert; drives: DrivesOutput }> {
+  async function genesis(): Promise<{ dynimo: typeof dynimos.$inferInsert; drives: DrivesOutput; voice: { voice: string; description: string } | null }> {
     const seed = pickSeed(random);
     const offer = pickOffer(random);
     const result = await generateText({
@@ -393,6 +400,14 @@ export function createBrain(deps: {
         bornAt: now(),
       },
       drives: result.output.drives,
+      voice: voices
+        ? await chooseGenesisVoice(voices, {
+            description: result.output.voiceDescription,
+            searchTerms: result.output.voiceSearchTerms,
+            hint: archetype?.voiceHint ?? "",
+            name: result.output.name,
+          })
+        : null,
     };
   }
 
@@ -602,7 +617,7 @@ ${fresh.map((memory) => `- (indruk ${memory.impression}) ${memory.text}`).join("
       slept = await sleepAll(tx);
       const [inserted] = await tx
         .insert(dynimos)
-        .values({ ...born.dynimo, awakeSince: now() })
+        .values({ ...born.dynimo, voice: born.voice?.voice ?? null, voiceDescription: born.voice?.description ?? null, awakeSince: now() })
         .returning();
       await tx.insert(drives).values(driveRowsFor(inserted!.id, born.drives, now()));
       await notifyStateChange(tx, String(inserted!.id));

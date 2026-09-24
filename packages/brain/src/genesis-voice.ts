@@ -1,5 +1,6 @@
 // Genesis-stemkeuze: zoektermen (NL + EN) tegen de ElevenLabs-catalogus. Puur en zonder netwerk; catalogus komt van buiten.
-import type { CatalogVoice } from "./voice-catalog.js";
+import { cached, fetchCatalog, fetchTier, type CatalogVoice } from "./voice-catalog.js";
+import { designVoice, saveDesignedVoice } from "./voice-design.js";
 
 // ElevenLabs-labels zijn Engels: Nederlandse stemtermen krijgen een Engels equivalent erbij.
 // ponytail: kleine handmatige lijst; breid uit als archetypes/Type2 vaker termen missen.
@@ -30,4 +31,51 @@ export function pickVoiceForCharacter({ description, catalog, tier }: { descript
     if (!best || score > best.score || (score === best.score && voice.id < best.voice.id)) best = { voice, score };
   }
   return best?.voice ?? null;
+}
+
+export type GenesisVoiceDeps = {
+  loadCatalog: () => Promise<{ catalog: CatalogVoice[]; tier: string }>;
+  /** Alleen gezet als voice design aan staat (GENESIS_VOICE_DESIGN=1); geeft het nieuwe voice_id of null. Kost tegoed. */
+  design?: (description: string, name: string) => Promise<string | null>;
+};
+
+/** Stem voor een net geboren Dynimo, of null (default-stem). Faalt nooit: elke fout wordt gelogd en levert null. */
+export async function chooseGenesisVoice(
+  deps: GenesisVoiceDeps,
+  { description, searchTerms, hint, name }: { description: string; searchTerms: string[]; hint: string; name: string },
+): Promise<{ voice: string; description: string } | null> {
+  const profileDescription = description.trim() || hint;
+  try {
+    const { catalog, tier } = await deps.loadCatalog();
+    if (tier === "free") return null;
+    const match = pickVoiceForCharacter({ description: [description, ...searchTerms, hint].join(" "), catalog, tier });
+    if (match) return { voice: match.id, description: profileDescription };
+    if (!deps.design || !profileDescription) return null;
+    const designed = await deps.design(profileDescription, name);
+    return designed ? { voice: designed, description: profileDescription } : null;
+  } catch (error) {
+    console.warn("Genesis-stemkeuze faalde; default-stem blijft:", error instanceof Error ? error.message : error);
+    return null;
+  }
+}
+
+const PREVIEW_TEXT =
+  "Hallo, ik ben net geboren en ontdek de wereld om me heen. Ik praat graag over alles wat ik zie, hoor en voel, en ik hoop dat we samen veel gaan beleven.";
+
+/** Echte ElevenLabs-koppeling; undefined zonder ELEVENLABS_API_KEY. Voice design (kost tegoed) alleen met GENESIS_VOICE_DESIGN=1. */
+export function elevenLabsGenesisVoices(env: Record<string, string | undefined>, fetchFn: typeof fetch = fetch): GenesisVoiceDeps | undefined {
+  const apiKey = env.ELEVENLABS_API_KEY;
+  if (!apiKey) return undefined;
+  const loadCatalog = cached(async () => {
+    const tier = await fetchTier(fetchFn, apiKey);
+    return { tier, catalog: tier === "free" ? [] : await fetchCatalog(fetchFn, apiKey, "nl", tier) };
+  }, 10 * 60_000);
+  const design =
+    env.GENESIS_VOICE_DESIGN === "1"
+      ? async (description: string, name: string) => {
+          const [preview] = await designVoice(fetchFn, apiKey, `${description}. Spreekt Nederlands.`, PREVIEW_TEXT);
+          return preview ? saveDesignedVoice(fetchFn, apiKey, { name: `Animus ${name}`, description, generatedVoiceId: preview.generatedVoiceId }) : null;
+        }
+      : undefined;
+  return { loadCatalog, design };
 }

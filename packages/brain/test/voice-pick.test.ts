@@ -38,3 +38,13 @@ describe("pickVoiceForCharacter", () => {
     expect(pickVoiceForCharacter({ description: "old man", catalog: two, tier: "starter" })?.id).toBe("a");
   });
 });
+
+describe("elevenLabsGenesisVoices", () => {
+  it("is undefined zonder key; voice design alleen met GENESIS_VOICE_DESIGN=1", async () => {
+    const { elevenLabsGenesisVoices } = await import("../src/genesis-voice.js");
+    const never = (async () => { throw new Error("geen netwerk"); }) as unknown as typeof fetch;
+    expect(elevenLabsGenesisVoices({}, never)).toBeUndefined();
+    expect(elevenLabsGenesisVoices({ ELEVENLABS_API_KEY: "k" }, never)?.design).toBeUndefined();
+    expect(elevenLabsGenesisVoices({ ELEVENLABS_API_KEY: "k", GENESIS_VOICE_DESIGN: "1" }, never)?.design).toBeTypeOf("function");
+  });
+});

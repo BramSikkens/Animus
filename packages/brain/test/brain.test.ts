@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { MockEmbeddingModelV4, MockLanguageModelV4, Experimental_EvaluationMockModelV4 } from "ai/test";
 import { simulateReadableStream } from "ai";
 import { eq, isNotNull } from "drizzle-orm";
@@ -8,6 +8,7 @@ import { EMOTIONS } from "../src/emotion.js";
 import { moodOfRow, singleEmotionValues, type MoodValues } from "../src/mood.js";
 import { ARCHETYPES, getArchetype } from "../src/archetypes.js";
 import { createBrain, DELTA_TABLE, STATE_CHANNEL, type BrainEvent } from "../src/index.js";
+import type { CatalogVoice } from "../src/voice-catalog.js";
 import { createTestDb, databaseUrl, TEST_DB_NAME, truncateAll } from "./db.js";
 
 const db = createTestDb();
@@ -44,10 +45,12 @@ function genesisModel(result: {
   drives?: typeof MID_DRIVES;
   baseEmotion?: string;
   archetype?: string | null;
+  voiceDescription?: string;
+  voiceSearchTerms?: string[];
 }) {
   return new MockLanguageModelV4({
     doGenerate: async () => ({
-      content: [{ type: "text" as const, text: JSON.stringify({ axes: MID_AXES, drives: MID_DRIVES, baseEmotion: "kalm", archetype: null, ...result }) }],
+      content: [{ type: "text" as const, text: JSON.stringify({ axes: MID_AXES, drives: MID_DRIVES, baseEmotion: "kalm", archetype: null, voiceDescription: "", voiceSearchTerms: [], ...result }) }],
       finishReason: STOP,
       usage: NULL_USAGE,
       warnings: [],
@@ -63,7 +66,7 @@ function generateResult(text: string) {
 function lifecycleModel(name: string, farewell: string) {
   return new MockLanguageModelV4({
     doGenerate: [
-      generateResult(JSON.stringify({ name, coreCharacter: "Speels.", birthStory: "Geboren uit ochtendnevel.", axes: MID_AXES, drives: MID_DRIVES, baseEmotion: "kalm", archetype: null })),
+      generateResult(JSON.stringify({ name, coreCharacter: "Speels.", birthStory: "Geboren uit ochtendnevel.", axes: MID_AXES, drives: MID_DRIVES, baseEmotion: "kalm", archetype: null, voiceDescription: "", voiceSearchTerms: [] })),
       generateResult(farewell),
     ],
   });
@@ -219,6 +222,63 @@ describe("createBrain", () => {
     expect(rows[0]?.seed).toBe(result.seed);
     expect(result.awakeSince).toEqual(bornAt);
     expect(rows[0]?.awakeSince).toEqual(bornAt);
+  });
+
+  describe("genesis-stemkeuze", () => {
+    const bornAt = new Date("2026-01-01T00:00:00.000Z");
+    const voice = (id: string, description: string): CatalogVoice => ({
+      id, name: id, gender: "", age: "", accent: "", description, useCase: "", language: "nl", previewUrl: "", category: "premade", usableOnFree: true,
+    });
+    const born = async (
+      result: Parameters<typeof genesisModel>[0],
+      voices?: NonNullable<Parameters<typeof createBrain>[0]["voices"]>,
+    ) => {
+      const heavy = genesisModel(result);
+      const brain = createBrain({ db, embedder: embedModel(), type1: type1Model(), type2: { light: unusedModel(), heavy }, now: () => bornAt, random: () => 0, voices });
+      return brain.bringToLife();
+    };
+    const base = { name: "Nova", coreCharacter: "x", birthStory: "y" };
+    const loader = (catalog: CatalogVoice[], tier = "starter") => ({ loadCatalog: async () => ({ catalog, tier }) });
+
+    it("kiest een stem uit de catalogus op voiceDescription en zoektermen en bewaart het profiel", async () => {
+      const row = await born({ ...base, voiceDescription: "oude man, hees", voiceSearchTerms: ["old man"] }, loader([voice("opa", "old man raspy"), voice("kind", "child")]));
+      expect(row.voice).toBe("opa");
+      expect(row.voiceDescription).toBe("oude man, hees");
+      expect((await db.select().from(dynimos))[0]?.voice).toBe("opa");
+    });
+
+    it("gebruikt de voiceHint van het gekozen archetype als aanvulling", async () => {
+      const row = await born({ ...base, archetype: "robot" }, loader([voice("bot", "robotic voice"), voice("kind", "child")]));
+      expect(row.voice).toBe("bot");
+    });
+
+    it("blijft op de default-stem zonder match, bij lege catalogus en op free", async () => {
+      expect((await born({ ...base, voiceDescription: "alien" }, loader([voice("kind", "child")]))).voice).toBeNull();
+      expect((await born({ ...base, voiceDescription: "alien" }, loader([]))).voice).toBeNull();
+      expect((await born({ ...base, voiceDescription: "child" }, loader([voice("kind", "child")], "free"))).voice).toBeNull();
+    });
+
+    it("faalt nooit door de stemstap", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const row = await born({ ...base, voiceDescription: "child" }, { loadCatalog: async () => { throw new Error("API stuk"); } });
+      expect(row.name).toBe("Nova");
+      expect(row.voice).toBeNull();
+      expect(warn).toHaveBeenCalled();
+      warn.mockRestore();
+    });
+
+    it("ontwerpt een stem alleen zonder match en met design-functie; mislukt design blijft default", async () => {
+      const design = vi.fn(async () => "gen1");
+      const withDesign = { ...loader([voice("kind", "child")]), design };
+      expect((await born({ ...base, voiceDescription: "child" }, withDesign)).voice).toBe("kind");
+      expect(design).not.toHaveBeenCalled();
+      expect((await born({ ...base, name: "Nova2", voiceDescription: "alien" }, withDesign)).voice).toBe("gen1");
+      expect(design).toHaveBeenCalledWith("alien", "Nova2");
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const failing = { ...loader([]), design: async () => { throw new Error("geen tegoed"); } };
+      expect((await born({ ...base, voiceDescription: "alien" }, failing)).voice).toBeNull();
+      warn.mockRestore();
+    });
   });
 
   describe("genesis met archetypes", () => {
@@ -848,9 +908,9 @@ describe("createBrain", () => {
     const bornAt = new Date("2026-01-01T12:00:00.000Z");
     const heavy = new MockLanguageModelV4({
       doGenerate: [
-        generateResult(JSON.stringify({ name: "Nova", coreCharacter: "Speels.", birthStory: "Ochtendnevel.", axes: MID_AXES, drives: MID_DRIVES, baseEmotion: "kalm", archetype: null })),
+        generateResult(JSON.stringify({ name: "Nova", coreCharacter: "Speels.", birthStory: "Ochtendnevel.", axes: MID_AXES, drives: MID_DRIVES, baseEmotion: "kalm", archetype: null, voiceDescription: "", voiceSearchTerms: [] })),
         generateResult("Vaarwel, lieve Mimi-kenner."),
-        generateResult(JSON.stringify({ name: "Lumen", coreCharacter: "Rustig.", birthStory: "Maanlicht.", axes: MID_AXES, drives: MID_DRIVES, baseEmotion: "kalm", archetype: null })),
+        generateResult(JSON.stringify({ name: "Lumen", coreCharacter: "Rustig.", birthStory: "Maanlicht.", axes: MID_AXES, drives: MID_DRIVES, baseEmotion: "kalm", archetype: null, voiceDescription: "", voiceSearchTerms: [] })),
       ],
     });
     const light = new MockLanguageModelV4({ doStream: [textStream("Hoi."), textStream("Hallo, ik ben Lumen.")] });
@@ -966,9 +1026,9 @@ describe("createBrain", () => {
     const bornAt = new Date("2026-01-01T12:00:00.000Z");
     const heavy = new MockLanguageModelV4({
       doGenerate: [
-        generateResult(JSON.stringify({ name: "Nova", coreCharacter: "x", birthStory: "y", axes: MID_AXES, drives: MID_DRIVES, baseEmotion: "kalm", archetype: null })),
+        generateResult(JSON.stringify({ name: "Nova", coreCharacter: "x", birthStory: "y", axes: MID_AXES, drives: MID_DRIVES, baseEmotion: "kalm", archetype: null, voiceDescription: "", voiceSearchTerms: [] })),
         generateResult("Vaarwel."),
-        generateResult(JSON.stringify({ name: "Lumen", coreCharacter: "Rustig.", birthStory: "Maanlicht.", axes: MID_AXES, drives: MID_DRIVES, baseEmotion: "kalm", archetype: null })),
+        generateResult(JSON.stringify({ name: "Lumen", coreCharacter: "Rustig.", birthStory: "Maanlicht.", axes: MID_AXES, drives: MID_DRIVES, baseEmotion: "kalm", archetype: null, voiceDescription: "", voiceSearchTerms: [] })),
       ],
     });
     const deleter = createBrain({
@@ -1046,8 +1106,8 @@ describe("createBrain", () => {
     function genesisTwice(first: string, second: string) {
       return new MockLanguageModelV4({
         doGenerate: [
-          generateResult(JSON.stringify({ name: first, coreCharacter: "x", birthStory: "y", axes: MID_AXES, drives: MID_DRIVES, baseEmotion: "kalm", archetype: null })),
-          generateResult(JSON.stringify({ name: second, coreCharacter: "x", birthStory: "y", axes: MID_AXES, drives: MID_DRIVES, baseEmotion: "kalm", archetype: null })),
+          generateResult(JSON.stringify({ name: first, coreCharacter: "x", birthStory: "y", axes: MID_AXES, drives: MID_DRIVES, baseEmotion: "kalm", archetype: null, voiceDescription: "", voiceSearchTerms: [] })),
+          generateResult(JSON.stringify({ name: second, coreCharacter: "x", birthStory: "y", axes: MID_AXES, drives: MID_DRIVES, baseEmotion: "kalm", archetype: null, voiceDescription: "", voiceSearchTerms: [] })),
         ],
       });
     }
@@ -1255,8 +1315,8 @@ describe("createBrain", () => {
     function twoDynimosBrain() {
       const heavy = new MockLanguageModelV4({
         doGenerate: [
-          generateResult(JSON.stringify({ name: "Nova", coreCharacter: "x", birthStory: "y", axes: MID_AXES, drives: MID_DRIVES, baseEmotion: "kalm", archetype: null })),
-          generateResult(JSON.stringify({ name: "Lumen", coreCharacter: "x", birthStory: "y", axes: MID_AXES, drives: MID_DRIVES, baseEmotion: "kalm", archetype: null })),
+          generateResult(JSON.stringify({ name: "Nova", coreCharacter: "x", birthStory: "y", axes: MID_AXES, drives: MID_DRIVES, baseEmotion: "kalm", archetype: null, voiceDescription: "", voiceSearchTerms: [] })),
+          generateResult(JSON.stringify({ name: "Lumen", coreCharacter: "x", birthStory: "y", axes: MID_AXES, drives: MID_DRIVES, baseEmotion: "kalm", archetype: null, voiceDescription: "", voiceSearchTerms: [] })),
           generateResult("Vaarwel."),
         ],
       });
@@ -1383,7 +1443,7 @@ describe("createBrain", () => {
           light: unusedModel(),
           heavy: new MockLanguageModelV4({
             doGenerate: [
-              generateResult(JSON.stringify({ name: "Nova", coreCharacter: "x", birthStory: "y", axes: MID_AXES, drives: MID_DRIVES, baseEmotion: "kalm", archetype: null })),
+              generateResult(JSON.stringify({ name: "Nova", coreCharacter: "x", birthStory: "y", axes: MID_AXES, drives: MID_DRIVES, baseEmotion: "kalm", archetype: null, voiceDescription: "", voiceSearchTerms: [] })),
               generateResult("Vaarwel."),
             ],
           }),
@@ -1767,7 +1827,7 @@ describe("createBrain", () => {
       const brain = brainWith(
         new MockLanguageModelV4({
           doGenerate: [
-            generateResult(JSON.stringify({ name: "Nova", coreCharacter: "x", birthStory: "y", axes: MID_AXES, baseEmotion: "kalm", archetype: null, ...DRIVES_RESULT })),
+            generateResult(JSON.stringify({ name: "Nova", coreCharacter: "x", birthStory: "y", axes: MID_AXES, baseEmotion: "kalm", archetype: null, voiceDescription: "", voiceSearchTerms: [], ...DRIVES_RESULT })),
           ],
         }),
       );
@@ -3004,7 +3064,7 @@ describe("createBrain", () => {
       await addMemory(vero.id, "iets", 1);
       const heavy = new MockLanguageModelV4({
         doGenerate: [
-          generateResult(JSON.stringify({ name: "Nova", coreCharacter: "x", birthStory: "y", axes: MID_AXES, drives: MID_DRIVES, baseEmotion: "kalm", archetype: null })),
+          generateResult(JSON.stringify({ name: "Nova", coreCharacter: "x", birthStory: "y", axes: MID_AXES, drives: MID_DRIVES, baseEmotion: "kalm", archetype: null, voiceDescription: "", voiceSearchTerms: [] })),
           generateResult(JSON.stringify(reflection())),
         ],
       });

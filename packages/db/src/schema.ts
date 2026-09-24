@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { check, date, index, integer, pgTable, real, serial, text, timestamp, uniqueIndex, vector } from "drizzle-orm/pg-core";
+import { check, date, index, integer, jsonb, pgTable, real, serial, text, timestamp, uniqueIndex, vector } from "drizzle-orm/pg-core";
 
 // Meerdere rijen mogelijk: elke rij is een Dynimo.
 export const dynimos = pgTable(
@@ -15,9 +15,9 @@ export const dynimos = pgTable(
     // Basisemotie: het temperament waar de Stemming naartoe uitdooft. NULL = nog te backfillen.
     // De waarden spiegelen EMOTIONS uit @animus/brain (db kan de brain niet importeren).
     baseEmotion: text("base_emotion"),
-    // Stemming: de sterkste recente Emotie; de intensiteit dooft uit (zie mood.ts). Alle drie samen NULL of gezet.
-    moodEmotion: text("mood_emotion"),
-    moodIntensity: real("mood_intensity"),
+    // Stemming: vector {emotie: 0–100} voor alle emoties, plus het tijdstip; de waarden doven uit (zie mood.ts).
+    // Beide samen NULL of gezet.
+    moodValues: jsonb("mood_values"),
     moodAt: timestamp("mood_at", { withTimezone: true }),
     // Reflectie (#27): tot en met welke Herinnering er gereflecteerd is (NULL = nog nooit), en de Ontwaakstemming
     // waarmee de Dynimo bij het wekken begint (samen NULL of samen gezet).
@@ -33,6 +33,8 @@ export const dynimos = pgTable(
     axisSn: real("axis_sn"),
     axisTf: real("axis_tf"),
     axisJp: real("axis_jp"),
+    // TTS-stem (model/stemnaam van de actieve spraakprovider). NULL = default van de agent.
+    voice: text("voice"),
   },
   // Hooguit één Wakker: alle wakkere rijen delen dezelfde constante indexwaarde.
   (table) => [
@@ -40,15 +42,7 @@ export const dynimos = pgTable(
       "dynimos_base_emotion_check",
       sql`${table.baseEmotion} in ('blij', 'boos', 'verrast', 'kalm', 'verveeld', 'nieuwsgierig', 'bang', 'neutraal')`,
     ),
-    check(
-      "dynimos_mood_emotion_check",
-      sql`${table.moodEmotion} in ('blij', 'boos', 'verrast', 'kalm', 'verveeld', 'nieuwsgierig', 'bang', 'neutraal')`,
-    ),
-    check("dynimos_mood_intensity_range", sql`${table.moodIntensity} between 0 and 1`),
-    check(
-      "dynimos_mood_all_or_none",
-      sql`(${table.moodEmotion} is null) = (${table.moodIntensity} is null) and (${table.moodEmotion} is null) = (${table.moodAt} is null)`,
-    ),
+    check("dynimos_mood_all_or_none", sql`(${table.moodValues} is null) = (${table.moodAt} is null)`),
     check(
       "dynimos_wake_mood_emotion_check",
       sql`${table.wakeMoodEmotion} in ('blij', 'boos', 'verrast', 'kalm', 'verveeld', 'nieuwsgierig', 'bang', 'neutraal')`,
@@ -91,7 +85,7 @@ export const memories = pgTable(
 );
 
 // Drijfveren van een Dynimo (CONTEXT.md). Rijen worden niet hard verwijderd: Doelen gaan naar bereikt/opgegeven
-// en sterktes veranderen (#27); "Drijfveren ontbreken" = nul rijen. status enkel voor doelen, strength enkel voor afkeer/ergernis.
+// (#27); "Drijfveren ontbreken" = nul rijen. status enkel voor doelen.
 export const drives = pgTable(
   "drives",
   {
@@ -102,7 +96,6 @@ export const drives = pgTable(
     kind: text("kind").notNull(),
     text: text("text").notNull(),
     status: text("status"),
-    strength: real("strength"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
     // Zachte verwijdering: Drijfveren worden nooit hard verwijderd ("nul rijen" = ontbreekt voor de backfill).
@@ -110,11 +103,9 @@ export const drives = pgTable(
   },
   (table) => [
     index("drives_dynimo_id_idx").on(table.dynimoId),
-    check("drives_kind_check", sql`${table.kind} in ('wens', 'doel', 'toekomstdroom', 'afkeer', 'ergernis')`),
+    check("drives_kind_check", sql`${table.kind} in ('wens', 'doel', 'toekomstdroom', 'ergernis')`),
     check("drives_status_check", sql`${table.status} in ('actief', 'bereikt', 'opgegeven')`),
     check("drives_status_only_goal", sql`(${table.kind} = 'doel') = (${table.status} is not null)`),
-    check("drives_strength_only_aversion", sql`(${table.kind} in ('afkeer', 'ergernis')) = (${table.strength} is not null)`),
-    check("drives_strength_range", sql`${table.strength} between 0 and 1`),
   ],
 );
 

@@ -19,7 +19,7 @@ export const VISIBLE_EMOTION_MIN_INTENSITY = 0.4;
 export const VISIBLE_INTENSITY_DELTA = 0.3;
 
 /** Is de Stemming zichtbaar veranderd (genoeg om een geluidje te rechtvaardigen)? */
-export function isVisibleMoodChange(before: Mood, after: Mood): boolean {
+export function isVisibleMoodChange(before: Pick<Mood, "emotion" | "intensity">, after: Pick<Mood, "emotion" | "intensity">): boolean {
   if (before.emotion !== after.emotion) return after.intensity >= VISIBLE_EMOTION_MIN_INTENSITY;
   return Math.abs(after.intensity - before.intensity) >= VISIBLE_INTENSITY_DELTA;
 }

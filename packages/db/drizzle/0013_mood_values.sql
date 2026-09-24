@@ -1,0 +1,8 @@
+ALTER TABLE "dynimos" DROP CONSTRAINT "dynimos_mood_emotion_check";--> statement-breakpoint
+ALTER TABLE "dynimos" DROP CONSTRAINT "dynimos_mood_intensity_range";--> statement-breakpoint
+ALTER TABLE "dynimos" DROP CONSTRAINT "dynimos_mood_all_or_none";--> statement-breakpoint
+ALTER TABLE "dynimos" ADD COLUMN "mood_values" jsonb;--> statement-breakpoint
+UPDATE "dynimos" SET "mood_values" = jsonb_build_object('blij', CASE WHEN "mood_emotion" = 'blij' THEN round("mood_intensity" * 100) ELSE 0 END, 'boos', CASE WHEN "mood_emotion" = 'boos' THEN round("mood_intensity" * 100) ELSE 0 END, 'verrast', CASE WHEN "mood_emotion" = 'verrast' THEN round("mood_intensity" * 100) ELSE 0 END, 'kalm', CASE WHEN "mood_emotion" = 'kalm' THEN round("mood_intensity" * 100) ELSE 0 END, 'verveeld', CASE WHEN "mood_emotion" = 'verveeld' THEN round("mood_intensity" * 100) ELSE 0 END, 'nieuwsgierig', CASE WHEN "mood_emotion" = 'nieuwsgierig' THEN round("mood_intensity" * 100) ELSE 0 END, 'bang', CASE WHEN "mood_emotion" = 'bang' THEN round("mood_intensity" * 100) ELSE 0 END, 'neutraal', CASE WHEN "mood_emotion" = 'neutraal' THEN round("mood_intensity" * 100) ELSE 0 END) WHERE "mood_emotion" IS NOT NULL;--> statement-breakpoint
+ALTER TABLE "dynimos" DROP COLUMN "mood_emotion";--> statement-breakpoint
+ALTER TABLE "dynimos" DROP COLUMN "mood_intensity";--> statement-breakpoint
+ALTER TABLE "dynimos" ADD CONSTRAINT "dynimos_mood_all_or_none" CHECK (("dynimos"."mood_values" is null) = ("dynimos"."mood_at" is null));

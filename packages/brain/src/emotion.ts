@@ -7,5 +7,12 @@ export function isEmotion(value: unknown): value is Emotion {
 }
 
 /** Bericht op het LiveKit data channel, van agent naar gezichtje. */
-export type EmotionMessage = { emotion: Emotion; intensity: number };
+export type EmotionMessage = {
+  /** De zichtbare (dominante) emotie: de hoogste waarde in `values`. */
+  emotion: Emotion;
+  /** De waarde van de dominante emotie als 0–1. */
+  intensity: number;
+  /** De volledige vector: elke emotie 0–100. */
+  values: Record<Emotion, number>;
+};
 export const EMOTION_TOPIC = "emotion";

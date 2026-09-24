@@ -9,14 +9,18 @@ export type DynimoState = {
   display: DisplayState;
   /** De effectieve Stemming van de wakkere Dynimo op het moment van lezen; null als niemand wakker is. */
   mood: Mood | null;
+  /** Naam van de wakkere Dynimo; null als niemand wakker is. */
+  name: string | null;
+  /** Opgeslagen TTS-stem van de wakkere Dynimo; null = default (of niemand wakker). */
+  voice: string | null;
 };
 
 /** Leest vers uit de database (ook de Stemming, die met de tijd uitdooft). */
 export async function readState(brain: Brain): Promise<DynimoState> {
   const awake = (await brain.list()).find((dynimo) => dynimo.awakeSince);
   return awake
-    ? { key: `${awake.id}:${awake.awakeSince!.getTime()}`, display: "wakker", mood: moodOfRow(awake, new Date()) }
-    : { key: "none", display: "slapend", mood: null };
+    ? { key: `${awake.id}:${awake.awakeSince!.getTime()}`, display: "wakker", mood: moodOfRow(awake, new Date()), name: awake.name, voice: awake.voice }
+    : { key: "none", display: "slapend", mood: null, name: null, voice: null };
 }
 
 /**
@@ -29,6 +33,8 @@ export async function watchDynimos(options: {
   onChange: (state: DynimoState) => void;
   /** Een Stemming is van buitenaf gezet (dashboard-override, payload "mood:<id>"): ververs enkel het gezichtje. */
   onMood?: () => void;
+  /** De stem van een Dynimo is gewijzigd (dashboard, payload "voice:<id>"). */
+  onVoice?: () => void;
 }): Promise<{ current: () => DynimoState; close: () => Promise<void> }> {
   const listener = postgres(options.databaseUrl, { max: 1, onnotice: () => {} });
   let last: DynimoState | undefined;
@@ -55,7 +61,8 @@ export async function watchDynimos(options: {
   // bij elke (her)verbinding, zodat meldingen tijdens een onderbreking alsnog opgemerkt worden.
   await listener.listen(
     STATE_CHANNEL,
-    (payload: string) => (payload.startsWith("mood:") ? options.onMood?.() : void check()),
+    (payload: string) =>
+      payload.startsWith("mood:") ? options.onMood?.() : payload.startsWith("voice:") ? options.onVoice?.() : void check(),
     check,
   );
   await check();

@@ -122,18 +122,17 @@ Waarom MBTI met getallen i.p.v. vaste types of Big Five: de types zijn herkenbaa
 
 ### Drijfveren — wat het wil en wat het niet wil
 
-Naast persoonlijkheid heeft elk wezen **Drijfveren** van vijf soorten, die verschillen in horizon en in de emotie die ze oproepen:
+Naast persoonlijkheid heeft elk wezen **Drijfveren** van vier soorten, die verschillen in horizon en in de emotie die ze oproepen:
 
 | Soort | Wat | Voorbeeld | Emotie-effect |
 |-------|-----|-----------|---------------|
 | **Wens** | iets wat het graag zou hebben of meemaken (passief) | "ooit de zee horen" | blij/nieuwsgierig als het ter sprake komt |
 | **Doel** | concreet, iets waar het naartoe werkt; kan bereikt of opgegeven worden | "alle namen van je vrienden leren" | blij bij vooruitgang/bereiken, teleurgesteld bij opgeven |
 | **Toekomstdroom** | ver, groots, misschien onhaalbaar | "een echt lichaam hebben" | kleurt vooral de nachtelijke Dromen |
-| **Afkeer** | iets wat het minder leuk vindt (mild) | "lang praten over het weer" | verveeld |
-| **Ergernis** | iets waar het lastig van wordt (sterk) | "onderbroken worden" | boos, met hogere intensiteit |
+| **Ergernis** | iets waar het zich aan ergert of weerzin tegen voelt (zonder sterkte) | "onderbroken worden" | boos |
 
 - **Ontstaan:** bij genesis kiest Type2 een eerste set, passend bij de Seed en het persoonlijkheidstype.
-- **Evolutie:** de reflectie-taak voegt drijfveren toe (uit gesprekken), zet doelen op bereikt/opgegeven en laat afkeren of ergernissen verzachten of versterken.
+- **Evolutie:** de reflectie-taak voegt drijfveren toe (uit gesprekken), zet doelen op bereikt/opgegeven en laat ergernissen los.
 - **Opslag:** een eigen tabel (soort, tekst, status voor doelen, tijdstippen), niet enkel in de karaktertekst — zodat het dashboard ze toont, doelen een status hebben en Type1 ze gericht kan meewegen.
 - **Zichtbaarheid:** het dashboard toont ze (met doel-status); in gesprek vertelt het wezen erover als het past.
 - **Naamgeving:** een *Toekomstdroom* (ambitie) is iets anders dan een *Droom* (de nachtelijke droomtekst hieronder), al put die laatste er wel uit.

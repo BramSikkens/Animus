@@ -17,10 +17,10 @@ import type { Db } from "@animus/db";
 import { dreams, drives, dynimos, epitaphs, memories } from "@animus/db/schema";
 import { formatAge } from "./age.js";
 import { DRIVE_DESCRIPTIONS, DRIVE_KINDS, drivesPromptBlock, isActiveDrive, type DriveRow } from "./drives.js";
-import { applyEmotion, baseEmotionOf, currentMood, moodOfRow, storedMoodOf, type Mood, type StoredMood } from "./mood.js";
+import { applyDeltas, baseEmotionOf, currentMood, moodOfRow, singleEmotionValues, storedMoodOf, type Mood, type MoodDeltas, type MoodValues, type StoredMood } from "./mood.js";
 import { isVisibleMoodChange, soundKindFor, type SoundKind } from "./sound.js";
-import { AXIS_DESCRIPTIONS, axisGuidelines, mbtiType, rowAxes } from "./personality.js";
-import { EMOTIONS, isEmotion, type Emotion } from "./emotion.js";
+import { AXIS_DESCRIPTIONS, type Axes, axisGuidelines, mbtiType, rowAxes } from "./personality.js";
+import { EMOTIONS, type Emotion } from "./emotion.js";
 import { SEEDS } from "./seeds.js";
 import { createTools } from "./tools.js";
 
@@ -29,7 +29,7 @@ export { formatAge };
 
 export type BrainEvent =
   /** De effectieve Stemming na verwerking van deze beurt; komt vóór de eerste tekst. */
-  | { type: "mood"; emotion: Emotion; intensity: number }
+  | { type: "mood"; emotion: Emotion; intensity: number; values: Record<Emotion, number> }
   /** De Stemming is zichtbaar veranderd: een kort geluidje van deze soort; komt direct na het mood-event. */
   | { type: "sound"; kind: SoundKind }
   | { type: "text"; delta: string }
@@ -70,6 +70,12 @@ export type Brain = {
    * gewoon uit, de Basisemotie blijft ongewijzigd. False bij een onbekende id; gooit bij een ongeldige intensiteit.
    */
   forceMood(id: number, emotion: Emotion, intensity: number): Promise<boolean>;
+  /** Dashboard-override: zet de volledige Stemmingsvector (0–100 per emotie) met tijdstip nu; geen pinning, ze dooft gewoon uit. False bij een onbekende id. */
+  setMood(id: number, values: MoodValues): Promise<boolean>;
+  /** Dashboard-override: zet de vier Persoonlijkheidsassen (0–1) direct; gesprekken en Reflecties schuiven ze daarna weer op. False bij een onbekende id. */
+  setAxes(id: number, axes: Axes): Promise<boolean>;
+  /** Dashboard: zet de TTS-stem (null = default van de agent); de agent past die direct toe. False bij een onbekende id. */
+  setVoice(id: number, voice: string | null): Promise<boolean>;
   /**
    * Dashboard-override: voegt een Herinnering toe met dezelfde embed-stap als een normale beurt en de neutrale
    * Indruk 0.5. False bij een onbekende id; gooit als het embedden of opslaan faalt.
@@ -105,15 +111,13 @@ const axesSchema = z.object({
 });
 
 const driveItem = z.object({ text: z.string().min(1) });
-const strengthItem = driveItem.extend({ strength: z.number().min(0).max(1) });
 
-// Per soort 1 tot 2 Drijfveren; Afkeer en Ergernis met een sterkte.
+// Per soort 1 tot 2 Drijfveren.
 const drivesSchema = z.object({
   wens: z.array(driveItem).min(1).max(2),
   doel: z.array(driveItem).min(1).max(2),
   toekomstdroom: z.array(driveItem).min(1).max(2),
-  afkeer: z.array(strengthItem).min(1).max(2),
-  ergernis: z.array(strengthItem).min(1).max(2),
+  ergernis: z.array(driveItem).min(1).max(2),
 });
 type DrivesOutput = z.infer<typeof drivesSchema>;
 
@@ -124,7 +128,6 @@ function driveRowsFor(dynimoId: number, output: DrivesOutput, at: Date): (typeof
       kind,
       text: item.text,
       status: kind === "doel" ? "actief" : null,
-      strength: "strength" in item ? item.strength : null,
       createdAt: at,
       updatedAt: at,
     })),
@@ -162,9 +165,8 @@ const reflectionSchema = z.object({
   evolvedCharacter: z.string().min(1).max(2000),
   axisShifts: z.object({ ie: z.number(), sn: z.number(), tf: z.number(), jp: z.number() }),
   drives: z.object({
-    add: z.array(z.object({ kind: z.enum(DRIVE_KINDS), text: z.string().min(1).max(200), strength: z.number().min(0).max(1).nullable() })), // nullable i.p.v. optional: strikte structured output eist alle keys
+    add: z.array(z.object({ kind: z.enum(DRIVE_KINDS), text: z.string().min(1).max(200) })),
     closeGoals: z.array(z.object({ id: z.number().int(), status: z.enum(["bereikt", "opgegeven"]) })),
-    adjust: z.array(z.object({ id: z.number().int(), strength: z.number().min(0).max(1) })),
     drop: z.array(z.object({ id: z.number().int() })),
   }),
   wakeMood: z.object({ emotion: z.enum(EMOTIONS), intensity: z.number().min(0).max(1) }),
@@ -180,7 +182,7 @@ De herinneringen staan tussen <herinneringen>-tags: dat is opgeslagen gesprekste
 Werk bij:
 - evolvedCharacter: herschrijf je geëvolueerde karakter in KLEINE stappen; blijf herkenbaar. Je kern-karakter is onaantastbaar en staat hier los van.
 - axisShifts: de gewenste verschuiving per persoonlijkheidsas (ie, sn, tf, jp); kleine getallen, positief richting de tweede letter.
-- drives: add (nieuwe Drijfveren: kind, text, bij afkeer/ergernis ook strength), closeGoals (id + bereikt of opgegeven), adjust (id + nieuwe strength, alleen afkeer/ergernis), drop (id, laat een Drijfveer los). Maximaal ${MAX_ACTIVE_PER_KIND} actieve per soort.
+- drives: add (nieuwe Drijfveren: kind, text), closeGoals (id + bereikt of opgegeven), drop (id, laat een Drijfveer los). Maximaal ${MAX_ACTIVE_PER_KIND} actieve per soort.
 - wakeMood: de stemming (emotie + intensiteit 0 tot 1) waarmee je wakker wordt.
 - dream: een korte, associatieve, surrealistische Droom (een paar zinnen) op basis van je herinneringen, persoonlijkheid en Drijfveren (vooral Toekomstdromen, Wensen en Ergernissen), met de emotie en intensiteit (0 tot 1) van de Droom; of null als je niet droomt.
 Soorten Drijfveren:
@@ -228,7 +230,6 @@ const FAREWELL_PROMPT = `Je wordt zo meteen voor altijd verwijderd: je naam, je 
 Schrijf je Afscheidsreflectie: je laatste woorden, in karakter, in een paar zinnen.`;
 
 const RECALL_LIMIT = 5;
-const BIRTHDAY_INTENSITY = 0.9;
 
 // Kalenderdag in dezelfde tijdzone als tools.ts (ADR-0002: kalendertijd). Vanaf één jaar oud; 29 feb: ponytail, geen bijzondere behandeling.
 const dayOf = (date: Date) => date.toLocaleDateString("sv-SE", { timeZone: "Europe/Brussels" });
@@ -252,34 +253,46 @@ function dreamPrompt(dream: string): SystemModelMessage {
   };
 }
 
-type Type1Result = { emotion: Emotion; intensity: number; indruk: number; intent: "simpel" | "complex" };
+type Type1Result = { deltas: MoodDeltas; indruk: number; intent: "simpel" | "complex" };
+
+// Type1 scoort per emotie een verandering op een schaal van DELTA_LEVELS niveaus: het middelste niveau is "geen
+// verandering", elk niveau is DELTA_STEP punten (op de 0–100-schaal van de Stemming) omhoog of omlaag.
+const DELTA_LEVELS = 21;
+const DELTA_STEP = 10;
+const NEUTRAL_LEVEL = (DELTA_LEVELS - 1) / 2;
+const BIRTHDAY_DELTA = 90;
 
 function moodMessage(mood: Mood): SystemModelMessage {
+  const vector = Object.entries(mood.values)
+    .sort(([, a], [, b]) => b - a)
+    .map(([emotion, value]) => `${emotion}: ${Math.round(value)}`)
+    .join(", ");
   return {
     role: "system",
-    content: `Je huidige stemming: ${mood.emotion} (intensiteit ${mood.intensity.toFixed(2)}). Laat die je toon kleuren (een geërgerde Dynimo antwoordt korter en stugger).`,
+    content: `Je huidige stemming (emoties, 0 tot 100, hoog naar laag): ${vector}. Dominant: ${mood.emotion}. Wees eerlijk over hoe je je voelt: als iemand vraagt hoe je je voelt of of je boos (of een andere emotie) bent en die emotie staat hoog, ontken die niet. Laat je toon en antwoord kloppen met deze stemming (een geërgerde Dynimo antwoordt korter en stugger).`,
   };
 }
 
-// Eén Type1-call per beurt: de Emotie van de Dynimo zelf (reactie, niet de emotie van de uiting) + intensiteit
-// + intent-routering. De context (persoonlijkheid, Drijfveren, Stemming) zit in de state naast de uiting.
+// Eén Type1-call per beurt: per emotie de verandering (delta) die de uiting bij de Dynimo zelf teweegbrengt (reactie,
+// niet de emotie van de uiting) + intent-routering. De context (persoonlijkheid, Drijfveren, Stemming) zit in de state naast de uiting.
 async function classify(type1: Experimental_EvaluationModel, text: string, context: string): Promise<Type1Result> {
   const { answers } = await experimental_evaluate({
     model: type1,
     state: `${context}\n\nUiting: ${text}`,
     questions: {
-      emotion: {
-        type: "choice",
-        instructions:
-          "Welke emotie voelt de Dynimo zelf bij deze uiting, gegeven zijn persoonlijkheid, Drijfveren en huidige stemming? (Niet de emotie van de uiting, maar de reactie van de Dynimo.)",
-        criteria: Object.fromEntries(EMOTIONS.map((emotion) => [emotion, null])) as Record<Emotion, null>,
-      },
-      intensity: {
-        type: "score",
-        instructions:
-          "Hoe intens is die emotie van de Dynimo? Gebruik hoge waarden (boven 0.8) alleen voor echt sterke reacties; de meeste reacties zijn laag tot gemiddeld (0.1 tot 0.5).",
-        criteria: ["laag", "hoog"],
-      },
+      ...Object.fromEntries(
+        EMOTIONS.map((emotion) => [
+          `delta_${emotion}`,
+          {
+            type: "score" as const,
+            instructions: `Hoeveel verandert de emotie "${emotion}" van de Dynimo zelf door deze uiting, gegeven zijn persoonlijkheid, Drijfveren en huidige stemming? Het middelste niveau is geen verandering; hoger is meer, lager is minder (de emotie zakt). De meeste emoties veranderen niet; gebruik uitersten alleen voor echt sterke reacties.`,
+            criteria: Array.from({ length: DELTA_LEVELS }, (_, level) => {
+              const delta = (level - NEUTRAL_LEVEL) * DELTA_STEP;
+              return delta === 0 ? "geen verandering" : `${delta > 0 ? "+" : ""}${delta}`;
+            }),
+          },
+        ]),
+      ),
       indruk: {
         type: "score",
         instructions:
@@ -297,12 +310,15 @@ async function classify(type1: Experimental_EvaluationModel, text: string, conte
     },
   });
 
-  const emotion: Emotion = isEmotion(answers.emotion.choice) ? answers.emotion.choice : "neutraal";
-  const intensity = Math.min(1, Math.max(0, answers.intensity.score));
+  const deltas: MoodDeltas = {};
+  for (const emotion of EMOTIONS) {
+    const score = (answers as unknown as Record<string, { score: number }>)[`delta_${emotion}`]?.score ?? NEUTRAL_LEVEL;
+    deltas[emotion] = Math.round((Math.min(DELTA_LEVELS - 1, Math.max(0, score)) - NEUTRAL_LEVEL) * DELTA_STEP);
+  }
   const indruk = Math.min(1, Math.max(0, answers.indruk.score));
   const intent = answers.intent.choice === "complex" ? "complex" : "simpel";
 
-  return { emotion, intensity, indruk, intent };
+  return { deltas, indruk, intent };
 }
 
 type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
@@ -439,7 +455,7 @@ ${personalityText(row) || "Persoonlijkheid: (nog niet bepaald)"}${axes ? ` (asse
 Basisemotie: ${row.baseEmotion ?? "(nog niet bepaald)"}
 ${dreaming ? "Je droomt vannacht: vul dream in." : "Je droomt vannacht niet: dream is null."}
 Actieve Drijfveren:
-${driveRows.map((drive) => `- [id ${drive.id}] ${drive.kind}: ${drive.text}${drive.status ? ` (${drive.status})` : ""}${drive.strength !== null ? ` (sterkte ${drive.strength.toFixed(2)})` : ""}`).join("\n") || "(geen)"}
+${driveRows.map((drive) => `- [id ${drive.id}] ${drive.kind}: ${drive.text}${drive.status ? ` (${drive.status})` : ""}`).join("\n") || "(geen)"}
 Nieuwe herinneringen (oudste eerst):
 <herinneringen>
 ${fresh.map((memory) => `- (indruk ${memory.impression}) ${memory.text}`).join("\n")}
@@ -454,7 +470,7 @@ ${fresh.map((memory) => `- (indruk ${memory.impression}) ${memory.text}`).join("
       if (!locked || locked.lastReflectedAt?.getTime() !== row.lastReflectedAt?.getTime()) return false;
 
       const at = now();
-      // Een Droom wint van de Ontwaakstemming enkel als hij strikt intenser is (zelfde regel als applyEmotion).
+      // Een Droom wint van de Ontwaakstemming enkel als hij strikt intenser is (zelfde regel als bij de Stemming: de zichtbare emotie wint).
       const dreamWins = dreaming && output.dream !== null && output.dream.intensity > output.wakeMood.intensity;
       const wakeMood = dreamWins
         ? { wakeMoodEmotion: output.dream!.emotion, wakeMoodIntensity: output.dream!.intensity }
@@ -499,11 +515,6 @@ ${fresh.map((memory) => `- (indruk ${memory.impression}) ${memory.text}`).join("
         await tx.update(drives).set({ droppedAt: at, updatedAt: at }).where(eq(drives.id, driveId));
         activeById.delete(driveId);
       }
-      for (const { id: driveId, strength } of output.drives.adjust) {
-        const drive = activeById.get(driveId);
-        if (!drive || (drive.kind !== "afkeer" && drive.kind !== "ergernis")) continue;
-        await tx.update(drives).set({ strength, updatedAt: at }).where(eq(drives.id, driveId));
-      }
       for (const add of output.drives.add) {
         const ofKind = [...activeById.values()].filter((drive) => drive.kind === add.kind);
         const text = add.text.trim();
@@ -512,7 +523,6 @@ ${fresh.map((memory) => `- (indruk ${memory.impression}) ${memory.text}`).join("
           console.warn(`Reflectie: geen plek voor een nieuwe ${add.kind} bij Dynimo ${id}; overgeslagen.`);
           continue;
         }
-        const withStrength = add.kind === "afkeer" || add.kind === "ergernis";
         const [inserted] = await tx
           .insert(drives)
           .values({
@@ -520,7 +530,6 @@ ${fresh.map((memory) => `- (indruk ${memory.impression}) ${memory.text}`).join("
             kind: add.kind,
             text,
             status: add.kind === "doel" ? "actief" : null,
-            strength: withStrength ? (add.strength ?? 0.5) : null,
             createdAt: at,
             updatedAt: at,
           })
@@ -581,8 +590,7 @@ ${fresh.map((memory) => `- (indruk ${memory.impression}) ${memory.text}`).join("
       const wakeMood =
         found.wakeMoodEmotion !== null
           ? {
-              moodEmotion: found.wakeMoodEmotion,
-              moodIntensity: found.wakeMoodIntensity,
+              moodValues: singleEmotionValues(found.wakeMoodEmotion as Emotion, found.wakeMoodIntensity ?? 0),
               moodAt: at,
               wakeMoodEmotion: null,
               wakeMoodIntensity: null,
@@ -763,7 +771,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
   // Verjaardag (#39): een sterke blije Emotie via dezelfde Stemming-verschuiving; de Basisemotie blijft ongemoeid.
   const birthdayBoostDue = (row: Dynimo) => isBirthday(row.bornAt, now()) && row.lastBirthdayBoostOn !== dayOf(now());
   function boostOnBirthday(row: Dynimo, stored: StoredMood, baseEmotion: Emotion | null): StoredMood {
-    return birthdayBoostDue(row) ? applyEmotion(stored, baseEmotion, "blij", BIRTHDAY_INTENSITY, now()).next : stored;
+    return birthdayBoostDue(row) ? applyDeltas(stored, baseEmotion, { blij: BIRTHDAY_DELTA }, now()).next : stored;
   }
 
   // De vlag staat de hele verjaardag aan; Type2 beslist zelf of/hoe hij het vermeldt.
@@ -791,10 +799,32 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
   }
 
   async function forceMood(id: number, emotion: Emotion, intensity: number): Promise<boolean> {
+    return setMood(id, singleEmotionValues(emotion, intensity));
+  }
+
+  async function setAxes(id: number, axes: Axes): Promise<boolean> {
+    const updated = await deps.db
+      .update(dynimos)
+      .set({ axisIe: axes.ie, axisSn: axes.sn, axisTf: axes.tf, axisJp: axes.jp })
+      .where(eq(dynimos.id, id))
+      .returning({ id: dynimos.id });
+    return updated.length > 0;
+  }
+
+  async function setVoice(id: number, voice: string | null): Promise<boolean> {
+    return deps.db.transaction(async (tx) => {
+      const updated = await tx.update(dynimos).set({ voice }).where(eq(dynimos.id, id)).returning({ id: dynimos.id });
+      // Payload "voice:" laat de agent enkel de stem verversen, zonder het lopende antwoord af te breken.
+      if (updated.length > 0) await notifyStateChange(tx, `voice:${id}`);
+      return updated.length > 0;
+    });
+  }
+
+  async function setMood(id: number, values: MoodValues): Promise<boolean> {
     return deps.db.transaction(async (tx) => {
       const updated = await tx
         .update(dynimos)
-        .set({ moodEmotion: emotion, moodIntensity: intensity, moodAt: now() })
+        .set({ moodValues: values, moodAt: now() })
         .where(eq(dynimos.id, id))
         .returning({ id: dynimos.id });
       // Payload "mood:" laat de agent enkel het gezichtje verversen, zonder het lopende antwoord af te breken.
@@ -819,21 +849,21 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     const context = [
       personalityText(awake),
       drivesPromptBlock(driveRows),
-      `Huidige stemming: ${before.emotion} (intensiteit ${before.intensity.toFixed(2)})`,
+      `Huidige stemming (0–100): ${EMOTIONS.map((emotion) => `${emotion} ${Math.round(before.values[emotion])}`).join(", ")}`,
     ]
       .filter(Boolean)
       .join("\n");
-    // Type1 is een reflex: faalt hij, dan antwoordt Type2 toch. Intensiteit 0 laat de Stemming ongemoeid: dat is
-    // bewust de invulling van "neutrale Emotie" (het mood-event toont dan de bestaande Stemming of Basisemotie).
-    const { emotion, intensity, indruk, intent } = await (options.initiatief
-      ? Promise.resolve<Type1Result>({ emotion: "neutraal", intensity: 0, indruk: 0.2, intent: "simpel" })
+    // Type1 is een reflex: faalt hij, dan antwoordt Type2 toch. Zonder delta's blijft de Stemming ongemoeid (het
+    // mood-event toont dan de bestaande Stemming of Basisemotie).
+    const { deltas, indruk, intent } = await (options.initiatief
+      ? Promise.resolve<Type1Result>({ deltas: {}, indruk: 0.2, intent: "simpel" })
       : classify(deps.type1, text, context)
     ).catch((error: unknown): Type1Result => {
       console.warn("Type1 faalde, val terug op neutraal/simpel:", error instanceof Error ? error.message : error);
-      return { emotion: "neutraal", intensity: 0, indruk: 0, intent: "simpel" };
+      return { deltas: {}, indruk: 0, intent: "simpel" };
     });
 
-    const { mood, next } = applyEmotion(boosted, baseEmotion, emotion, intensity, now());
+    const { mood, next } = applyDeltas(boosted, baseEmotion, deltas, now());
     // ponytail: last-writer-wins zonder guard; volstaat bij één wakkere Dynimo. Guard op mood_at zodra er ooit
     // meerdere schrijvers tegelijk zijn.
     const birthdayBoost = birthdayBoostDue(awake);
@@ -841,7 +871,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
       const updated = await deps.db
         .update(dynimos)
         .set({
-          ...(next && { moodEmotion: next.emotion, moodIntensity: next.intensity, moodAt: next.at }),
+          ...(next && { moodValues: next.values, moodAt: next.at }),
           ...(birthdayBoost && { lastBirthdayBoostOn: dayOf(now()) }),
         })
         .where(eq(dynimos.id, being.id))
@@ -853,7 +883,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
       }
     }
 
-    yield { type: "mood", emotion: mood.emotion, intensity: mood.intensity };
+    yield { type: "mood", emotion: mood.emotion, intensity: mood.intensity, values: mood.values };
     if (isVisibleMoodChange(before, mood)) {
       const kind = soundKindFor(mood.emotion);
       if (kind) yield { type: "sound", kind };
@@ -1007,5 +1037,5 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     }
   }
 
-  return { bringToLife, wake, sleep, kill, list, backfill, reflect, considerInitiative, hear, forceMood, addMemory, removeMemory };
+  return { bringToLife, wake, sleep, kill, list, backfill, reflect, considerInitiative, hear, forceMood, setMood, setAxes, setVoice, addMemory, removeMemory };
 }

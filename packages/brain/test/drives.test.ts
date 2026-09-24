@@ -1,19 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { DRIVE_KINDS, DRIVE_LABELS, drivesPromptBlock, isActiveDrive, strengthWord, type DriveRow } from "../src/drives.js";
+import { DRIVE_KINDS, DRIVE_LABELS, drivesPromptBlock, isActiveDrive, type DriveRow } from "../src/drives.js";
 
 const drive = (id: number, kind: DriveRow["kind"], text: string, extra: Partial<DriveRow> = {}): DriveRow => ({
   id,
   kind,
   text,
   status: kind === "doel" ? "actief" : null,
-  strength: kind === "afkeer" || kind === "ergernis" ? 0.5 : null,
   ...extra,
 });
 
 describe("drives", () => {
-  it("kent de vijf soorten in vaste volgorde met Nederlandse labels", () => {
-    expect(DRIVE_KINDS).toEqual(["wens", "doel", "toekomstdroom", "afkeer", "ergernis"]);
-    expect(DRIVE_KINDS.map((kind) => DRIVE_LABELS[kind])).toEqual(["Wens", "Doel", "Toekomstdroom", "Afkeer", "Ergernis"]);
+  it("kent de vier soorten in vaste volgorde met Nederlandse labels", () => {
+    expect(DRIVE_KINDS).toEqual(["wens", "doel", "toekomstdroom", "ergernis"]);
+    expect(DRIVE_KINDS.map((kind) => DRIVE_LABELS[kind])).toEqual(["Wens", "Doel", "Toekomstdroom", "Ergernis"]);
   });
 
   it("geeft geen blok zonder Drijfveren", () => {
@@ -31,7 +30,7 @@ describe("drives", () => {
 
   it("laat gedropte Drijfveren weg uit het blok (zachte verwijdering)", () => {
     const dropped = new Date("2026-01-01T00:00:00.000Z");
-    const rows = [drive(1, "wens", "Gedropte wens", { droppedAt: dropped }), drive(2, "afkeer", "Gedropte afkeer", { droppedAt: dropped })];
+    const rows = [drive(1, "wens", "Gedropte wens", { droppedAt: dropped }), drive(2, "ergernis", "Gedropte ergernis", { droppedAt: dropped })];
     expect(drivesPromptBlock(rows)).toBe("");
     const block = drivesPromptBlock([...rows, drive(3, "wens", "Levende wens")]);
     expect(block).toContain("Levende wens");
@@ -61,18 +60,14 @@ describe("drives", () => {
   });
 
   it("is byte-stabiel voor dezelfde invoer, ongeacht de volgorde van de rijen", () => {
-    const rows = [drive(1, "wens", "A"), drive(2, "afkeer", "B"), drive(3, "wens", "C")];
+    const rows = [drive(1, "wens", "A"), drive(2, "ergernis", "B"), drive(3, "wens", "C")];
     expect(drivesPromptBlock([...rows].reverse())).toBe(drivesPromptBlock(rows));
   });
 
-  it("noemt de sterkte van Afkeer en Ergernis in woorden", () => {
-    expect(strengthWord(0.49)).toBe("mild");
-    expect(strengthWord(0.5)).toBe("sterk");
-    const block = drivesPromptBlock([
-      drive(1, "afkeer", "Kou", { strength: 0.9 }),
-      drive(2, "ergernis", "Gedoe", { strength: 0.1 }),
-    ]);
-    expect(block).toContain("Kou (sterk)");
-    expect(block).toContain("Gedoe (mild)");
+  it("noemt geen sterkte bij een Ergernis", () => {
+    const block = drivesPromptBlock([drive(1, "ergernis", "Kou")]);
+    expect(block).toContain("- Kou");
+    expect(block).not.toContain("(mild)");
+    expect(block).not.toContain("(sterk)");
   });
 });

@@ -90,3 +90,14 @@ export function axisGuidelines(axes: Axes): string[] {
   }
   return lines;
 }
+
+/** Dashboard-formulier: veld `axis_<as>` (0–1, geclampt) voor elke as; null als er één ontbreekt of geen getal is. */
+export function parseAxes(field: (name: string) => unknown): Axes | null {
+  const axes: Partial<Axes> = {};
+  for (const axis of AXES) {
+    const raw = field(`axis_${axis}`);
+    if (typeof raw !== "string" || raw.trim() === "" || Number.isNaN(Number(raw))) return null;
+    axes[axis] = Math.min(1, Math.max(0, Number(raw)));
+  }
+  return axes as Axes;
+}

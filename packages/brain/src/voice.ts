@@ -30,16 +30,22 @@ export function voicesFor(provider: SpeechProvider): readonly string[] {
   return VOICES[provider];
 }
 
+// ElevenLabs-stemmen komen uit de (open) catalogus: elke niet-lege id is geldig. Andere providers: de vaste lijst.
+function isKnownVoice(provider: SpeechProvider, voice: string): boolean {
+  return provider === "elevenlabs" ? voice.trim() !== "" : voicesFor(provider).includes(voice);
+}
+
 /** De stem om te spreken: de opgeslagen stem, of de default van de provider bij null/onbekend. */
 export function resolveVoice(provider: SpeechProvider, stored: string | null, fallback?: string): string {
   const voices = voicesFor(provider);
-  return stored !== null && voices.includes(stored) ? stored : fallback || voices[0]!;
+  if (stored !== null && isKnownVoice(provider, stored)) return stored;
+  return fallback || voices[0]!;
 }
 
 /** Valideert een formulierwaarde: leeg = default (null), anders moet de stem in de lijst staan; null = ongeldig. */
 export function parseVoice(provider: SpeechProvider, raw: unknown): { voice: string | null } | null {
   if (raw === "") return { voice: null };
-  return typeof raw === "string" && voicesFor(provider).includes(raw) ? { voice: raw } : null;
+  return typeof raw === "string" && isKnownVoice(provider, raw) ? { voice: raw } : null;
 }
 
 /** TTS-provider: ELEVENLABS_API_KEY, anders DEEPGRAM_API_KEY, anders OpenAI. */

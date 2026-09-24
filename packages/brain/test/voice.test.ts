@@ -48,6 +48,15 @@ describe("elevenlabs", () => {
   });
 });
 
+describe("elevenlabs catalogus-stemmen", () => {
+  it("accepteert elke niet-lege voice-id (catalogus) bij parseVoice en resolveVoice", () => {
+    expect(parseVoice("elevenlabs", "catalogus-id-123")).toEqual({ voice: "catalogus-id-123" });
+    expect(parseVoice("elevenlabs", "  ")).toBeNull();
+    expect(parseVoice("elevenlabs", 5)).toBeNull();
+    expect(resolveVoice("elevenlabs", "catalogus-id-123", "abc123")).toBe("catalogus-id-123");
+  });
+});
+
 describe("speechProvider", () => {
   it("kiest ElevenLabs met ELEVENLABS_API_KEY, v\u00f3\u00f3r Deepgram", () => {
     expect(speechProvider({ ELEVENLABS_API_KEY: "x", DEEPGRAM_API_KEY: "y" })).toBe("elevenlabs");

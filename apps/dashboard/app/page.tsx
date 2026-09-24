@@ -1,17 +1,19 @@
 import { desc, eq, isNull } from "drizzle-orm";
+import { EMOTIONS } from "@animus/brain/emotion";
 import { formatAge } from "@animus/brain/age";
 import { moodOfRow } from "@animus/brain/mood";
 import { DRIVE_KINDS, DRIVE_LABELS, type DriveKind } from "@animus/brain/drives";
 import { AXES, AXIS_LETTERS, mbtiType, rowAxes } from "@animus/brain/personality";
-import { drives, dynimos, epitaphs, memories } from "@animus/db/schema";
+import { dreams, drives, dynimos, epitaphs, memories } from "@animus/db/schema";
 import { db } from "../lib/db";
 import { ActionForm } from "./action-form";
-import { bringToLife, kill, sleep, wake } from "./actions";
+import { addMemory, bringToLife, forceMood, kill, removeMemory, sleep, wake } from "./actions";
 import { formatDate, formatDateTime } from "../lib/format";
 
 export const dynamic = "force-dynamic";
 
 const RECENT_MEMORIES_LIMIT = 20;
+const RECENT_DREAMS_LIMIT = 5;
 
 // Postgres "undefined_table": de database is nog niet gemigreerd.
 const UNDEFINED_TABLE = "42P01";
@@ -35,7 +37,17 @@ async function loadDashboard() {
         .limit(RECENT_MEMORIES_LIMIT),
     ),
   );
-  return { dynimoRows, recentMemories, epitaphRows, drivesByDynimo };
+  const recentDreams = await Promise.all(
+    dynimoRows.map((dynimo) =>
+      db
+        .select()
+        .from(dreams)
+        .where(eq(dreams.dynimoId, dynimo.id))
+        .orderBy(desc(dreams.createdAt), desc(dreams.id))
+        .limit(RECENT_DREAMS_LIMIT),
+    ),
+  );
+  return { dynimoRows, recentMemories, recentDreams, epitaphRows, drivesByDynimo };
 }
 
 export default async function DashboardPage() {
@@ -55,7 +67,7 @@ export default async function DashboardPage() {
       </main>
     );
   }
-  const { dynimoRows, recentMemories, epitaphRows, drivesByDynimo } = data;
+  const { dynimoRows, recentMemories, recentDreams, epitaphRows, drivesByDynimo } = data;
 
   return (
     <main>
@@ -149,6 +161,16 @@ export default async function DashboardPage() {
                   ) : (
                     <ActionForm action={wake} label="Wakker maken" pendingLabel="Wordt wakker…" id={dynimo.id} />
                   )}
+                  <ActionForm action={forceMood} label="Stemming forceren" pendingLabel="Zet…" id={dynimo.id}>
+                    <select name="emotion" aria-label="Emotie" defaultValue="blij">
+                      {EMOTIONS.map((emotion) => (
+                        <option key={emotion} value={emotion}>
+                          {emotion}
+                        </option>
+                      ))}
+                    </select>
+                    <input name="intensity" type="number" min={0} max={1} step={0.05} defaultValue={0.8} aria-label="Intensiteit (0 tot 1)" required />
+                  </ActionForm>
                   <ActionForm action={kill} label="Doden" pendingLabel="Neemt afscheid…" id={dynimo.id} confirmName />
                   <details>
                     <summary>Details en herinneringen</summary>
@@ -168,13 +190,33 @@ export default async function DashboardPage() {
                       <dt>Geboortedatum</dt>
                       <dd>{formatDate(dynimo.bornAt)}</dd>
                     </dl>
+                    <h4>Recente dromen</h4>
+                    {recentDreams[index]!.length ? (
+                      <ul>
+                        {recentDreams[index]!.map((dream) => (
+                          <li key={dream.id}>
+                            <time dateTime={dream.createdAt.toISOString()}>{formatDateTime(dream.createdAt)}</time>
+                            <em> — {dream.emotion} ({Math.round(dream.intensity * 100)}%)</em>
+                            <p style={{ whiteSpace: "pre-wrap" }}>{dream.text}</p>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p>nog geen</p>
+                    )}
                     <h4>Recente herinneringen</h4>
+                    <ActionForm action={addMemory} label="Herinnering toevoegen" pendingLabel="Onthoudt…" id={dynimo.id}>
+                      <input name="text" placeholder="Wat moet hij onthouden?" aria-label="Nieuwe herinnering" required />
+                    </ActionForm>
                     {recentMemories[index]!.length ? (
                       <ul>
                         {recentMemories[index]!.map((memory) => (
                           <li key={memory.id}>
                             <time dateTime={memory.createdAt.toISOString()}>{formatDateTime(memory.createdAt)}</time>
                             <p style={{ whiteSpace: "pre-wrap" }}>{memory.text}</p>
+                            <ActionForm action={removeMemory} label="Verwijderen" pendingLabel="Verwijdert…" id={dynimo.id}>
+                              <input type="hidden" name="memoryId" value={memory.id} />
+                            </ActionForm>
                           </li>
                         ))}
                       </ul>

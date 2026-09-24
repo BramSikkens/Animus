@@ -76,4 +76,16 @@ describe("textStream", () => {
     const chunks = await collect(textStream(gen(events)));
     expect(chunks).toEqual(["Hoi"]);
   });
+
+  it("roept onSound aan met de soort en houdt het event uit de tekst", async () => {
+    const events: BrainEvent[] = [
+      { type: "mood", emotion: "boos", intensity: 0.8 },
+      { type: "sound", kind: "brommen" },
+      { type: "text", delta: "Hoi" },
+    ];
+    const kinds: string[] = [];
+    const chunks = await collect(textStream(gen(events), { onSound: (kind) => kinds.push(kind) }));
+    expect(kinds).toEqual(["brommen"]);
+    expect(chunks).toEqual(["Hoi"]);
+  });
 });

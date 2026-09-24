@@ -86,3 +86,21 @@ describe("reflecterend", () => {
     expect(REFLECT.background).not.toBe(NEUTRAL.background);
   });
 });
+
+describe("luisterend", () => {
+  it("houdt de emotie-achtergrond en kijkt aandachtiger dan wakker (grotere ogen, opgetrokken wenkbrauwen)", () => {
+    const awake = frameForDisplay("wakker", "blij", 0.5);
+    const listening = frameForDisplay("luisterend", "blij", 0.5);
+    expect(listening.background).toBe(awake.background);
+    expect(listening.mouth).toEqual(awake.mouth);
+    expect(listening.eyes.left.scale).toBeGreaterThan(awake.eyes.left.scale);
+    expect(listening.eyes.right.scale).toBeGreaterThan(awake.eyes.right.scale);
+    expect(listening.brow!.raise).toBeGreaterThan(awake.brow!.raise);
+  });
+});
+
+describe("spreekt", () => {
+  it("toont het emotieframe (de mond wordt door het volume gestuurd, niet door het frame)", () => {
+    expect(frameForDisplay("spreekt", "blij", 0.5)).toEqual(frameForDisplay("wakker", "blij", 0.5));
+  });
+});

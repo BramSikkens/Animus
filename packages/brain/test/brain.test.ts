@@ -2,8 +2,9 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { MockEmbeddingModelV4, MockLanguageModelV4, Experimental_EvaluationMockModelV4 } from "ai/test";
 import { simulateReadableStream } from "ai";
 import { eq, isNotNull } from "drizzle-orm";
-import { EMBEDDING_DIMENSIONS, drives, dynimos, epitaphs, memories } from "@animus/db/schema";
+import { EMBEDDING_DIMENSIONS, dreams, drives, dynimos, epitaphs, memories } from "@animus/db/schema";
 import postgres from "postgres";
+import { moodOfRow } from "../src/mood.js";
 import { createBrain, STATE_CHANNEL, type BrainEvent } from "../src/index.js";
 import { createTestDb, databaseUrl, TEST_DB_NAME, truncateAll } from "./db.js";
 
@@ -2050,6 +2051,51 @@ describe("createBrain", () => {
       expect(row?.moodAt).toEqual(clock);
     });
 
+    it("levert een sound-event direct na het mood-event als de Stemming zichtbaar verandert", async () => {
+      await insertDynimo();
+      const { model } = type1Sequence([{ emotion: "boos", intensity: 0.8 }]);
+      const brain = brainWith({ type1: model, light: textModel(["Hoi."]) });
+
+      const events: BrainEvent[] = [];
+      for await (const event of brain.hear("Wat een dag")) events.push(event);
+
+      expect(events[0]).toEqual({ type: "mood", emotion: "boos", intensity: 0.8 });
+      expect(events[1]).toEqual({ type: "sound", kind: "brommen" });
+    });
+
+    it("levert geen sound-event als de Emotie de Stemming niet noemenswaardig verschuift", async () => {
+      await insertDynimo();
+      const { model } = type1Sequence([
+        { emotion: "boos", intensity: 0.8 },
+        { emotion: "blij", intensity: 0.5 }, // zwakker dan boos: Stemming blijft
+        { emotion: "kalm", intensity: 0 }, // neutrale Emotie: Stemming blijft
+      ]);
+      const light = new MockLanguageModelV4({ doStream: [textStream("Een."), textStream("Twee."), textStream("Drie.")] });
+      const brain = brainWith({ type1: model, light });
+
+      const perTurn: BrainEvent[][] = [];
+      for (const utterance of ["Een", "Twee", "Drie"]) {
+        const events: BrainEvent[] = [];
+        for await (const event of brain.hear(utterance)) events.push(event);
+        perTurn.push(events);
+      }
+
+      expect(perTurn[0]!.some((e) => e.type === "sound")).toBe(true);
+      expect(perTurn[1]!.some((e) => e.type === "sound")).toBe(false);
+      expect(perTurn[2]!.some((e) => e.type === "sound")).toBe(false);
+    });
+
+    it("levert geen sound-event bij een kleine Emotie die de Basisemotie amper verschuift", async () => {
+      await insertDynimo();
+      const { model } = type1Sequence([{ emotion: "blij", intensity: 0.35 }]); // basisniveau is 0.3
+      const brain = brainWith({ type1: model, light: textModel(["Hoi."]) });
+
+      const events: BrainEvent[] = [];
+      for await (const event of brain.hear("Hoi")) events.push(event);
+
+      expect(events.some((e) => e.type === "sound")).toBe(false);
+    });
+
     it("laat een Emotie die zwakker is dan de uitgedoofde Stemming die niet veranderen, en ververst mood_at niet", async () => {
       let clock = bornAt;
       await insertDynimo();
@@ -2148,6 +2194,87 @@ describe("createBrain", () => {
 
       expect(events[0]).toEqual({ type: "mood", emotion: "boos", intensity: 0.8 });
       expect((await db.select().from(dynimos))[0]?.moodEmotion).toBe("boos");
+    });
+
+    describe("Verjaardag", () => {
+      const born = new Date("2025-06-15T08:00:00.000Z");
+      const birthday = new Date("2026-06-15T10:00:00.000Z");
+
+      it("geeft bij het eerste contact op de verjaardag een sterke blije Stemming, ook als Type1 niets voelt", async () => {
+        await insertDynimo({ bornAt: born });
+        const { model } = type1Sequence([{ emotion: "neutraal", intensity: 0 }]);
+
+        await collectText(brainWith({ type1: model, light: textModel(["Hoi."]), now: () => birthday }).hear("Hoi"));
+
+        const row = (await db.select().from(dynimos))[0];
+        expect(row?.moodEmotion).toBe("blij");
+        expect(row?.moodIntensity).toBeGreaterThanOrEqual(0.8);
+      });
+
+      it("geeft de boost maar één keer per kalenderdag, ook niet bij een tweede uiting of na een herstart", async () => {
+        await insertDynimo({ bornAt: born });
+        const { model } = type1Sequence([{ emotion: "neutraal", intensity: 0 }]);
+        await collectText(brainWith({ type1: model, light: textModel(["Hoi."]), now: () => birthday }).hear("Hoi"));
+
+        // Een uur later is de boost uitgedoofd; een nieuwe brain-instantie (herstart) hoort niet opnieuw te boosten.
+        const later = new Date(birthday.getTime() + 60 * MIN);
+        const restarted = brainWith({ type1: type1Sequence([{ emotion: "neutraal", intensity: 0 }]).model, light: textModel(["Hoi."]), now: () => later });
+        const events: BrainEvent[] = [];
+        for await (const event of restarted.hear("Nog eens")) events.push(event);
+
+        expect(events.find((event) => event.type === "mood")).toMatchObject({ emotion: "kalm" });
+        expect((await db.select().from(dynimos))[0]?.moodAt).toEqual(birthday);
+      });
+
+      it("laat een sterkere bestaande Stemming staan, maar telt de boost van vandaag wel als gegeven", async () => {
+        await insertDynimo({ bornAt: born, moodEmotion: "boos", moodIntensity: 1, moodAt: birthday });
+        const { model } = type1Sequence([{ emotion: "neutraal", intensity: 0 }]);
+
+        await collectText(brainWith({ type1: model, light: textModel(["Hoi."]), now: () => birthday }).hear("Hoi"));
+
+        const row = (await db.select().from(dynimos))[0];
+        expect(row?.moodEmotion).toBe("boos");
+        expect(row?.lastBirthdayBoostOn).toBe("2026-06-15");
+      });
+
+      it("wijzigt de Basisemotie nooit", async () => {
+        await insertDynimo({ bornAt: born });
+        const { model } = type1Sequence([{ emotion: "neutraal", intensity: 0 }]);
+
+        await collectText(brainWith({ type1: model, light: textModel(["Hoi."]), now: () => birthday }).hear("Hoi"));
+
+        expect((await db.select().from(dynimos))[0]?.baseEmotion).toBe("kalm");
+      });
+
+      const birthdayFlag = (light: MockLanguageModelV4) =>
+        contentsByRole(light.doStreamCalls[0]?.prompt, "system").find((text) => text.includes("verjaardag"));
+
+      it("geeft Type2 alleen op de verjaardag een vlag met de leeftijd in jaren, buiten het gecachete deel", async () => {
+        await insertDynimo({ bornAt: born });
+        const onBirthday = textModel(["Hoi."]);
+        const otherDay = textModel(["Hoi."]);
+        const t1 = () => type1Sequence([{ emotion: "neutraal", intensity: 0 }]).model;
+
+        await collectText(brainWith({ type1: t1(), light: onBirthday, now: () => birthday }).hear("Hoi"));
+        await collectText(
+          brainWith({ type1: t1(), light: otherDay, now: () => new Date("2026-06-16T10:00:00.000Z") }).hear("Hoi"),
+        );
+
+        expect(birthdayFlag(onBirthday)).toContain("1 jaar");
+        expect(contentsByRole(onBirthday.doStreamCalls[0]?.prompt, "system")[0]).not.toContain("verjaardag");
+        expect(birthdayFlag(otherDay)).toBeUndefined();
+      });
+
+      it("boost opnieuw op de volgende verjaardag", async () => {
+        await insertDynimo({ bornAt: born });
+        const t1 = () => type1Sequence([{ emotion: "neutraal", intensity: 0 }]).model;
+        await collectText(brainWith({ type1: t1(), light: textModel(["Hoi."]), now: () => birthday }).hear("Hoi"));
+        const nextYear = new Date("2027-06-15T10:00:00.000Z");
+
+        await collectText(brainWith({ type1: t1(), light: textModel(["Hoi."]), now: () => nextYear }).hear("Hoi"));
+
+        expect((await db.select().from(dynimos))[0]?.moodAt).toEqual(nextYear);
+      });
     });
 
     describe("backfill van de Basisemotie", () => {
@@ -2293,6 +2420,7 @@ describe("createBrain", () => {
         add: ((driveOps.add as object[] | undefined) ?? []).map((item) => ({ strength: null, ...item })),
       },
       wakeMood: { emotion: "kalm", intensity: 0.4 },
+      dream: null, // strikte structured output: key verplicht, null = geen Droom
       ...over,
     });
     const heavyReturning = (result: unknown, delayMs = 0) =>
@@ -2303,14 +2431,17 @@ describe("createBrain", () => {
         },
       });
 
-    function brainWith(heavy: MockLanguageModelV4, options: { light?: MockLanguageModelV4; now?: () => Date } = {}) {
+    function brainWith(
+      heavy: MockLanguageModelV4,
+      options: { light?: MockLanguageModelV4; now?: () => Date; random?: () => number } = {},
+    ) {
       return createBrain({
         db,
         embedder: embedModel(),
         type1: type1Model(),
         type2: { light: options.light ?? unusedModel(), heavy },
         now: options.now ?? (() => bornAt),
-        random: () => 0,
+        random: options.random ?? (() => 0),
       });
     }
 
@@ -2834,6 +2965,138 @@ describe("createBrain", () => {
       expect(await driveTexts(vero.id)).toHaveLength(0);
     });
 
+    describe("Dromen", () => {
+      const dream = (over: Record<string, unknown> = {}) => ({ text: "Ik vloog boven een zee van klokken.", emotion: "bang", intensity: 0.9, ...over });
+      const dreamsOf = async (id: number) => db.select().from(dreams).where(eq(dreams.dynimoId, id)).orderBy(dreams.id);
+
+      it("bewaart een Droom uit de slaap-Reflectie in de dreams-tabel", async () => {
+        const vero = await insertDynimo();
+        await addMemory(vero.id, "iets", 1);
+
+        await brainWith(heavyReturning(reflection({ dream: dream() }))).sleep();
+
+        const rows = await dreamsOf(vero.id);
+        expect(rows.map((row) => [row.text, row.emotion, row.intensity])).toEqual([["Ik vloog boven een zee van klokken.", "bang", expect.closeTo(0.9)]]);
+        expect(rows[0]!.createdAt).toEqual(bornAt);
+      });
+
+      it("bewaart geen Droom als het model er geen levert", async () => {
+        const vero = await insertDynimo();
+        await addMemory(vero.id, "iets", 1);
+
+        await brainWith(heavyReturning(reflection({ dream: null }))).sleep();
+
+        expect(await dreamsOf(vero.id)).toEqual([]);
+      });
+
+      it("laat een Droom niet ontstaan als de kans (random) tegenzit, ook al levert het model er een", async () => {
+        const vero = await insertDynimo();
+        await addMemory(vero.id, "iets", 1);
+
+        await brainWith(heavyReturning(reflection({ dream: dream() })), { random: () => 0.99 }).sleep();
+
+        expect(await dreamsOf(vero.id)).toEqual([]);
+      });
+
+      it("overschrijft de Ontwaakstemming met de Droom als die intenser is", async () => {
+        const vero = await insertDynimo();
+        await addMemory(vero.id, "iets", 1);
+
+        await brainWith(heavyReturning(reflection({ dream: dream({ emotion: "bang", intensity: 0.9 }) }))).sleep();
+
+        const row = await rowOf(vero.id);
+        expect([row.wakeMoodEmotion, row.wakeMoodIntensity]).toEqual(["bang", expect.closeTo(0.9)]);
+      });
+
+      it.each([
+        ["minder intens", 0.3],
+        ["even intens", 0.4],
+      ])("laat de Ontwaakstemming van de Reflectie staan als de Droom %s is", async (_label, intensity) => {
+        const vero = await insertDynimo();
+        await addMemory(vero.id, "iets", 1);
+
+        await brainWith(heavyReturning(reflection({ dream: dream({ emotion: "bang", intensity }) }))).sleep();
+
+        const row = await rowOf(vero.id);
+        expect([row.wakeMoodEmotion, row.wakeMoodIntensity]).toEqual(["kalm", expect.closeTo(0.4)]);
+      });
+
+      it("wist de Dromen van een Dynimo bij kill() (cascade), niet die van een andere", async () => {
+        const vero = await insertDynimo();
+        const other = await insertDynimo({ name: "Nova", awakeSince: null });
+        for (const id of [vero.id, other.id]) await db.insert(dreams).values({ dynimoId: id, text: "Droom", emotion: "kalm", intensity: 0.5, createdAt: bornAt });
+
+        const heavy = new MockLanguageModelV4({ doGenerate: [generateResult("Vaarwel.")] });
+        await brainWith(heavy).kill(vero.id, "Vero");
+
+        expect((await db.select().from(dreams)).map((row) => row.dynimoId)).toEqual([other.id]);
+      });
+
+      describe("spontaan aanhalen in hear()", () => {
+        async function systemPromptOfTurn(random: () => number) {
+          const light = new MockLanguageModelV4({ doStream: [textStream("Hoi.")] });
+          await collectText(brainWith(unusedModel(), { light, random }).hear("Hallo"));
+          return contentsByRole(light.doStreamCalls[0]?.prompt, "system").join(" ");
+        }
+
+        it("biedt de meest recente Droom aan als context als de kans meezit", async () => {
+          const vero = await insertDynimo();
+          await db.insert(dreams).values([
+            { dynimoId: vero.id, text: "Oude droom over vissen.", emotion: "kalm", intensity: 0.5, createdAt: bornAt },
+            { dynimoId: vero.id, text: "Recente droom over klokken.", emotion: "bang", intensity: 0.7, createdAt: new Date(bornAt.getTime() + MIN) },
+          ]);
+
+          const system = await systemPromptOfTurn(() => 0);
+
+          expect(system).toContain("Recente droom over klokken.");
+          expect(system).not.toContain("Oude droom over vissen.");
+        });
+
+        it("biedt geen Droom aan als de kans tegenzit", async () => {
+          const vero = await insertDynimo();
+          await db.insert(dreams).values({ dynimoId: vero.id, text: "Recente droom over klokken.", emotion: "bang", intensity: 0.7, createdAt: bornAt });
+
+          expect(await systemPromptOfTurn(() => 0.99)).not.toContain("Recente droom over klokken.");
+        });
+
+        it("biedt niets aan als er geen Droom is, of enkel een Droom van een andere Dynimo", async () => {
+          await insertDynimo();
+          const other = await insertDynimo({ name: "Nova", awakeSince: null });
+          await db.insert(dreams).values({ dynimoId: other.id, text: "Droom van Nova.", emotion: "bang", intensity: 0.7, createdAt: bornAt });
+
+          const system = await systemPromptOfTurn(() => 0);
+
+          expect(system).not.toContain("Droom van Nova.");
+          expect(system).not.toContain("gedroomd");
+        });
+      });
+
+      it("droomt niet bij een Reflectie bij stilte (de Dynimo slaapt dan niet)", async () => {
+        const vero = await insertDynimo();
+        await addMemory(vero.id, "iets", 1);
+
+        await brainWith(heavyReturning(reflection({ dream: dream() }))).reflect();
+
+        expect(await dreamsOf(vero.id)).toEqual([]);
+      });
+
+      it("vraagt om een Droom in dezelfde Reflectie-call, en zegt bij een tegenvallende kans dat er niet gedroomd wordt", async () => {
+        const vero = await insertDynimo();
+        await addMemory(vero.id, "iets", 1);
+        const dreaming = heavyReturning(reflection());
+        await brainWith(dreaming).sleep();
+        expect(dreaming.doGenerateCalls).toHaveLength(1);
+        expect(JSON.stringify(dreaming.doGenerateCalls[0]?.prompt)).toContain("Je droomt vannacht:");
+
+        await addMemory(vero.id, "nog iets", 5);
+        await db.update(dynimos).set({ awakeSince: bornAt }).where(eq(dynimos.id, vero.id));
+        const awake = heavyReturning(reflection());
+        await brainWith(awake, { random: () => 0.99 }).sleep();
+        expect(JSON.stringify(awake.doGenerateCalls[0]?.prompt)).toContain("Je droomt vannacht niet");
+      });
+
+    });
+
     describe("reflect() bij stilte (de Dynimo blijft wakker)", () => {
       it("geeft false zonder modelcall als niemand wakker is", async () => {
         const vero = await insertDynimo({ awakeSince: null });
@@ -2939,6 +3202,178 @@ describe("createBrain", () => {
       expect(prompt).toContain("herinnering-100");
       expect(prompt).not.toContain("herinnering-101");
       expect((await rowOf(vero.id)).lastReflectedAt).toEqual(new Date(bornAt.getTime() + 100 * MIN));
+    });
+  });
+
+  describe("Dashboard-overrides", () => {
+    const bornAt = new Date("2026-01-01T12:00:00.000Z");
+    const MIN = 60_000;
+
+    function brainWith(options: { light?: MockLanguageModelV4; heavy?: MockLanguageModelV4; now?: () => Date } = {}) {
+      return createBrain({
+        db,
+        embedder: embedModel(),
+        type1: type1Model(),
+        type2: { light: options.light ?? unusedModel(), heavy: options.heavy ?? unusedModel() },
+        now: options.now ?? (() => bornAt),
+        random: () => 0,
+      });
+    }
+
+    async function insertDynimo(extra: Partial<typeof dynimos.$inferInsert> = {}) {
+      const [row] = await db
+        .insert(dynimos)
+        .values({
+          name: "Vero",
+          coreCharacter: "Rustig.",
+          birthStory: "Geboren.",
+          seed: "z",
+          bornAt,
+          awakeSince: bornAt,
+          baseEmotion: "kalm",
+          axisIe: 0.5,
+          axisSn: 0.5,
+          axisTf: 0.5,
+          axisJp: 0.5,
+          ...extra,
+        })
+        .returning();
+      return row!;
+    }
+
+    const rowOf = async (id: number) => (await db.select().from(dynimos).where(eq(dynimos.id, id)))[0]!;
+
+    describe("addMemory", () => {
+      it("maakt een Herinnering met embedding en neutrale Indruk", async () => {
+        const vero = await insertDynimo();
+
+        expect(await brainWith().addMemory(vero.id, "De kat heet Pluis")).toBe(true);
+
+        const [row] = await db.select().from(memories).where(eq(memories.dynimoId, vero.id));
+        expect(row).toMatchObject({ text: "De kat heet Pluis", impression: 0.5, createdAt: bornAt });
+        expect(row!.embedding).toEqual(fakeVector("De kat heet Pluis"));
+      });
+
+      it("wordt bij een volgende uiting teruggevonden (recall)", async () => {
+        const vero = await insertDynimo();
+        const light = textModel(["ok"]);
+        const brain = brainWith({ light });
+
+        await brain.addMemory(vero.id, "De kat heet Pluis");
+        await collectText(brain.hear("Weet je nog mijn kat?"));
+
+        expect(JSON.stringify(light.doStreamCalls[0]?.prompt)).toContain("De kat heet Pluis");
+      });
+
+      it("geeft false en bewaart niets bij een onbekende Dynimo", async () => {
+        expect(await brainWith().addMemory(999, "De kat heet Pluis")).toBe(false);
+        expect(await db.select().from(memories)).toHaveLength(0);
+      });
+
+      // ADD-APPEND
+    });
+
+    describe("removeMemory", () => {
+      const memoryOf = async (dynimoId: number, text: string, minutes = 1) => {
+        const [row] = await db
+          .insert(memories)
+          .values({ dynimoId, text, embedding: fakeVector(text), createdAt: new Date(bornAt.getTime() + minutes * MIN), impression: 0.5 })
+          .returning();
+        return row!;
+      };
+
+      it("verwijdert de Herinnering hard en laat andere Herinneringen van dezelfde Dynimo staan", async () => {
+        const vero = await insertDynimo();
+        const weg = await memoryOf(vero.id, "Weg ermee");
+        await memoryOf(vero.id, "Blijft", 2);
+
+        expect(await brainWith().removeMemory(vero.id, weg.id)).toBe(true);
+
+        expect((await db.select().from(memories)).map((row) => row.text)).toEqual(["Blijft"]);
+      });
+
+      it("verwijdert niets van een andere Dynimo en geeft dan false", async () => {
+        const vero = await insertDynimo();
+        const nova = await insertDynimo({ name: "Nova", awakeSince: null });
+        const novasMemory = await memoryOf(nova.id, "Van Nova");
+
+        expect(await brainWith().removeMemory(vero.id, novasMemory.id)).toBe(false);
+
+        expect(await db.select().from(memories)).toHaveLength(1);
+      });
+
+      it("geeft false bij een onbekende Herinnering", async () => {
+        const vero = await insertDynimo();
+
+        expect(await brainWith().removeMemory(vero.id, 999)).toBe(false);
+      });
+
+      it("telt de verwijderde Herinnering niet meer mee in de volgende Reflectie", async () => {
+        const vero = await insertDynimo();
+        const weg = await memoryOf(vero.id, "Geheim-verkeerd-onthouden", 1);
+        await memoryOf(vero.id, "Gewone-herinnering", 2);
+        const heavy = new MockLanguageModelV4({
+          doGenerate: async () =>
+            generateResult(
+              JSON.stringify({
+                evolvedCharacter: "x",
+                axisShifts: { ie: 0, sn: 0, tf: 0, jp: 0 },
+                drives: { add: [], closeGoals: [], adjust: [], drop: [] },
+                wakeMood: { emotion: "kalm", intensity: 0.4 },
+              }),
+            ),
+        });
+        const brain = brainWith({ heavy });
+
+        await brain.removeMemory(vero.id, weg.id);
+        await brain.sleep();
+
+        const prompt = JSON.stringify(heavy.doGenerateCalls[0]?.prompt);
+        expect(prompt).toContain("Gewone-herinnering");
+        expect(prompt).not.toContain("Geheim-verkeerd-onthouden");
+      });
+    });
+
+    describe("forceMood", () => {
+      it("zet de Stemming direct, ook onder de huidige intensiteit, en laat de Basisemotie ongemoeid", async () => {
+        const vero = await insertDynimo({ moodEmotion: "boos", moodIntensity: 0.9, moodAt: bornAt });
+
+        expect(await brainWith().forceMood(vero.id, "blij", 0.4)).toBe(true);
+
+        expect(await rowOf(vero.id)).toMatchObject({ moodEmotion: "blij", moodIntensity: 0.4, moodAt: bornAt, baseEmotion: "kalm" });
+      });
+
+      it("dooft de geforceerde Stemming daarna normaal uit (niet gepind)", async () => {
+        const vero = await insertDynimo();
+        await brainWith().forceMood(vero.id, "boos", 0.8);
+
+        const row = await rowOf(vero.id);
+        expect(moodOfRow(row, new Date(bornAt.getTime() + 10 * MIN))).toMatchObject({ emotion: "boos", intensity: 0.4 });
+        expect(moodOfRow(row, new Date(bornAt.getTime() + 60 * MIN))).toMatchObject({ emotion: "kalm", intensity: 0.3 });
+      });
+
+      it("geeft false en wijzigt niets bij een onbekende Dynimo", async () => {
+        const vero = await insertDynimo();
+
+        expect(await brainWith().forceMood(vero.id + 999, "boos", 0.8)).toBe(false);
+        expect((await rowOf(vero.id)).moodEmotion).toBeNull();
+      });
+
+      it("meldt de nieuwe Stemming op het toestandskanaal, zodat de agent hem publiceert", async () => {
+        const vero = await insertDynimo();
+        const client = postgres(databaseUrl(TEST_DB_NAME), { onnotice: () => {} });
+        const received: string[] = [];
+        await client.listen(STATE_CHANNEL, (payload) => received.push(payload));
+        try {
+          await brainWith().forceMood(vero.id, "boos", 0.8);
+          await new Promise((resolve) => setTimeout(resolve, 150));
+          expect(received).toEqual([`mood:${vero.id}`]);
+        } finally {
+          await client.end();
+        }
+      });
+
+      // OVERRIDES-APPEND
     });
   });
 });

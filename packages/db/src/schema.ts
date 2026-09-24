@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { check, index, integer, pgTable, real, serial, text, timestamp, uniqueIndex, vector } from "drizzle-orm/pg-core";
+import { check, date, index, integer, pgTable, real, serial, text, timestamp, uniqueIndex, vector } from "drizzle-orm/pg-core";
 
 // Meerdere rijen mogelijk: elke rij is een Dynimo.
 export const dynimos = pgTable(
@@ -24,6 +24,8 @@ export const dynimos = pgTable(
     lastReflectedAt: timestamp("last_reflected_at", { withTimezone: true }),
     wakeMoodEmotion: text("wake_mood_emotion"),
     wakeMoodIntensity: real("wake_mood_intensity"),
+    // Verjaardag (#39): de kalenderdag waarop de verjaardagsboost al gegeven is (idempotent over herstarts).
+    lastBirthdayBoostOn: date("last_birthday_boost_on", { mode: "string" }),
     // NULL = Slapend; gezet = Wakker (en de marker van deze wake-generatie).
     awakeSince: timestamp("awake_since", { withTimezone: true }),
     // Persoonlijkheid: 0..1 = positie richting de tweede letter (I↔E, S↔N, T↔F, J↔P). NULL = nog te backfillen.
@@ -113,6 +115,30 @@ export const drives = pgTable(
     check("drives_status_only_goal", sql`(${table.kind} = 'doel') = (${table.status} is not null)`),
     check("drives_strength_only_aversion", sql`(${table.kind} in ('afkeer', 'ergernis')) = (${table.strength} is not null)`),
     check("drives_strength_range", sql`${table.strength} between 0 and 1`),
+  ],
+);
+
+// Dromen (#38): korte, associatieve tekst uit de Reflectie-bij-het-slapen. Emotie + intensiteit zijn de gevoelslading
+// van de Droom; die overschrijft de Ontwaakstemming enkel als hij intenser is. Cascade bij het doden van de Dynimo.
+export const dreams = pgTable(
+  "dreams",
+  {
+    id: serial("id").primaryKey(),
+    dynimoId: integer("dynimo_id")
+      .notNull()
+      .references(() => dynimos.id, { onDelete: "cascade" }),
+    text: text("text").notNull(),
+    emotion: text("emotion").notNull(),
+    intensity: real("intensity").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    index("dreams_dynimo_id_idx").on(table.dynimoId),
+    check(
+      "dreams_emotion_check",
+      sql`${table.emotion} in ('blij', 'boos', 'verrast', 'kalm', 'verveeld', 'nieuwsgierig', 'bang', 'neutraal')`,
+    ),
+    check("dreams_intensity_range", sql`${table.intensity} between 0 and 1`),
   ],
 );
 

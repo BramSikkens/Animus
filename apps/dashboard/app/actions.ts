@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { isEmotion } from "@animus/brain/emotion";
 import { getBrain } from "../lib/brain";
 
 export type ActionState = { error?: string };
@@ -49,5 +50,38 @@ export async function kill(_prev: ActionState, formData: FormData): Promise<Acti
     if (!(await getBrain().kill(id, String(formData.get("name") ?? "")))) {
       return "De naam klopt niet (of de Dynimo bestaat niet meer). Er is niets verwijderd.";
     }
+  });
+}
+
+const DYNIMO_GONE = "Deze Dynimo bestaat niet meer.";
+
+export async function forceMood(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  return run(async () => {
+    const id = parseId(formData);
+    if (id === null) return INVALID_ID;
+    const emotion = formData.get("emotion");
+    const intensity = Number(formData.get("intensity"));
+    if (!isEmotion(emotion)) return "Ongeldige emotie.";
+    if (!(intensity >= 0 && intensity <= 1)) return "Intensiteit moet tussen 0 en 1 liggen.";
+    if (!(await getBrain().forceMood(id, emotion, intensity))) return DYNIMO_GONE;
+  });
+}
+
+export async function addMemory(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  return run(async () => {
+    const id = parseId(formData);
+    if (id === null) return INVALID_ID;
+    const text = String(formData.get("text") ?? "").trim();
+    if (!text) return "Vul een tekst in.";
+    if (!(await getBrain().addMemory(id, text))) return DYNIMO_GONE;
+  });
+}
+
+export async function removeMemory(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  return run(async () => {
+    const id = parseId(formData);
+    const memoryId = Number(formData.get("memoryId"));
+    if (id === null || !Number.isInteger(memoryId)) return "Ongeldige Herinnering.";
+    if (!(await getBrain().removeMemory(id, memoryId))) return "Deze Herinnering bestaat niet (meer).";
   });
 }

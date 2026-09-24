@@ -1,8 +1,10 @@
 import { ReadableStream } from "node:stream/web";
 import { fileURLToPath } from "node:url";
 import { createBrain, type Brain } from "@animus/brain";
-import { DISPLAY_TOPIC, type DisplayMessage } from "@animus/brain/display";
+import { DISPLAY_TOPIC, type DisplayMessage, type DisplayState } from "@animus/brain/display";
+import { SOUND_TOPIC, type SoundMessage } from "@animus/brain/sound";
 import { EMOTION_TOPIC, type EmotionMessage } from "@animus/brain/emotion";
+import { rowAxes } from "@animus/brain/personality";
 import { EMBEDDING_MODEL, loadType2Config, TYPE1_MODEL } from "@animus/brain/config";
 import { createDb, migrate } from "@animus/db";
 import {
@@ -24,9 +26,11 @@ import * as openai from "@livekit/agents-plugin-openai";
 import * as silero from "@livekit/agents-plugin-silero";
 import { RoomEvent } from "@livekit/rtc-node";
 import { readState, watchDynimos } from "./dynimo-watch.js";
+import { createInitiativeTimer, initiativeIntervalMs, parseInitiativeMinutes } from "./initiative-timer.js";
 import { createReflectionDisplay } from "./reflection-display.js";
 import { createSilenceTimer, parseSilenceMinutes } from "./silence-timer.js";
 import { textStream } from "./text-stream.js";
+import { resolveDisplay, voiceDisplay } from "./voice-display.js";
 
 try {
   process.loadEnvFile(fileURLToPath(new URL("../../../.env", import.meta.url)));
@@ -78,6 +82,7 @@ class AnimusAgent extends voice.Agent {
   readonly #brain: Brain;
   readonly #room: JobContext["room"];
   readonly #onUtterance: () => void;
+  #pendingInitiative: string | undefined;
 
   constructor(brain: Brain, room: JobContext["room"], onUtterance: () => void) {
     // instructions is verplicht op voice.Agent, maar onbenut: llmNode hieronder draait i.p.v. het
@@ -88,14 +93,21 @@ class AnimusAgent extends voice.Agent {
     this.#onUtterance = onUtterance;
   }
 
+  /** Zet een spontane uiting klaar; de eerstvolgende llmNode (via session.generateReply) draait die i.p.v. een user-turn. */
+  queueInitiative(instruction: string): void {
+    this.#pendingInitiative = instruction;
+  }
+
   override async llmNode(chatCtx: ChatContext, _toolCtx: ToolContext): Promise<ReadableStream<string> | null> {
     const isUserMessage = (item: ChatContext["items"][number]): item is ChatMessage =>
       item.type === "message" && item.role === "user";
-    const text = chatCtx.items.filter(isUserMessage).at(-1)?.textContent;
+    const initiative = this.#pendingInitiative;
+    this.#pendingInitiative = undefined;
+    const text = initiative ?? chatCtx.items.filter(isUserMessage).at(-1)?.textContent;
     if (!text) return null;
     this.#onUtterance();
     // tool-*-events uit brain.hear() worden hier genegeerd (ticket #7).
-    return textStream(this.#brain.hear(text), {
+    return textStream(this.#brain.hear(text, { initiatief: initiative !== undefined }), {
       onMood: (emotion, intensity) => {
         const participant = this.#room.localParticipant;
         if (!participant) {
@@ -108,6 +120,16 @@ class AnimusAgent extends voice.Agent {
           .publishData(new TextEncoder().encode(JSON.stringify(message)), { reliable: true, topic: EMOTION_TOPIC })
           .catch((error: unknown) => {
             console.error("Emotie publiceren faalde:", error instanceof Error ? error.message : error);
+          });
+      },
+      onSound: (kind) => {
+        const participant = this.#room.localParticipant;
+        if (!participant) return;
+        const message: SoundMessage = { kind };
+        participant
+          .publishData(new TextEncoder().encode(JSON.stringify(message)), { reliable: true, topic: SOUND_TOPIC })
+          .catch((error: unknown) => {
+            console.error("Geluid publiceren faalde:", error instanceof Error ? error.message : error);
           });
       },
     });
@@ -165,11 +187,25 @@ export default defineAgent<AgentUserData>({
       publishDisplay: (display) => publish(DISPLAY_TOPIC, { state: display }),
       publishState: () => void publishState(),
     });
+    // luisterend/spreekt volgen LiveKit's AgentState/UserState (ADR-0011); reflecterend/slapend winnen daarvan.
+    let agentState: voice.AgentState = "initializing";
+    let userState: voice.UserState = "listening";
+    const effectiveDisplay = (state: { key: string; display: DisplayState }): DisplayState =>
+      resolveDisplay(reflectionDisplay.displayFor(state.key, state.display), voiceDisplay(agentState, userState));
+    session.on(voice.AgentSessionEventTypes.AgentStateChanged, (event) => {
+      agentState = event.newState;
+      // `watcher` bestaat pas na session.start; eerdere events worden door de eerste publishState opgepikt.
+      if (watcher) publish(DISPLAY_TOPIC, { state: effectiveDisplay(watcher.current()) });
+    });
+    session.on(voice.AgentSessionEventTypes.UserStateChanged, (event) => {
+      userState = event.newState;
+      if (watcher) publish(DISPLAY_TOPIC, { state: effectiveDisplay(watcher.current()) });
+    });
     // Weergavetoestand plus, bij wakker, de HUIDIGE Stemming (vers gelezen), zodat het gezichtje na wekken direct klopt.
     const publishState = async (): Promise<void> => {
       try {
         const state = await readState(brain);
-        publish(DISPLAY_TOPIC, { state: reflectionDisplay.displayFor(state.key, state.display) });
+        publish(DISPLAY_TOPIC, { state: effectiveDisplay(state) });
         if (state.mood) publish(EMOTION_TOPIC, state.mood);
       } catch (error) {
         console.error("Toestand publiceren faalde:", error instanceof Error ? error.message : error);
@@ -191,24 +227,50 @@ export default defineAgent<AgentUserData>({
     });
     ctx.addShutdownCallback(async () => silence.dispose());
 
-    await session.start({
-      agent: new AnimusAgent(brain, ctx.room, () => {
-        silence.reset();
-        reflectionDisplay.onUtterance();
-      }),
-      room: ctx.room,
+    // Initiatief: periodiek vraagt de brain (Type1) of de wakkere Dynimo iets wil zeggen; zo ja, dan spreekt hij
+    // uit zichzelf. Enkel bij stilte (agent niet speaking/thinking, gebruiker niet aan het praten); de frequentie
+    // volgt de N/P-kant van de Persoonlijkheid.
+    const initiativeBaseMs = parseInitiativeMinutes(process.env.INITIATIVE_CHECK_MINUTES);
+    if (initiativeBaseMs.warning) console.warn(initiativeBaseMs.warning);
+    let initiativeAxes: ReturnType<typeof rowAxes> = null;
+    const refreshInitiativeAxes = async (): Promise<void> => {
+      initiativeAxes = rowAxes((await brain.list()).find((dynimo) => dynimo.awakeSince) ?? { axisIe: null, axisSn: null, axisTf: null, axisJp: null });
+    };
+    const animusAgent = new AnimusAgent(brain, ctx.room, () => {
+      silence.reset();
+      initiative.reset();
+      reflectionDisplay.onUtterance();
     });
+    const initiative = createInitiativeTimer({
+      intervalMs: () => initiativeIntervalMs(initiativeAxes, initiativeBaseMs.ms),
+      random: Math.random,
+      isQuiet: () => (session.agentState === "idle" || session.agentState === "listening") && session.userState !== "speaking",
+      onCheck: async () => {
+        await refreshInitiativeAxes();
+        const instruction = await brain.considerInitiative();
+        // Opnieuw controleren: de check duurde even, misschien is er intussen iemand gaan praten.
+        if (!instruction || session.agentState === "speaking" || session.agentState === "thinking" || session.userState === "speaking") return;
+        animusAgent.queueInitiative(instruction);
+        session.generateReply();
+      },
+    });
+    ctx.addShutdownCallback(async () => initiative.dispose());
+
+    await session.start({ agent: animusAgent, room: ctx.room });
 
     // Volgt de wakkere Dynimo (dashboard-acties komen binnen via Postgres NOTIFY): een wissel breekt het
     // lopende antwoord af (zoals barge-in; de brain-stream sluit via textStream) en zet het gezichtje om.
     watcher = await watchDynimos({
       databaseUrl,
       brain,
+      onMood: () => void publishState(),
       onChange: () => {
         // Een wissel beëindigt het reflecterende gezicht; een lopende Reflectie mag doorlopen maar publiceert
         // dan niets meer (sleutel-guard in reflectionDisplay).
         reflectionDisplay.onSwitch();
         silence.reset();
+        initiative.reset();
+        void refreshInitiativeAxes().catch(() => {});
         // interrupt gooit/weigert als er niets te onderbreken valt; dat is geen fout.
         try {
           session.interrupt({ force: true }).await.catch(() => {});
@@ -221,6 +283,8 @@ export default defineAgent<AgentUserData>({
     ctx.addShutdownCallback(() => watcher.close());
     void publishState();
     silence.arm();
+    void refreshInitiativeAxes().catch(() => {});
+    initiative.start();
     // Een later ladend gezichtje kent de toestand nog niet. ParticipantConnected vuurt vóórdat het gezichtje
     // zijn data-channel-subscriber gemount heeft, dus nog eens na een korte vertraging.
     // ponytail: een echte oplossing (state-sync via participant attributes of een request-bericht) pas nodig

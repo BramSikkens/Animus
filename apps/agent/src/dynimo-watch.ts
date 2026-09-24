@@ -27,6 +27,8 @@ export async function watchDynimos(options: {
   databaseUrl: string;
   brain: Brain;
   onChange: (state: DynimoState) => void;
+  /** Een Stemming is van buitenaf gezet (dashboard-override, payload "mood:<id>"): ververs enkel het gezichtje. */
+  onMood?: () => void;
 }): Promise<{ current: () => DynimoState; close: () => Promise<void> }> {
   const listener = postgres(options.databaseUrl, { max: 1, onnotice: () => {} });
   let last: DynimoState | undefined;
@@ -51,7 +53,11 @@ export async function watchDynimos(options: {
 
   // Eerst luisteren, dán lezen: een wissel tussen lezen en luisteren gaat anders verloren. `onlisten` draait
   // bij elke (her)verbinding, zodat meldingen tijdens een onderbreking alsnog opgemerkt worden.
-  await listener.listen(STATE_CHANNEL, check, check);
+  await listener.listen(
+    STATE_CHANNEL,
+    (payload: string) => (payload.startsWith("mood:") ? options.onMood?.() : void check()),
+    check,
+  );
   await check();
 
   return {

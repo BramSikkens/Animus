@@ -9,6 +9,7 @@
     "./age": "./src/age.ts",
     "./config": "./src/config.ts",
     "./emotion": "./src/emotion.ts",
+    "./familiarity": "./src/familiarity.ts",
     "./display": "./src/display.ts",
     "./gallery": "./src/gallery.ts",
     "./personality": "./src/personality.ts",

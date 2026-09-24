@@ -15,7 +15,7 @@ import { doodleActive } from "./face/doodle.js";
 import { isSoundKind, SOUND_TOPIC } from "@animus/brain/sound";
 import { clipUrl } from "./sound.js";
 import { Face } from "./face/Face.js";
-import { emotionBars } from "./emotion-bars.js";
+import { emotionBarGroups } from "./emotion-bars.js";
 
 type TokenSession = { serverUrl: string; token: string };
 // `values` (de volledige vector) voedt de balken; ontbreekt hij (debugpaneel), dan tonen we geen balken.
@@ -230,12 +230,16 @@ export function App() {
       {name && <p className="dynimo-name">{name}</p>}
       {emotionState.values && (
         <ul className="emotion-bars" aria-label="Emoties">
-          {emotionBars(emotionState.values).map(({ emotion, value }) => (
-            <li key={emotion}>
-              <span>{emotion}</span>
-              <div className="bar" role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(value)}>
-                <div style={{ width: `${value}%` }} />
-              </div>
+          {emotionBarGroups(emotionState.values).map((group) => (
+            <li key={group[0]!.emotion}>
+              {group.map(({ emotion, value }) => (
+                <div key={emotion} className="item">
+                  <span>{emotion}</span>
+                  <div className="bar" role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(value)}>
+                    <div style={{ width: `${value}%` }} />
+                  </div>
+                </div>
+              ))}
             </li>
           ))}
         </ul>

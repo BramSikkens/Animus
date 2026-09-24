@@ -123,17 +123,21 @@ button:hover {
 
 .emotion-bars li {
   display: flex;
-  align-items: center;
   gap: 0.6rem;
   margin-bottom: 0.5rem;
 }
 
+.emotion-bars .item {
+  flex: 1;
+  min-width: 0;
+}
+
 .emotion-bars span {
-  width: 5.5em;
+  display: block;
+  font-size: 0.9rem;
 }
 
 .emotion-bars .bar {
-  flex: 1;
   height: 10px;
   background: rgba(244, 239, 227, 0.2);
 }

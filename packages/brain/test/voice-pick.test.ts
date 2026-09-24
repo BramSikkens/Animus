@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { pickVoiceForCharacter } from "../src/genesis-voice.js";
+import { chooseGenesisVoice, defaultVoiceDeps, elevenLabsGenesisVoices, pickVoiceForCharacter } from "../src/genesis-voice.js";
 import type { CatalogVoice } from "../src/voice-catalog.js";
 
 const v = (id: string, over: Partial<CatalogVoice> = {}): CatalogVoice => ({
@@ -46,5 +46,25 @@ describe("elevenLabsGenesisVoices", () => {
     expect(elevenLabsGenesisVoices({}, never)).toBeUndefined();
     expect(elevenLabsGenesisVoices({ ELEVENLABS_API_KEY: "k" }, never)?.design).toBeUndefined();
     expect(elevenLabsGenesisVoices({ ELEVENLABS_API_KEY: "k", GENESIS_VOICE_DESIGN: "1" }, never)?.design).toBeTypeOf("function");
+  });
+});
+
+describe("defaultVoiceDeps", () => {
+  it("is de ElevenLabs-koppeling voor de meegegeven env, en undefined zonder key", () => {
+    expect(defaultVoiceDeps({})).toBeUndefined();
+    expect(defaultVoiceDeps({ ELEVENLABS_API_KEY: "k" })?.loadCatalog).toBeTypeOf("function");
+  });
+});
+
+describe("ElevenLabs-fetches hebben een timeout", () => {
+  it("een hangende fetch blokkeert genesis niet: stem blijft null", async () => {
+    // Hangt tot de meegegeven signal afbreekt.
+    const hanging = ((_url: unknown, init?: RequestInit) =>
+      new Promise((_resolve, reject) => init?.signal?.addEventListener("abort", () => reject(init.signal!.reason)))) as unknown as typeof fetch;
+    const deps = elevenLabsGenesisVoices({ ELEVENLABS_API_KEY: "k" }, hanging, 20)!;
+
+    const result = await chooseGenesisVoice(deps, { description: "oude man", searchTerms: [], hint: "", name: "Nova" });
+
+    expect(result).toBeNull();
   });
 });

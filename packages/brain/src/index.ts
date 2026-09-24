@@ -31,7 +31,8 @@ import { AXIS_DESCRIPTIONS, type Axes, axisGuidelines, mbtiType, rowAxes } from 
 import { EMOTIONS, oppositeOf, type Emotion } from "./emotion.js";
 import { SEEDS } from "./seeds.js";
 import { createTools } from "./tools.js";
-import { chooseGenesisVoice, elevenLabsGenesisVoices, type GenesisVoiceDeps } from "./genesis-voice.js";
+import { chooseGenesisVoice, type GenesisVoiceDeps } from "./genesis-voice.js";
+export { defaultVoiceDeps } from "./genesis-voice.js";
 
 export { EMOTIONS, type Emotion };
 export { formatAge };
@@ -380,12 +381,12 @@ export function createBrain(deps: {
   embedder: EmbeddingModel;
   now?: () => Date;
   random?: () => number;
-  /** Stemkeuze bij genesis; default: echte ElevenLabs als ELEVENLABS_API_KEY gezet is, anders geen stemkeuze. */
+  /** Stemkeuze bij genesis; default: geen (geen netwerk). Aanroepers geven defaultVoiceDeps(process.env) mee. */
   voices?: GenesisVoiceDeps;
 }): Brain {
   const now = deps.now ?? (() => new Date());
   const random = deps.random ?? Math.random;
-  const voices = deps.voices ?? elevenLabsGenesisVoices(process.env);
+  const voices = deps.voices;
   let lastIgnored = false; // vorige beurt genegeerd? Voorkomt twee keer achter elkaar negeren.
   let turnCount = 0; // beurten (zonder initiatief) van deze brain-instantie, voor de cooldown van het Standpunt.
   let lastOpinionTurn: number | undefined;

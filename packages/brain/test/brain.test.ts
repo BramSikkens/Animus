@@ -240,6 +240,20 @@ describe("createBrain", () => {
     const base = { name: "Nova", coreCharacter: "x", birthStory: "y" };
     const loader = (catalog: CatalogVoice[], tier = "starter") => ({ loadCatalog: async () => ({ catalog, tier }) });
 
+    it("is hermetisch: zonder voices doet createBrain geen netwerk, ook als ELEVENLABS_API_KEY in de omgeving staat", async () => {
+      const fetchSpy = vi.fn(async () => { throw new Error("netwerk!"); });
+      vi.stubGlobal("fetch", fetchSpy);
+      vi.stubEnv("ELEVENLABS_API_KEY", "k");
+      try {
+        const row = await born({ ...base, voiceDescription: "oude man" });
+        expect(row.voice).toBeNull();
+        expect(fetchSpy).not.toHaveBeenCalled();
+      } finally {
+        vi.unstubAllGlobals();
+        vi.unstubAllEnvs();
+      }
+    });
+
     it("kiest een stem uit de catalogus op voiceDescription en zoektermen en bewaart het profiel", async () => {
       const row = await born({ ...base, voiceDescription: "oude man, hees", voiceSearchTerms: ["old man"] }, loader([voice("opa", "old man raspy"), voice("kind", "child")]));
       expect(row.voice).toBe("opa");

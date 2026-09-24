@@ -63,9 +63,11 @@ const PREVIEW_TEXT =
   "Hallo, ik ben net geboren en ontdek de wereld om me heen. Ik praat graag over alles wat ik zie, hoor en voel, en ik hoop dat we samen veel gaan beleven.";
 
 /** Echte ElevenLabs-koppeling; undefined zonder ELEVENLABS_API_KEY. Voice design (kost tegoed) alleen met GENESIS_VOICE_DESIGN=1. */
-export function elevenLabsGenesisVoices(env: Record<string, string | undefined>, fetchFn: typeof fetch = fetch): GenesisVoiceDeps | undefined {
+export function elevenLabsGenesisVoices(env: Record<string, string | undefined>, baseFetch: typeof fetch = fetch, timeoutMs = 8000): GenesisVoiceDeps | undefined {
   const apiKey = env.ELEVENLABS_API_KEY;
   if (!apiKey) return undefined;
+  // Elke aanroep krijgt een timeout: een hangende ElevenLabs mag genesis niet blokkeren (chooseGenesisVoice vangt de fout op).
+  const fetchFn = ((input, init) => baseFetch(input, { ...init, signal: AbortSignal.timeout(timeoutMs) })) as typeof fetch;
   const loadCatalog = cached(async () => {
     const tier = await fetchTier(fetchFn, apiKey);
     return { tier, catalog: tier === "free" ? [] : await fetchCatalog(fetchFn, apiKey, "nl", tier) };
@@ -79,3 +81,6 @@ export function elevenLabsGenesisVoices(env: Record<string, string | undefined>,
       : undefined;
   return { loadCatalog, design };
 }
+
+/** Standaardkoppeling voor aanroepers (dashboard/agent): expliciet meegeven aan createBrain({ voices }); createBrain zelf leest geen omgeving. */
+export const defaultVoiceDeps = (env: Record<string, string | undefined>): GenesisVoiceDeps | undefined => elevenLabsGenesisVoices(env);

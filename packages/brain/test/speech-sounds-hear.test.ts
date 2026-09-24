@@ -122,12 +122,10 @@ describe("hear(): latentie", () => {
       doStream: async () => ({
         stream: new ReadableStream({
           start(controller) {
-            for (const chunk of [
-              { type: "stream-start", warnings: [] },
-              { type: "text-start", id: "1" },
-              { type: "text-delta", id: "1", delta: "Hoi" },
-              { type: "text-delta", id: "1", delta: " daar," },
-            ]) controller.enqueue(chunk);
+            controller.enqueue({ type: "stream-start" as const, warnings: [] });
+            controller.enqueue({ type: "text-start" as const, id: "1" });
+            controller.enqueue({ type: "text-delta" as const, id: "1", delta: "Hoi" });
+            controller.enqueue({ type: "text-delta" as const, id: "1", delta: " daar," });
           },
         }),
       }),

@@ -203,6 +203,8 @@ Een geplande job (bv. nachtelijk of na lange idle-tijd) laat Type2 een korte, as
 
 - Type1 (Jev) bepaalt continu `{emotion, intensity}` uit toon/context, doorgestuurd via WebSocket of een LiveKit data channel naar het gezichtje — dit hoeft niet te wachten op de volledige Type2-redenering
 
+**Levendigheid — idle-animatie en toestanden (fase 2b):** het gezicht mag nooit een stilstaand plaatje zijn. Naast de emotiekeyframes komt een continue idle-laag (knipperen, een subtiele ademhaling in schaal/positie, lichte pupilverschuiving) die altijd doorloopt, ook zonder emotie-event. Daarbovenop krijgt elke weergavetoestand een eigen, herkenbare beweging in plaats van een statische pose: een nieuwe **luisterend**-toestand (naast de bestaande *wakker*/*reflecterend*/*slapend*) terwijl er spraak binnenkomt, een eigen beweging voor *reflecterend*, en de idle-laag zelf voor stilte zonder gesprek.
+
 **Extra expressiemodi:**
 
 - **Zelf geluiden maken** — korte audioclips (kirren, zuchten, brommen) getriggerd door emotiewissels, geen LLM-call nodig
@@ -303,3 +305,4 @@ Beslist tijdens de `/grill-with-docs`-sessies (fase 1 en fase 2a) — zie [CONTE
 - [x] **Meerdere wezens — wisselen:** het lopende antwoord wordt meteen onderbroken, de huidige Dynimo gaat slapen (met Reflectie), daarna wordt de andere wakker.
 - [x] **Meerdere wezens — maximum:** geen grens.
 - [ ] **Initiatief:** bevestigen dat het van de N- en P-kant afgeleid wordt (voorstel), of een eigen as/knop krijgt.
+- [ ] **Levendigheid/idle-animatie:** vorm van de continue idle-laag (knipperen, ademhaling, pupilverschuiving) en een aparte *luisterend*-weergavetoestand, los van de emotiekeyframes — fase 2b.

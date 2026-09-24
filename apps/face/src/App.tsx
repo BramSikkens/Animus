@@ -74,7 +74,7 @@ function DisplayListener({ onDisplay }: { onDisplay: (state: DisplayState) => vo
 // Speelt bij een sound-event (SoundMessage op SOUND_TOPIC) een vooraf opgenomen clip af; niet tijdens slapend/reflecterend.
 function SoundListener({ display }: { display: DisplayState }) {
   useDataChannel(SOUND_TOPIC, (msg) => {
-    if (!msg.from?.isAgent || display !== "wakker") return;
+    if (!msg.from?.isAgent || display === "slapend" || display === "reflecterend") return;
     try {
       const payload: unknown = JSON.parse(new TextDecoder().decode(msg.payload));
       if (payload !== null && typeof payload === "object" && "kind" in payload && isSoundKind(payload.kind)) {

@@ -7,7 +7,7 @@ import postgres from "postgres";
 import { EMOTIONS } from "../src/emotion.js";
 import { moodOfRow, singleEmotionValues, type MoodValues } from "../src/mood.js";
 import { ARCHETYPES, getArchetype } from "../src/archetypes.js";
-import { createBrain, STATE_CHANNEL, type BrainEvent } from "../src/index.js";
+import { createBrain, DELTA_TABLE, STATE_CHANNEL, type BrainEvent } from "../src/index.js";
 import { createTestDb, databaseUrl, TEST_DB_NAME, truncateAll } from "./db.js";
 
 const db = createTestDb();
@@ -111,9 +111,11 @@ function embedModel() {
   });
 }
 
-// Type1-contract: per emotie een 'delta_<emotie>'-score (21 niveaus, 0..20; 10 = geen verandering, 10 punten per niveau).
+// Type1-contract: per emotie een 'delta_<emotie>'-score (niveau 0..8 in DELTA_TABLE; 4 = geen verandering). Een delta wordt het dichtstbijzijnde niveau.
+const nearestLevel = (delta: number) =>
+  (DELTA_TABLE as readonly number[]).reduce((best, value, level) => (Math.abs(value - delta) < Math.abs(DELTA_TABLE[best]! - delta) ? level : best), 0);
 const deltaAnswers = (deltas: Partial<Record<string, number>>) =>
-  Object.fromEntries(EMOTIONS.map((emotion) => [`delta_${emotion}`, { type: "score", score: (deltas[emotion] ?? 0) / 10 + 10 }]));
+  Object.fromEntries(EMOTIONS.map((emotion) => [`delta_${emotion}`, { type: "score", score: nearestLevel(deltas[emotion] ?? 0) }]));
 
 // Default: geen delta's/simpel. Registreert calls zelf (de mock houdt ze niet bij), t.b.v. test 5.
 function type1Model(
@@ -410,17 +412,17 @@ describe("createBrain", () => {
   }
 
   it("geeft de Type2-prompt de volledige emotievector mee, hoog naar laag, met de dominante emotie benoemd", async () => {
-    const system = await systemAfterHearing({ blij: 80 });
-    expect(system).toContain("blij: 80");
+    const system = await systemAfterHearing({ blij: 50 });
+    expect(system).toContain("blij: 50");
     expect(system).toContain("kalm: 30");
     expect(system).toContain("boos: 0");
-    expect(system.indexOf("blij: 80")).toBeLessThan(system.indexOf("kalm: 30"));
+    expect(system.indexOf("blij: 50")).toBeLessThan(system.indexOf("kalm: 30"));
     expect(system.indexOf("kalm: 30")).toBeLessThan(system.indexOf("boos: 0"));
     expect(system).toContain("Dominant: blij");
   });
 
   it("instrueert de Type2-prompt eerlijk over de stemming te zijn en er toon en antwoord op af te stemmen", async () => {
-    const system = await systemAfterHearing({ boos: 80 });
+    const system = await systemAfterHearing({ boos: 50 });
     expect(system).toContain("Wees eerlijk over hoe je je voelt");
     expect(system).toContain("ontken die niet");
     expect(system).toContain("toon en antwoord");
@@ -432,7 +434,7 @@ describe("createBrain", () => {
     const brain = createBrain({
       db,
       embedder: embedModel(),
-      type1: type1Model({ deltas: { blij: 80 } }),
+      type1: type1Model({ deltas: { blij: 50 } }),
       type2: { light, heavy: genesisModel({ name: "Nova", coreCharacter: "x", birthStory: "y" }) },
       now: () => bornAt,
       random: () => 0.99, // boven elke gedragskans: geen negeren/kort
@@ -442,7 +444,7 @@ describe("createBrain", () => {
     const events: BrainEvent[] = [];
     for await (const event of brain.hear("Hoi!")) events.push(event);
 
-    expect(events[0]).toMatchObject({ type: "mood", emotion: "blij", intensity: 0.8, values: { blij: 80, kalm: 30, boos: 0 } });
+    expect(events[0]).toMatchObject({ type: "mood", emotion: "blij", intensity: 0.5, values: { blij: 50, kalm: 30, boos: 0 } });
     const emotionIndex = events.findIndex((e) => e.type === "mood");
     const firstTextIndex = events.findIndex((e) => e.type === "text");
     expect(emotionIndex).toBeLessThan(firstTextIndex);
@@ -508,7 +510,7 @@ describe("createBrain", () => {
     const brain = createBrain({
       db,
       embedder: embedModel(),
-      type1: type1Model({ deltas: { nieuwsgierig: 65 } }),
+      type1: type1Model({ deltas: { nieuwsgierig: 50 } }),
       type2: { light, heavy: genesisModel({ name: "Nova", coreCharacter: "x", birthStory: "y" }) },
       now: () => bornAt,
       random: () => 0,
@@ -517,7 +519,7 @@ describe("createBrain", () => {
     await collectText(brain.hear("Vertel eens iets nieuws."));
 
     const rows = await db.select().from(dynimos);
-    expect(rows[0]?.moodValues).toMatchObject({ nieuwsgierig: 65, kalm: 30, blij: 0 });
+    expect(rows[0]?.moodValues).toMatchObject({ nieuwsgierig: 50, kalm: 30, blij: 0 });
     expect(rows[0]?.moodAt).toEqual(bornAt);
   });
 
@@ -2011,11 +2013,11 @@ describe("createBrain", () => {
 
     // Type1 met een reeks antwoorden (één per beurt); registreert wat hij ontving.
     function type1Sequence(answers: { deltas: Partial<Record<string, number>>; indruk?: number }[]) {
-      const calls: { state: string; questions: Record<string, { criteria: string[] }> }[] = [];
+      const calls: { state: string; questions: Record<string, { type?: string; criteria: string[] }> }[] = [];
       const model = new Experimental_EvaluationMockModelV4({
         doEvaluate: async (options) => {
           const answer = answers[calls.length] ?? answers.at(-1)!;
-          calls.push({ state: String((options as { state: unknown }).state), questions: (options as unknown as { questions: Record<string, { criteria: string[] }> }).questions });
+          calls.push({ state: String((options as { state: unknown }).state), questions: (options as unknown as { questions: Record<string, { type?: string; criteria: string[] }> }).questions });
           return {
             answers: {
               ...deltaAnswers(answer.deltas),
@@ -2109,27 +2111,38 @@ describe("createBrain", () => {
       expect(state).toContain("boos");
     });
 
-    it("biedt Type1 een fijne delta-schaal: 21 niveaus van -100 tot +100 in stappen van 10, midden = geen verandering", async () => {
+    it("biedt Type1 een niet-lineaire delta-schaal van 9 niveaus met −20 en +8; midden = geen verandering", async () => {
       await insertDynimo();
       const { model, calls } = type1Sequence([{ deltas: {} }]);
 
       await collectText(brainWith({ type1: model, light: textModel(["Hoi."]) }).hear("Hoi"));
 
       const criteria = calls[0]!.questions.delta_blij!.criteria;
-      expect(criteria).toHaveLength(21);
+      expect(criteria).toHaveLength(9);
       expect(criteria[0]).toBe("-100");
-      expect(criteria[8]).toBe("-20");
-      expect(criteria[10]).toBe("geen verandering");
-      expect(criteria[11]).toBe("+10");
-      expect(criteria[20]).toBe("+100");
+      expect(criteria[2]).toBe("-20");
+      expect(criteria[4]).toBe("geen verandering");
+      expect(criteria[5]).toBe("+8");
+      expect(criteria[8]).toBe("+100");
+    });
+
+    it("stelt Type1 alleen Score-vragen met hoogstens 10 niveaus (limiet van de typesafe-Score)", async () => {
+      await insertDynimo();
+      const { model, calls } = type1Sequence([{ deltas: {} }]);
+
+      await collectText(brainWith({ type1: model, light: textModel(["Hoi."]) }).hear("Hoi"));
+
+      const scores = Object.values(calls[0]!.questions).filter((question) => question.type === "score");
+      expect(scores.length).toBeGreaterThan(EMOTIONS.length);
+      for (const question of scores) expect(question.criteria.length).toBeLessThanOrEqual(10);
     });
 
     it("telt de delta's per uiting op bij de Stemming en clampt op 100: een andere emotie kan zo winnen", async () => {
       await insertDynimo();
       const { model } = type1Sequence([
-        { deltas: { boos: 80 } },
-        { deltas: { blij: 50 } },
-        { deltas: { blij: 90 } },
+        { deltas: { boos: 50 } },
+        { deltas: { blij: 20 } },
+        { deltas: { blij: 100 } },
       ]);
       const light = new MockLanguageModelV4({ doStream: [textStream("Een."), textStream("Twee."), textStream("Drie.")] });
       const brain = brainWith({ type1: model, light });
@@ -2140,16 +2153,16 @@ describe("createBrain", () => {
       }
 
       expect(moods.map((m) => m.type === "mood" && m.emotion)).toEqual(["boos", "boos", "blij"]);
-      expect(moods[2]).toMatchObject({ intensity: 1, values: { blij: 100, boos: 80 } });
-      expect((await db.select().from(dynimos))[0]?.moodValues).toMatchObject({ blij: 100, boos: 80 });
+      expect(moods[2]).toMatchObject({ intensity: 1, values: { blij: 100, boos: 50 } });
+      expect((await db.select().from(dynimos))[0]?.moodValues).toMatchObject({ blij: 100, boos: 50 });
     });
 
     it.each([
-      [0, 2],
-      [1, 78],
+      [0, 2.5],
+      [1, 97.5],
     ])("schaalt de Type1-delta's met de reactiviteit van de Dynimo (%s geeft boos %s)", async (axisReactivity, expected) => {
       await insertDynimo({ axisReactivity });
-      const { model } = type1Sequence([{ deltas: { boos: 40 } }]);
+      const { model } = type1Sequence([{ deltas: { boos: 50 } }]);
 
       await collectText(brainWith({ type1: model, light: textModel(["Hoi."]) }).hear("Grr"));
 
@@ -2158,7 +2171,7 @@ describe("createBrain", () => {
 
     it("laat boos van 96 bij herhaalde geruststelling zakken tot een andere emotie wint", async () => {
       await insertDynimo({ moodValues: singleEmotionValues("boos", 0.96), moodAt: bornAt });
-      const { model } = type1Sequence([{ deltas: { boos: -50, kalm: 75 } }, { deltas: { boos: -50, kalm: 25 } }]);
+      const { model } = type1Sequence([{ deltas: { boos: -50, kalm: 50 } }, { deltas: { boos: -50, kalm: 50 } }]);
       const light = new MockLanguageModelV4({ doStream: [textStream("Een."), textStream("Twee.")] });
       const brain = brainWith({ type1: model, light });
 
@@ -2167,43 +2180,43 @@ describe("createBrain", () => {
         for await (const event of brain.hear(utterance)) if (event.type === "mood") moods.push(event);
       }
 
-      expect(moods[0]).toMatchObject({ emotion: "kalm", values: { boos: 46, kalm: 75 } }); // kalm stond op 0 in de opgeslagen vector
+      expect(moods[0]).toMatchObject({ emotion: "kalm", values: { boos: 46, kalm: 50 } }); // kalm stond op 0 in de opgeslagen vector
       expect(moods[1]).toMatchObject({ emotion: "kalm", values: { boos: 0, kalm: 100 } });
     });
 
     it("laat een emotie na uitdoven door een delta alsnog winnen van de uitgedoofde Stemming", async () => {
       let clock = bornAt;
       await insertDynimo();
-      const { model } = type1Sequence([{ deltas: { boos: 80 } }, { deltas: { blij: 50 } }]);
+      const { model } = type1Sequence([{ deltas: { boos: 50 } }, { deltas: { blij: 50 } }]);
       const brain = brainWith({ type1: model, light: new MockLanguageModelV4({ doStream: [textStream("Een."), textStream("Twee.")] }), now: () => clock });
 
       await collectText(brain.hear("Een"));
-      clock = new Date(bornAt.getTime() + 3 * MIN); // boos is nu uitgedoofd tot 40
+      clock = new Date(bornAt.getTime() + 3 * MIN); // boos is nu uitgedoofd tot 25
       const events: BrainEvent[] = [];
       for await (const event of brain.hear("Twee")) events.push(event);
 
-      expect(events[0]).toMatchObject({ type: "mood", emotion: "blij", values: { blij: 50, boos: 40 } });
+      expect(events[0]).toMatchObject({ type: "mood", emotion: "blij", values: { blij: 50, boos: 25 } });
       const [row] = await db.select().from(dynimos);
       expect(row?.moodAt).toEqual(clock);
     });
 
     it("levert een sound-event direct na het mood-event als de Stemming zichtbaar verandert", async () => {
       await insertDynimo();
-      const { model } = type1Sequence([{ deltas: { boos: 80 } }]);
+      const { model } = type1Sequence([{ deltas: { boos: 50 } }]);
       const brain = brainWith({ type1: model, light: textModel(["Hoi."]) });
 
       const events: BrainEvent[] = [];
       for await (const event of brain.hear("Wat een dag")) events.push(event);
 
-      expect(events[0]).toMatchObject({ type: "mood", emotion: "boos", intensity: 0.8 });
+      expect(events[0]).toMatchObject({ type: "mood", emotion: "boos", intensity: 0.5 });
       expect(events[1]).toEqual({ type: "sound", kind: "brommen" });
     });
 
     it("levert geen sound-event als de Emotie de Stemming niet noemenswaardig verschuift", async () => {
       await insertDynimo();
       const { model } = type1Sequence([
-        { deltas: { boos: 80 } },
-        { deltas: { blij: 50 } }, // blij blijft onder boos: zichtbare emotie en intensiteit blijven
+        { deltas: { boos: 50 } },
+        { deltas: { blij: 20 } }, // blij blijft onder boos: zichtbare emotie en intensiteit blijven
         { deltas: {} }, // geen delta's: Stemming blijft
       ]);
       const light = new MockLanguageModelV4({ doStream: [textStream("Een."), textStream("Twee."), textStream("Drie.")] });
@@ -2223,7 +2236,7 @@ describe("createBrain", () => {
 
     it("levert geen sound-event bij een kleine Emotie die de Basisemotie amper verschuift", async () => {
       await insertDynimo();
-      const { model } = type1Sequence([{ deltas: { blij: 35 } }]); // basisniveau is 0.3
+      const { model } = type1Sequence([{ deltas: { blij: 20 } }]); // basisniveau is 0.3
       const brain = brainWith({ type1: model, light: textModel(["Hoi."]) });
 
       const events: BrainEvent[] = [];
@@ -2245,7 +2258,7 @@ describe("createBrain", () => {
 
     it("geeft Type2 de Stemming als los system-bericht buiten het gecachete deel", async () => {
       await insertDynimo();
-      const { model } = type1Sequence([{ deltas: { boos: 80 } }]);
+      const { model } = type1Sequence([{ deltas: { boos: 50 } }]);
       const light = textModel(["Hoi."]);
 
       await collectText(brainWith({ type1: model, light }).hear("Hoi"));
@@ -2253,7 +2266,7 @@ describe("createBrain", () => {
       const systems = contentsByRole(light.doStreamCalls[0]?.prompt, "system");
       expect(systems[0]).not.toContain("Je huidige stemming");
       expect(moodMessage(light, 0)).toContain("boos");
-      expect(moodMessage(light, 0)).toContain("boos: 80");
+      expect(moodMessage(light, 0)).toContain("boos: 50");
       expect(systems.indexOf(moodMessage(light, 0)!)).toBeGreaterThan(1); // na stabiel en leeftijd
     });
 
@@ -2283,7 +2296,7 @@ describe("createBrain", () => {
 
     it("bewaart de Stemming over beurten en over een nieuwe brain-instantie", async () => {
       await insertDynimo();
-      const first = type1Sequence([{ deltas: { boos: 80 } }]);
+      const first = type1Sequence([{ deltas: { boos: 50 } }]);
       await collectText(brainWith({ type1: first.model, light: textModel(["Grr."]) }).hear("Jij!"));
 
       const second = type1Sequence([{ deltas: {} }]);
@@ -2291,7 +2304,7 @@ describe("createBrain", () => {
       await collectText(brainWith({ type1: second.model, light }).hear("Sorry."));
 
       expect(moodMessage(light, 0)).toContain("boos");
-      expect(moodMessage(light, 0)).toContain("boos: 80");
+      expect(moodMessage(light, 0)).toContain("boos: 50");
     });
 
     it("laat een mislukte Type1 de Stemming ongewijzigd", async () => {

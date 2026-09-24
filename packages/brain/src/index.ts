@@ -271,11 +271,10 @@ function dreamPrompt(dream: string): SystemModelMessage {
 
 type Type1Result = { deltas: MoodDeltas; indruk: number; intent: "simpel" | "complex" };
 
-// Type1 scoort per emotie een verandering op een schaal van DELTA_LEVELS niveaus: het middelste niveau is "geen
-// verandering", elk niveau is DELTA_STEP punten (op de 0–100-schaal van de Stemming) omhoog of omlaag.
-const DELTA_LEVELS = 21;
-const DELTA_STEP = 10;
-const NEUTRAL_LEVEL = (DELTA_LEVELS - 1) / 2;
+// Type1 scoort per emotie een verandering op een schaal van 9 niveaus (de typesafe-Score ondersteunt er max 10): niveau 4
+// is "geen verandering"; de tabel is niet-lineair zodat zowel kleine als grote delta's (0–100-schaal van de Stemming) kunnen.
+export const DELTA_TABLE = [-100, -50, -20, -8, 0, 8, 20, 50, 100] as const;
+const NEUTRAL_LEVEL = 4;
 const BIRTHDAY_DELTA = 90;
 
 // Extra Type2-instructie per gedrag van de beurt (Nederlands); 'normaal' en 'negeren' krijgen er geen.
@@ -308,10 +307,7 @@ async function classify(type1: Experimental_EvaluationModel, text: string, conte
           {
             type: "score" as const,
             instructions: `Hoeveel verandert de emotie "${emotion}" van de Dynimo zelf door deze uiting, gegeven zijn persoonlijkheid, Drijfveren en huidige stemming? Het middelste niveau is geen verandering; hoger is meer, lager is minder (de emotie zakt). De meeste emoties veranderen niet; gebruik uitersten alleen voor echt sterke reacties.`,
-            criteria: Array.from({ length: DELTA_LEVELS }, (_, level) => {
-              const delta = (level - NEUTRAL_LEVEL) * DELTA_STEP;
-              return delta === 0 ? "geen verandering" : `${delta > 0 ? "+" : ""}${delta}`;
-            }),
+            criteria: DELTA_TABLE.map((delta) => (delta === 0 ? "geen verandering" : `${delta > 0 ? "+" : ""}${delta}`)),
           },
         ]),
       ),
@@ -335,7 +331,7 @@ async function classify(type1: Experimental_EvaluationModel, text: string, conte
   const deltas: MoodDeltas = {};
   for (const emotion of EMOTIONS) {
     const score = (answers as unknown as Record<string, { score: number }>)[`delta_${emotion}`]?.score ?? NEUTRAL_LEVEL;
-    deltas[emotion] = Math.round((Math.min(DELTA_LEVELS - 1, Math.max(0, score)) - NEUTRAL_LEVEL) * DELTA_STEP);
+    deltas[emotion] = DELTA_TABLE[Math.min(DELTA_TABLE.length - 1, Math.max(0, Math.round(score)))]!;
   }
   const indruk = Math.min(1, Math.max(0, answers.indruk.score));
   const intent = answers.intent.choice === "complex" ? "complex" : "simpel";

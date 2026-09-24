@@ -171,7 +171,7 @@ Afgeleid van `born_at`: een dagelijkse check vergelijkt de huidige datum met de 
 
 ### Nieuwsgierigheid/initiatief
 
-Type1 doet een periodieke of event-getriggerde check ("is er nu iets de moeite waard om spontaan iets over te zeggen?", bv. na X minuten stilte, of vanaf fase 3 een onbekend object in beeld). Enkel bij een positieve trigger wordt Type2 opgeroepen om er iets concreets mee te doen — houdt de kost laag (zie Kostenbeheersing). Initiatief is geen eigen as: het volgt uit de N/P-kant van Persoonlijkheid (een INTP antwoordt kort maar komt geregeld zelf terug met een vraag), zodat Reflectie geen vijfde getal hoeft bij te stellen.
+Type1 doet een periodieke of event-getriggerde check ("is er nu iets de moeite waard om spontaan iets over te zeggen?", bv. na X minuten stilte, of vanaf fase 3 een onbekend object in beeld) — actieve Doelen tellen daarbij mee als bron, zodat een Dynimo ook zelf over een eigen Doel kan beginnen (dat is het volledige "actief nastreven" uit fase 2b: geen nieuw statusmechanisme, Doelen wijzigen nog steeds enkel via Reflectie). Enkel bij een positieve trigger wordt Type2 opgeroepen om er iets concreets mee te doen — houdt de kost laag (zie Kostenbeheersing). Initiatief is geen eigen as: het volgt uit de N/P-kant van Persoonlijkheid (een INTP antwoordt kort maar komt geregeld zelf terug met een vraag), zodat Reflectie geen vijfde getal hoeft bij te stellen. Technisch hoort de check en de uitvoering bij de agent-laag (net als de stiltetimer): bij een positieve trigger roept de agent zelf `session.say(...)`/`session.generateReply(...)` aan, buiten een user-turn om; de brain-module levert enkel de content/context.
 
 ### Dromen
 
@@ -206,12 +206,12 @@ Onderdeel van de bestaande Reflectie-bij-het-slapen (geen apart schema of schedu
 **Levendigheid — idle-animatie en toestanden (fase 2b):** het gezicht mag nooit een stilstaand plaatje zijn. Drie lagen, los van elkaar en los van de Emotiekeyframes (die ongewijzigd blijven):
 
 - **Altijd-aan idle-animatie** — knipperen, een subtiele ademhaling in schaal/positie, lichte pupilverschuiving en een subtiele wenkbrauwbeweging; blijft in élke Weergavetoestand doorlopen, ook zonder emotie-event.
-- **Mondbeweging op audio** — tijdens *spreekt* stuurt het live audioniveau van de Dynimo's TTS-output de mondbeweging, niet de tekst.
-- **Weergavetoestand als eigen beweging** — vijf toestanden: *slapend*, *wakker* (idle-animatie), **luisterend** (nieuw — de Gesprekspartner praat), **spreekt** (nieuw — de Dynimo praat, mondbeweging uit de vorige laag) en *reflecterend*. Elke toestand krijgt een eigen, herkenbare beweging i.p.v. een statische pose.
+- **Mondbeweging op audio** — tijdens *spreekt* stuurt het live volume van de agent-participant zijn eigen audiotrack (via `useTrackVolume` uit `@livekit/components-react`) de mondopening; geen fonetische lipsync, puur volume-gedreven.
+- **Weergavetoestand als eigen beweging** — vijf toestanden: *slapend*, *wakker* (idle-animatie), **luisterend** (nieuw — de Gesprekspartner praat), **spreekt** (nieuw — de Dynimo praat, mondbeweging uit de vorige laag) en *reflecterend*. Elke toestand krijgt een eigen, herkenbare beweging i.p.v. een statische pose. *Luisterend*/*spreekt* volgen LiveKit's ingebouwde `AgentState`/`UserState` (`AgentStateChanged`/`UserStateChanged`, tot nu toe ongebruikt); *reflecterend*/*slapend* blijven eigen logica. Zie [ADR-0011](docs/adr/0011-weergavetoestand-gemengde-bron.md).
 
 **Extra expressiemodi:**
 
-- **Zelf geluiden maken** — korte audioclips (kirren, zuchten, brommen) getriggerd door een zichtbare **Stemmingsverandering** (niet elke onderliggende Emotie — anders klinkt het te druk), geen LLM-call nodig
+- **Zelf geluiden maken** — korte audioclips (kirren, zuchten, brommen) getriggerd door een zichtbare **Stemmingsverandering** (niet elke onderliggende Emotie — anders klinkt het te druk), geen LLM-call nodig. Mechanisme zoals Emotie/Weergavetoestand: de agent stuurt een event over het bestaande datachannel-patroon, de face-app speelt een vaste, vooraf opgenomen clip per triggersoort af — geen live audiogeneratie.
 - **Doodle-modus** — bij lange idle-tijd (eigen, mogelijk kortere drempel dan de 30-minuten-stiltedrempel van Reflectie) schakelt het canvas over naar een genererende/procedurele tekening in dezelfde monochrome stijl, puur lokale animatie; loopt de stilte-Reflectie (#28), dan wint *reflecterend* — twee onafhankelijke drempels, geen gedeelde config
 
 ## Spraak
@@ -310,5 +310,7 @@ Beslist tijdens de `/grill-with-docs`-sessies (fase 1 en fase 2a) — zie [CONTE
 - [x] **Meerdere wezens — maximum:** geen grens.
 - [x] **Initiatief:** afgeleid van de N- en P-kant van Persoonlijkheid, geen eigen as/knop.
 - [x] **Levendigheid/idle-animatie — lagen en toestanden:** drie lagen (altijd-aan idle-animatie, mondbeweging op audio tijdens *spreekt*, eigen beweging per Weergavetoestand) en vijf toestanden (*slapend*/*wakker*/**luisterend**/**spreekt**/*reflecterend*), los van de Emotiekeyframes.
-- [ ] **Levendigheid/idle-animatie — technische koppeling:** of *luisterend*/*spreekt* op LiveKit's ingebouwde `AgentState`/`UserState` leunen i.p.v. een eigen state-uitbreiding, en hoe de mondbeweging het audioniveau uitleest — fase 2b, vervolgronde.
+- [x] **Levendigheid/idle-animatie — technische koppeling:** *luisterend*/*spreekt* leunen op LiveKit's ingebouwde `AgentState`/`UserState` ([ADR-0011](docs/adr/0011-weergavetoestand-gemengde-bron.md)); de mondbeweging leest het live volume van de agent-audiotrack via `useTrackVolume`.
+- [x] **Initiatief — technisch:** de agent roept zelf `session.say(...)`/`session.generateReply(...)` aan bij een positieve Type1-trigger, net als de stiltetimer; actieve Doelen tellen mee als triggerbron ("actief nastreven"), zonder nieuw statusmechanisme.
+- [x] **Zelf geluiden — mechanisme:** datachannel-event van de agent, vaste vooraf opgenomen clip per triggersoort in de face-app, geen live audiogeneratie.
 - [ ] **Modelwissel-experiment:** uit `Animus.md` verwijderd wegens niet uitgewerkt/onduidelijk doel; zeg het als dit toch bij fase 2b hoort.

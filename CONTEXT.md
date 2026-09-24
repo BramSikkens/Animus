@@ -109,7 +109,7 @@ De visuele definitie van één emotie: oogvorm/scale/pupil-offset, mondkromming 
 _Avoid_: expressie-state, animatie (te generiek)
 
 **Weergavetoestand** (fase 2b):
-De niet-emotionele modus van het gezichtje, los van de Emotiekeyframes: *slapend*, *wakker*, *luisterend* (de Gesprekspartner praat), *spreekt* (de Dynimo praat) of *reflecterend*. Bepaalt welke animatielaag toont, niet welke emotie.
+De niet-emotionele modus van het gezichtje, los van de Emotiekeyframes: *slapend*, *wakker*, *luisterend* (de Gesprekspartner praat), *spreekt* (de Dynimo praat) of *reflecterend*. Bepaalt welke animatielaag toont, niet welke emotie. *Luisterend*/*spreekt* volgen LiveKit's ingebouwde `AgentState`/`UserState`; *reflecterend*/*slapend* zijn eigen logica. Zie [ADR-0011](docs/adr/0011-weergavetoestand-gemengde-bron.md).
 _Avoid_: mode, view-state, display-state (in proza toegestaan, niet als term)
 
 **Idle-animatie** (fase 2b):

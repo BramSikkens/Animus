@@ -10,7 +10,7 @@ import {
   useTrackVolume,
   useVoiceAssistant,
 } from "@livekit/components-react";
-import { ConnectionState } from "livekit-client";
+import { ConnectionState, type LocalAudioTrack } from "livekit-client";
 import { DISPLAY_STATES, DISPLAY_TOPIC, isDisplayState, type DisplayState } from "@animus/brain/display";
 import { GALLERY_TOPIC, galleryView, type GalleryBeing } from "@animus/brain/gallery";
 import { BackButton, Gallery } from "./Gallery.js";
@@ -19,6 +19,9 @@ import { doodleActive } from "./face/doodle.js";
 import { isSoundKind, SOUND_TOPIC } from "@animus/brain/sound";
 import { clipUrl } from "./sound.js";
 import { Face } from "./face/Face.js";
+import { voiceReaction, type VoiceReaction } from "./face/voice-reaction.js";
+
+const VOICE_WINDOW = 20; // samples van 100ms
 import { emotionBarGroups } from "./emotion-bars.js";
 
 type TokenSession = { serverUrl: string; token: string };
@@ -133,6 +136,24 @@ function MouthVolumeListener({ onVolume }: { onVolume: (volume: number) => void 
   return null;
 }
 
+// Volume van de eigen microfoon (lokale track, geen extra netwerkverkeer) -> stemreactie in een ref; één interval van 100ms.
+function VoiceReactionListener({ reaction }: { reaction: { current: VoiceReaction } }) {
+  const { microphoneTrack } = useLocalParticipant();
+  const volume = useTrackVolume(microphoneTrack?.track as LocalAudioTrack | undefined);
+  const latest = useRef(0);
+  latest.current = volume;
+  useEffect(() => {
+    const samples: number[] = [];
+    const id = setInterval(() => {
+      samples.push(latest.current);
+      if (samples.length > VOICE_WINDOW) samples.shift();
+      reaction.current = voiceReaction({ samples, baseline: 0 });
+    }, 100);
+    return () => clearInterval(id);
+  }, [reaction]);
+  return null;
+}
+
 // Laatste transcriptie van de eigen microfoon (agent publiceert die op lk.transcription); voedt de micro-expressies.
 function UserTextListener({ onText }: { onText: (text: string) => void }) {
   const { localParticipant } = useLocalParticipant();
@@ -215,6 +236,7 @@ export function App() {
   const [mouthVolume, setMouthVolume] = useState(0);
   const [doodle, setDoodle] = useState(false);
   const [userText, setUserText] = useState<string>();
+  const voice = useRef<VoiceReaction>({ startle: 0, lean: 0, alert: 0 });
   const lastActivity = useRef(Date.now());
   const thresholdMs = useMemo(doodleThresholdMs, []);
   const debug = useMemo(() => new URLSearchParams(window.location.search).has("debug"), []);
@@ -267,7 +289,7 @@ export function App() {
   return (
     <>
       {view.screen !== "galerij" && <>
-      <Face doodle={doodle} display={displayState} emotion={emotionState.emotion} intensity={emotionState.intensity} mouthVolume={mouthVolume} values={emotionState.values} lastUserText={userText} />
+      <Face doodle={doodle} display={displayState} emotion={emotionState.emotion} intensity={emotionState.intensity} mouthVolume={mouthVolume} values={emotionState.values} lastUserText={userText} voice={voice} />
 
       {name && <p className="dynimo-name">{name}</p>}
       {emotionState.values && (
@@ -309,6 +331,7 @@ export function App() {
             <DisplayListener onDisplay={onDisplay} onName={setName} />
             <UserTextListener onText={setUserText} />
             <MouthVolumeListener onVolume={setMouthVolume} />
+            <VoiceReactionListener reaction={voice} />
             <GalleryListener onGallery={setBeings} />
             <SoundListener display={displayState} onSound={touch} />
             <ConnectionStatus />

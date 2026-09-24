@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { applyTtsVoice } from "./tts-voice.js";
+import { applyTtsEmotion, applyTtsVoice } from "./tts-voice.js";
 
 describe("applyTtsVoice", () => {
   it("zet bij ElevenLabs voiceId, Flash v2.5 en Nederlands", () => {
@@ -18,5 +18,22 @@ describe("applyTtsVoice", () => {
     const tts = { updateOptions: vi.fn() };
     applyTtsVoice("openai", tts, "nova");
     expect(tts.updateOptions).toHaveBeenCalledWith({ voice: "nova" });
+  });
+});
+
+describe("applyTtsEmotion", () => {
+  const settings = { stability: 0.4, style: 0.3, speed: 1.05, similarity_boost: 0.75 };
+
+  it("zet bij ElevenLabs de voiceSettings", () => {
+    const tts = { updateOptions: vi.fn() };
+    applyTtsEmotion("elevenlabs", tts, settings);
+    expect(tts.updateOptions).toHaveBeenCalledWith({ voiceSettings: settings });
+  });
+
+  it("doet bij Deepgram en OpenAI niets", () => {
+    const tts = { updateOptions: vi.fn() };
+    applyTtsEmotion("deepgram", tts, settings);
+    applyTtsEmotion("openai", tts, settings);
+    expect(tts.updateOptions).not.toHaveBeenCalled();
   });
 });

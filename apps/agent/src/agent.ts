@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { createBrain, type Brain } from "@animus/brain";
 import { DISPLAY_TOPIC, type DisplayMessage, type DisplayState } from "@animus/brain/display";
 import { SOUND_TOPIC, type SoundMessage } from "@animus/brain/sound";
-import { EMOTION_TOPIC } from "@animus/brain/emotion";
+import { EMOTION_TOPIC, type EmotionMessage } from "@animus/brain/emotion";
 import { initiativeFactor } from "@animus/brain/behavior";
 import { moodOfRow } from "@animus/brain/mood";
 import { rowAxes } from "@animus/brain/personality";
@@ -34,7 +34,8 @@ import { createStateRepublisher, emotionMessageFor } from "./state-republish.js"
 import { createInitiativeTimer, initiativeIntervalMs, parseInitiativeMinutes } from "./initiative-timer.js";
 import { createReflectionDisplay } from "./reflection-display.js";
 import { createSilenceTimer, parseSilenceMinutes } from "./silence-timer.js";
-import { applyTtsVoice } from "./tts-voice.js";
+import { voiceSettingsFor } from "@animus/brain/voice-emotion";
+import { applyTtsEmotion, applyTtsVoice } from "./tts-voice.js";
 import { textStream } from "./text-stream.js";
 import { resolveDisplay, voiceDisplay } from "./voice-display.js";
 
@@ -100,15 +101,17 @@ class AnimusAgent extends voice.Agent {
   readonly #brain: Brain;
   readonly #room: JobContext["room"];
   readonly #onUtterance: () => void;
+  readonly #onMoodValues: (values: EmotionMessage["values"]) => void;
   #pendingInitiative: string | undefined;
 
-  constructor(brain: Brain, room: JobContext["room"], onUtterance: () => void) {
+  constructor(brain: Brain, room: JobContext["room"], onUtterance: () => void, onMoodValues: (values: EmotionMessage["values"]) => void) {
     // instructions is verplicht op voice.Agent, maar onbenut: llmNode hieronder draait i.p.v. het
     // ingebouwde LLM-pad de brein-kern.
     super({ instructions: "Animus", llm: new BrainPlaceholderLLM() });
     this.#brain = brain;
     this.#room = room;
     this.#onUtterance = onUtterance;
+    this.#onMoodValues = onMoodValues;
   }
 
   /** Zet een spontane uiting klaar; de eerstvolgende llmNode (via session.generateReply) draait die i.p.v. een user-turn. */
@@ -127,6 +130,8 @@ class AnimusAgent extends voice.Agent {
     // tool-*-events uit brain.hear() worden hier genegeerd (ticket #7).
     return textStream(this.#brain.hear(text, { initiatief: initiative !== undefined }), {
       onMood: (message) => {
+        // Vóór de eerste tekst (dus vóór de TTS-context van deze beurt opent): emotie in de stem.
+        this.#onMoodValues(message.values);
         const participant = this.#room.localParticipant;
         if (!participant) {
           console.error("Emotie niet gepubliceerd: agent is (nog) niet verbonden met de room.");
@@ -266,6 +271,9 @@ export default defineAgent<AgentUserData>({
       silence.reset();
       initiative.reset();
       reflectionDisplay.onUtterance();
+    }, (values) => {
+      // Expressiviteit uit de gecachete assen (refresh bij start, wissel en initiatief-check).
+      applyTtsEmotion(speechProvider(process.env), tts, voiceSettingsFor({ values, expressiveness: initiativeAxes?.expressiveness ?? 0.5 }));
     });
     const initiative = createInitiativeTimer({
       intervalMs: () => initiativeIntervalMs(initiativeAxes, initiativeBaseMs.ms, initiativeMoodFactor),

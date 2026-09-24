@@ -26,6 +26,7 @@ import { pickDreamToTell, DREAM_MAX_AGE_MS } from "./dream-tell.js";
 import { pickSpontaneousMemory, SPONTANEOUS_INITIATIVE_CHANCE, SPONTANEOUS_MIN_AGE_MS, SPONTANEOUS_MIN_IMPRESSION, SPONTANEOUS_TURN_CHANCE, type SpontaneousCandidate } from "./recall-spontaneous.js";
 import { applyDeltas, baseEmotionOf, currentMood, moodOfRow, singleEmotionValues, storedMoodOf, type Mood, type MoodDeltas, type MoodValues, type StoredMood } from "./mood.js";
 import { isVisibleMoodChange, soundKindFor, type SoundKind } from "./sound.js";
+import { FAMILIARITY_POSITIVE_DELTA, familiarityStyle, updateFamiliarity } from "./familiarity.js";
 import { AXIS_DESCRIPTIONS, type Axes, axisGuidelines, mbtiType, rowAxes } from "./personality.js";
 import { EMOTIONS, oppositeOf, type Emotion } from "./emotion.js";
 import { SEEDS } from "./seeds.js";
@@ -310,6 +311,11 @@ function moodMessage(mood: Mood): SystemModelMessage {
     role: "system",
     content: `Je huidige stemming (emoties, 0 tot 100, hoog naar laag): ${vector}. Dominant: ${mood.emotion}. Wees eerlijk over hoe je je voelt: als iemand vraagt hoe je je voelt of of je boos (of een andere emotie) bent en die emotie staat hoog, ontken die niet. Laat je toon en antwoord kloppen met deze stemming (een geërgerde Dynimo antwoordt korter en stugger).`,
   };
+}
+
+// Na het cachepunt: Vertrouwdheid verschuift per beurt, dus niet in de gecachete stabiele prompt.
+function familiarityMessage(familiarity: number): SystemModelMessage {
+  return { role: "system", content: `Vertrouwdheid met de Gesprekspartner: ${familiarityStyle(familiarity).instruction}` };
 }
 
 // De tegenpool remt vanzelf af (ADR-0015); Type1 hoeft die niet ook nog omlaag te scoren.
@@ -992,11 +998,26 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     // ponytail: last-writer-wins zonder guard; volstaat bij één wakkere Dynimo. Guard op mood_at zodra er ooit
     // meerdere schrijvers tegelijk zijn.
     const birthdayBoost = birthdayBoostDue(awake);
-    if ((next !== stored && next) || birthdayBoost) {
+    // Emotie stuurt gedrag (behavior.ts). Een spontane uiting (initiatief) wordt nooit genegeerd of ingekort.
+    // Vóór de UPDATE, zodat de Vertrouwdheid (genegeerd of beurt) in dezelfde schrijfactie meegaat.
+    const behavior = options.initiatief || !axes ? "normaal" : decideBehavior({ values: mood.values, axes, rng: random, vorigeGenegeerd: lastIgnored });
+    if (!options.initiatief) lastIgnored = behavior === "negeren";
+    // Vertrouwdheid (familiarity.ts): een beurt telt, een positieve beurt extra; een genegeerde beurt telt niet als beurt.
+    const familiarityAxes = axes ?? { tf: 0.5, expressiveness: 0.5 };
+    let familiarity = awake.familiarity;
+    if (!options.initiatief) {
+      if (behavior === "negeren") familiarity = updateFamiliarity({ current: familiarity, event: "genegeerd", axes: familiarityAxes });
+      else {
+        familiarity = updateFamiliarity({ current: familiarity, event: "beurt", axes: familiarityAxes });
+        if ((type1Deltas.blij ?? 0) >= FAMILIARITY_POSITIVE_DELTA) familiarity = updateFamiliarity({ current: familiarity, event: "positief", axes: familiarityAxes });
+      }
+    }
+    if ((next !== stored && next) || birthdayBoost || familiarity !== awake.familiarity) {
       const updated = await deps.db
         .update(dynimos)
         .set({
           ...(next && { moodValues: next.values, moodAt: next.at }),
+          ...(familiarity !== awake.familiarity && { familiarity }),
           ...(birthdayBoost && { lastBirthdayBoostOn: dayOf(now()) }),
         })
         .where(eq(dynimos.id, being.id))
@@ -1016,9 +1037,6 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
       yield { type: "sound", kind: soundKind };
     }
 
-    // Emotie stuurt gedrag (behavior.ts). Een spontane uiting (initiatief) wordt nooit genegeerd of ingekort.
-    const behavior = options.initiatief || !axes ? "normaal" : decideBehavior({ values: mood.values, axes, rng: random, vorigeGenegeerd: lastIgnored });
-    if (!options.initiatief) lastIgnored = behavior === "negeren";
     const userMessage: ModelMessage = { role: "user", content: text };
     if (behavior === "negeren") {
       // Zichtbaar op het gezichtje via de (boze) Stemming plus een non-verbaal geluid; geen antwoord en geen TTS.
@@ -1057,7 +1075,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     const result = streamText({
       abortSignal: abort.signal,
       model: intent === "complex" ? deps.type2.heavy : deps.type2.light,
-      instructions: [stable, ageMessage(being), ...birthdayMessages(awake), moodMessage(mood), ...(BEHAVIOR_PROMPTS[behavior] ? [BEHAVIOR_PROMPTS[behavior]] : []), ...opinionMessage, recallPrompt(recalled), ...spontaneousPromptMessage, ...(dream ? [dreamPrompt(dream.text)] : [])],
+      instructions: [stable, ageMessage(being), ...birthdayMessages(awake), moodMessage(mood), familiarityMessage(familiarity), ...(BEHAVIOR_PROMPTS[behavior] ? [BEHAVIOR_PROMPTS[behavior]] : []), ...opinionMessage, recallPrompt(recalled), ...spontaneousPromptMessage, ...(dream ? [dreamPrompt(dream.text)] : [])],
       messages: [...workingMemory, userMessage],
       tools,
       // Genoeg stappen om een tool te gebruiken en daarna het resultaat te verwoorden.

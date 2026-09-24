@@ -8,6 +8,8 @@ export const FAMILIARITY_TURN_RATE = 0.01;
 
 /** Groei bij een positieve emotie / compliment (blij-delta), zelfde schaal als hierboven. */
 export const FAMILIARITY_POSITIVE_RATE = 0.03;
+/** Type1-blij-delta (0–100-schaal, vóór reactiviteit) vanaf wanneer een beurt als positief telt (blij/compliment). */
+export const FAMILIARITY_POSITIVE_DELTA = 20;
 /** Daling (absoluut) bij een genegeerde beurt en bij een Reflectie na lange stilte. */
 export const FAMILIARITY_IGNORED_DROP = 0.02;
 export const FAMILIARITY_SILENCE_DROP = 0.04;

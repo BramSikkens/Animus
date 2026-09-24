@@ -85,6 +85,8 @@ export type Brain = {
   setAxes(id: number, axes: Axes): Promise<boolean>;
   /** Dashboard: zet de TTS-stem (null = default van de agent); de agent past die direct toe. False bij een onbekende id. */
   setVoiceProfile(id: number, profile: { voice: string | null; description: string | null }): Promise<boolean>;
+  /** Dashboard-override: zet de Vertrouwdheid (0–1). False bij een onbekende id. */
+  setFamiliarity(id: number, familiarity: number): Promise<boolean>;
   /** Dashboard-override: kiest een archetype en zet zijn zes assen en Basisemotie als startpunt (geen pinning). False bij een onbekende id of een onbekend archetype. */
   setArchetype(id: number, archetypeId: string): Promise<boolean>;
   /**
@@ -569,6 +571,8 @@ ${fresh.map((memory) => `- (indruk ${memory.impression}) ${memory.text}`).join("
             ...wakeMood,
           }),
           lastReflectedAt: processedUntil,
+          // Reflectie bij stilte (niet bij slapen): de relatie koelt een beetje af.
+          ...(!sleeping && { familiarity: updateFamiliarity({ current: locked.familiarity, event: "langeStilte", axes: { tf: 0.5, expressiveness: 0.5 } }) }),
         })
         .where(eq(dynimos.id, id));
 
@@ -900,6 +904,11 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
       .set({ axisIe: axes.ie, axisSn: axes.sn, axisTf: axes.tf, axisJp: axes.jp, axisReactivity: axes.reactivity, axisExpressiveness: axes.expressiveness })
       .where(eq(dynimos.id, id))
       .returning({ id: dynimos.id });
+    return updated.length > 0;
+  }
+
+  async function setFamiliarity(id: number, familiarity: number): Promise<boolean> {
+    const updated = await deps.db.update(dynimos).set({ familiarity }).where(eq(dynimos.id, id)).returning({ id: dynimos.id });
     return updated.length > 0;
   }
 
@@ -1263,5 +1272,5 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     }
   }
 
-  return { bringToLife, wake, sleep, kill, list, backfill, reflect, considerInitiative, hear, forceMood, setMood, setAxes, setVoiceProfile, setArchetype, addMemory, removeMemory };
+  return { bringToLife, wake, sleep, kill, list, backfill, reflect, considerInitiative, hear, forceMood, setMood, setAxes, setFamiliarity, setVoiceProfile, setArchetype, addMemory, removeMemory };
 }

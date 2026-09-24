@@ -89,6 +89,10 @@ _Avoid_: rol, persona, type (dat is Type1/Type2)
 Het MBTI-type van een Dynimo, afgeleid uit vier assen (I↔E, S↔N, T↔F, J↔P) die elk een getal van 0 tot 1 zijn; de letter volgt uit de kant van het midden. Daarnaast twee losse assen (0–1, standaard 0.5, buiten het MBTI-type): **reactiviteit** (hoe hard Emoties bewegen: schaalt de Type1-delta's en de uitdoofsnelheid van de Stemming) en **expressiviteit** (hoeveel emotie in taal, stem en gezicht doorschemert). Alle zes verschuiven traag via Reflecties en zijn instelbaar in het dashboard. Type2 krijgt per as-uiteinde concrete gedragsregels (sterk vanaf <0.25 / >0.75, zacht vanaf <0.4 / >0.6, daartussen niets); spraakzaamheid volgt uit de I↔E-as. Zie [ADR-0013](docs/adr/0013-reactiviteit-en-expressiviteit.md).
 _Avoid_: karakter (dat is de vrije tekst), Big Five
 
+**Vertrouwdheid**:
+Een getal van 0 tot 1 per Dynimo (start op 0.2) voor hoe vertrouwd de relatie met de Gesprekspartner is. Het stijgt langzaam en asymptotisch bij elke beurt en extra bij positieve emoties (blij-delta), en daalt bij een genegeerde beurt en bij een Reflectie na lange stilte (nooit onder 0.05); de Persoonlijkheid (T↔F en expressiviteit) schaalt de groeisnelheid. Vier banden (afstandelijk, vriendelijk, vertrouwd, intiem) geven Type2 een toonregel: van beleefd en formeel ('u' mag, afhankelijk van archetype en karakter) tot bijnamen en plagen. Instelbaar in het dashboard. Zie [ADR-0016](docs/adr/0016-vertrouwdheid-als-aparte-schaal.md).
+_Avoid_: vertrouwen, band, zevende as
+
 **Drijfveer**:
 Iets wat een Dynimo wil of niet wil, van één van vier soorten: Wens, Doel (kan bereikt of opgegeven worden), Toekomstdroom of Ergernis (zonder waarde of sterkte). Kleurt welke Emotie een uiting oproept.
 _Avoid_: voorkeur, interesse; een Toekomstdroom is geen Droom (de nachtelijke droomtekst)

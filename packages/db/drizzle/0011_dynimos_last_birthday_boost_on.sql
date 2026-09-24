@@ -1,0 +1,1 @@
+ALTER TABLE "dynimos" ADD COLUMN "last_birthday_boost_on" date;

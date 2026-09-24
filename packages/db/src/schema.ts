@@ -133,6 +133,7 @@ export const dreams = pgTable(
     emotion: text("emotion").notNull(),
     intensity: real("intensity").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    toldAt: timestamp("told_at", { withTimezone: true }),
   },
   (table) => [
     index("dreams_dynimo_id_idx").on(table.dynimoId),

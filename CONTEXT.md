@@ -102,7 +102,7 @@ Een Type2-verwerking van recente ervaringen die het geëvolueerde karakter, de p
 _Avoid_: samenvatting, evaluatie; niet te verwarren met de Afscheidsreflectie
 
 **Droom** (fase 2b):
-Een korte, associatieve tekst die Type2 genereert als onderdeel van de Reflectie-bij-het-slapen, op basis van recente Herinneringen, Drijfveren en Persoonlijkheid. Bewaard in een eigen tabel, zeldzaam aangehaald in gesprek. Overschrijft de Ontwaakstemming enkel als hij intenser is dan wat de Reflectie anders zou klaarzetten.
+Een korte, associatieve tekst die Type2 genereert als onderdeel van de Reflectie-bij-het-slapen, op basis van recente Herinneringen, Drijfveren en Persoonlijkheid. Bewaard in een eigen tabel, zeldzaam aangehaald in gesprek. Kan ook spontaan verteld worden: bij een initiatief-moment kiest een pure kiezer (`pickDreamToTell`) een recente (< 7 dagen), nog niet verteld Droom (`told_at`), vaker bij verveeld/kalm/vredig en minder bij boos/druk, nooit tijdens luisteren of spreken; een Spontane herinnering gaat voor (nooit beide in één moment) en Type2 vertelt hem kort en associatief ('Ik droomde…'). Overschrijft de Ontwaakstemming enkel als hij intenser is dan wat de Reflectie anders zou klaarzetten.
 _Avoid_: niet te verwarren met een Toekomstdroom (een Drijfveer, geen nachtelijke tekst)
 
 ### Expressie

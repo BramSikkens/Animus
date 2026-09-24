@@ -22,6 +22,7 @@ import { decideBehavior, type Behavior } from "./behavior.js";
 import { decideOpinion, matchDrives, opinionPrompt, OPINION_BOOS_DELTA } from "./opinion.js";
 import { pickSpeechSound, SPEECH_SOUND_MIN_LENGTH } from "./speech-sounds.js";
 import { createPacer, pacingFor } from "./speech-pacing.js";
+import { pickDreamToTell, DREAM_MAX_AGE_MS } from "./dream-tell.js";
 import { pickSpontaneousMemory, SPONTANEOUS_INITIATIVE_CHANCE, SPONTANEOUS_MIN_AGE_MS, SPONTANEOUS_MIN_IMPRESSION, SPONTANEOUS_TURN_CHANCE, type SpontaneousCandidate } from "./recall-spontaneous.js";
 import { applyDeltas, baseEmotionOf, currentMood, moodOfRow, singleEmotionValues, storedMoodOf, type Mood, type MoodDeltas, type MoodValues, type StoredMood } from "./mood.js";
 import { isVisibleMoodChange, soundKindFor, type SoundKind } from "./sound.js";
@@ -270,6 +271,7 @@ function recallPrompt(recalled: string[]): SystemModelMessage {
 }
 
 const SPONTANEOUS_CANDIDATE_LIMIT = 200;
+const DREAM_HOW = "Vertel hem kort, associatief en in het Nederlands, in je eigen stijl, beginnend met 'Ik droomde…'.";
 const SPONTANEOUS_HOW = "Kom er natuurlijk op terug, kort, in het Nederlands, met één vraag (bv. 'Je zei vorige week dat …, ben je …?').";
 
 // Na het cachepunt: alleen aanwezig op de beurten waarop de kans meezit; het onderwerp is optioneel.
@@ -387,6 +389,8 @@ export function createBrain(deps: {
   const sessionMemoryIds: number[] = [];
   // Spontane herinnering die considerInitiative koos: pas na de initiatief-beurt als aangehaald gemarkeerd.
   let pendingSpontaneousId: number | undefined;
+  // Idem voor een Droom die considerInitiative koos (verteld = told_at).
+  let pendingDreamId: number | undefined;
 
   async function genesis(): Promise<{ dynimo: typeof dynimos.$inferInsert; drives: DrivesOutput; voice: { voice: string; description: string } | null }> {
     const seed = pickSeed(random);
@@ -1029,6 +1033,8 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     // Spontane herinnering: bij initiatief die van considerInitiative (al in `text`), anders heel zelden een aanleiding.
     let spontaneousId = options.initiatief ? pendingSpontaneousId : undefined;
     if (options.initiatief) pendingSpontaneousId = undefined;
+    const dreamToMark = options.initiatief ? pendingDreamId : undefined;
+    if (options.initiatief) pendingDreamId = undefined;
     let spontaneousPromptMessage: SystemModelMessage[] = [];
     if (!options.initiatief && axes) {
       const picked = await pickSpontaneous(being.id, axes, SPONTANEOUS_TURN_CHANCE);
@@ -1125,6 +1131,9 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
       if (outcome === "completed" && spontaneousId !== undefined) {
         await deps.db.update(memories).set({ lastRecalledAt: now() }).where(eq(memories.id, spontaneousId));
       }
+      if (outcome === "completed" && dreamToMark !== undefined) {
+        await deps.db.update(dreams).set({ toldAt: now() }).where(eq(dreams.id, dreamToMark));
+      }
       if (outcome !== "failed" && full.trim()) {
         await remember(options.initiatief ? `${being.name}: ${full}` : `Gesprekspartner: ${text}\n${being.name}: ${full}`, being.id, indruk);
       }
@@ -1213,7 +1222,20 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
       const axes = rowAxes(awake);
       const spontaneous = axes ? await pickSpontaneous(awake.id, axes, SPONTANEOUS_INITIATIVE_CHANCE) : null;
       pendingSpontaneousId = spontaneous?.id;
+      pendingDreamId = undefined;
       if (spontaneous) return `Je begint uit jezelf een gesprek en komt spontaan terug op iets uit een eerder gesprek: "${spontaneous.text}". ${SPONTANEOUS_HOW}`;
+      // Herinnering gaat voor Droom: nooit beide in één initiatief-moment. Initiatief gebeurt in rust, dus displayState 'wakker'.
+      const told = pickDreamToTell({
+        dreams: await deps.db.select().from(dreams).where(and(eq(dreams.dynimoId, awake.id), isNull(dreams.toldAt), gt(dreams.createdAt, new Date(now().getTime() - DREAM_MAX_AGE_MS)))),
+        values: mood.values,
+        displayState: "wakker",
+        rng: random,
+        now: now(),
+      });
+      if (told) {
+        pendingDreamId = told.id;
+        return `Je begint uit jezelf een gesprek en vertelt over een droom die je recent had: "${told.text}". ${DREAM_HOW}`;
+      }
       return answers.onderwerp.choice === "doel" && hasGoal
         ? "Je begint uit jezelf een gesprek, want je wilt praten over een van je actieve Doelen."
         : "Je begint uit jezelf een gesprek over iets wat je bezighoudt of waar je nieuwsgierig naar bent.";

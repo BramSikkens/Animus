@@ -95,3 +95,49 @@ button:hover {
   gap: 0.25rem;
   width: 100%;
 }
+
+.dynimo-name {
+  position: fixed;
+  top: 1rem;
+  left: 50%;
+  transform: translateX(-50%);
+  margin: 0;
+  font-size: 1rem;
+  color: #f4efe3;
+  opacity: 0.8;
+}
+
+.emotion-bars {
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
+  width: 140px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.7rem;
+  color: #f4efe3;
+  opacity: 0.7;
+}
+
+.emotion-bars li {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.25rem;
+}
+
+.emotion-bars span {
+  width: 5.5em;
+}
+
+.emotion-bars .bar {
+  flex: 1;
+  height: 4px;
+  background: rgba(244, 239, 227, 0.2);
+}
+
+.emotion-bars .bar div {
+  height: 100%;
+  background: #f4efe3;
+}

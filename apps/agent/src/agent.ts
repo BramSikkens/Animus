@@ -204,7 +204,7 @@ export default defineAgent<AgentUserData>({
     const publishState = async (): Promise<void> => {
       try {
         const state = await readState(brain);
-        publish(DISPLAY_TOPIC, { state: effectiveDisplay(state) });
+        publish(DISPLAY_TOPIC, { state: effectiveDisplay(state), name: state.name });
         if (state.mood) publish(EMOTION_TOPIC, state.mood);
       } catch (error) {
         console.error("Toestand publiceren faalde:", error instanceof Error ? error.message : error);

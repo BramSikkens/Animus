@@ -10,15 +10,16 @@ import {
 } from "@livekit/components-react";
 import { ConnectionState } from "livekit-client";
 import { DISPLAY_STATES, DISPLAY_TOPIC, isDisplayState, type DisplayState } from "@animus/brain/display";
-import { EMOTION_TOPIC, EMOTIONS, isEmotion, type EmotionMessage } from "@animus/brain/emotion";
+import { EMOTION_TOPIC, EMOTIONS, isEmotion, type Emotion, type EmotionMessage } from "@animus/brain/emotion";
 import { doodleActive } from "./face/doodle.js";
 import { isSoundKind, SOUND_TOPIC } from "@animus/brain/sound";
 import { clipUrl } from "./sound.js";
 import { Face } from "./face/Face.js";
+import { emotionBars } from "./emotion-bars.js";
 
 type TokenSession = { serverUrl: string; token: string };
-// De gezichtje-app tekent voorlopig enkel de dominante emotie; de volledige vector (balken) volgt in #55.
-type EmotionState = Pick<EmotionMessage, "emotion" | "intensity">;
+// `values` (de volledige vector) voedt de balken; ontbreekt hij (debugpaneel), dan tonen we geen balken.
+type EmotionState = Pick<EmotionMessage, "emotion" | "intensity"> & { values?: Record<Emotion, number> };
 
 const NEUTRAL_STATE: EmotionState = { emotion: "neutraal", intensity: 0 };
 const DEFAULT_DISPLAY: DisplayState = "wakker";
@@ -59,7 +60,14 @@ function EmotionListener({ onEmotion }: { onEmotion: (state: EmotionState) => vo
         isEmotion(payload.emotion) &&
         typeof payload.intensity === "number"
       ) {
-        onEmotion({ emotion: payload.emotion, intensity: payload.intensity });
+        const values = "values" in payload ? payload.values : undefined;
+        const valid =
+          values !== null && typeof values === "object" && EMOTIONS.every((e) => typeof (values as Record<string, unknown>)[e] === "number");
+        onEmotion({
+          emotion: payload.emotion,
+          intensity: payload.intensity,
+          values: valid ? (values as Record<Emotion, number>) : undefined,
+        });
       } else {
         console.error("Emotie-event heeft onverwachte vorm:", payload);
       }
@@ -71,13 +79,14 @@ function EmotionListener({ onEmotion }: { onEmotion: (state: EmotionState) => vo
 }
 
 // Decodeert weergavetoestand-berichten van de agent (DisplayMessage op DISPLAY_TOPIC), met dezelfde validatie.
-function DisplayListener({ onDisplay }: { onDisplay: (state: DisplayState) => void }) {
+function DisplayListener({ onDisplay, onName }: { onDisplay: (state: DisplayState) => void; onName: (name: string | null) => void }) {
   useDataChannel(DISPLAY_TOPIC, (msg) => {
     if (!msg.from?.isAgent) return;
     try {
       const payload: unknown = JSON.parse(new TextDecoder().decode(msg.payload));
       if (payload !== null && typeof payload === "object" && "state" in payload && isDisplayState(payload.state)) {
         onDisplay(payload.state);
+        if ("name" in payload && (typeof payload.name === "string" || payload.name === null)) onName(payload.name);
       } else {
         console.error("Display-event heeft onverwachte vorm:", payload);
       }
@@ -167,6 +176,7 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [emotionState, setEmotionState] = useState<EmotionState>(NEUTRAL_STATE);
   const [displayState, setDisplayState] = useState<DisplayState>(DEFAULT_DISPLAY);
+  const [name, setName] = useState<string | null>(null);
   const [mouthVolume, setMouthVolume] = useState(0);
   const [doodle, setDoodle] = useState(false);
   const lastActivity = useRef(Date.now());
@@ -209,12 +219,27 @@ export function App() {
     setSession(null);
     setEmotionState(NEUTRAL_STATE);
     setDisplayState(DEFAULT_DISPLAY);
+    setName(null);
     setMouthVolume(0);
   }
 
   return (
     <>
       <Face doodle={doodle} display={displayState} emotion={emotionState.emotion} intensity={emotionState.intensity} mouthVolume={mouthVolume} />
+
+      {name && <p className="dynimo-name">{name}</p>}
+      {emotionState.values && (
+        <ul className="emotion-bars" aria-label="Emoties">
+          {emotionBars(emotionState.values).map(({ emotion, value }) => (
+            <li key={emotion}>
+              <span>{emotion}</span>
+              <div className="bar" role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(value)}>
+                <div style={{ width: `${value}%` }} />
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
 
       <main className="screen">
         {!session ? (
@@ -234,7 +259,7 @@ export function App() {
             onError={(err) => setError(err.message)}
           >
             <EmotionListener onEmotion={onEmotion} />
-            <DisplayListener onDisplay={onDisplay} />
+            <DisplayListener onDisplay={onDisplay} onName={setName} />
             <MouthVolumeListener onVolume={setMouthVolume} />
             <SoundListener display={displayState} onSound={touch} />
             <ConnectionStatus />

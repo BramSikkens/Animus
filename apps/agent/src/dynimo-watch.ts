@@ -9,14 +9,16 @@ export type DynimoState = {
   display: DisplayState;
   /** De effectieve Stemming van de wakkere Dynimo op het moment van lezen; null als niemand wakker is. */
   mood: Mood | null;
+  /** Naam van de wakkere Dynimo; null als niemand wakker is. */
+  name: string | null;
 };
 
 /** Leest vers uit de database (ook de Stemming, die met de tijd uitdooft). */
 export async function readState(brain: Brain): Promise<DynimoState> {
   const awake = (await brain.list()).find((dynimo) => dynimo.awakeSince);
   return awake
-    ? { key: `${awake.id}:${awake.awakeSince!.getTime()}`, display: "wakker", mood: moodOfRow(awake, new Date()) }
-    : { key: "none", display: "slapend", mood: null };
+    ? { key: `${awake.id}:${awake.awakeSince!.getTime()}`, display: "wakker", mood: moodOfRow(awake, new Date()), name: awake.name }
+    : { key: "none", display: "slapend", mood: null, name: null };
 }
 
 /**

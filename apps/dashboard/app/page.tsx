@@ -3,7 +3,7 @@ import { formatAge } from "@animus/brain/age";
 import { moodOfRow } from "@animus/brain/mood";
 import { DRIVE_KINDS, DRIVE_LABELS, type DriveKind } from "@animus/brain/drives";
 import { AXES, AXIS_LETTERS, mbtiType, rowAxes } from "@animus/brain/personality";
-import { drives, dynimos, epitaphs, memories } from "@animus/db/schema";
+import { dreams, drives, dynimos, epitaphs, memories } from "@animus/db/schema";
 import { db } from "../lib/db";
 import { ActionForm } from "./action-form";
 import { bringToLife, kill, sleep, wake } from "./actions";
@@ -12,6 +12,7 @@ import { formatDate, formatDateTime } from "../lib/format";
 export const dynamic = "force-dynamic";
 
 const RECENT_MEMORIES_LIMIT = 20;
+const RECENT_DREAMS_LIMIT = 5;
 
 // Postgres "undefined_table": de database is nog niet gemigreerd.
 const UNDEFINED_TABLE = "42P01";
@@ -35,7 +36,17 @@ async function loadDashboard() {
         .limit(RECENT_MEMORIES_LIMIT),
     ),
   );
-  return { dynimoRows, recentMemories, epitaphRows, drivesByDynimo };
+  const recentDreams = await Promise.all(
+    dynimoRows.map((dynimo) =>
+      db
+        .select()
+        .from(dreams)
+        .where(eq(dreams.dynimoId, dynimo.id))
+        .orderBy(desc(dreams.createdAt), desc(dreams.id))
+        .limit(RECENT_DREAMS_LIMIT),
+    ),
+  );
+  return { dynimoRows, recentMemories, recentDreams, epitaphRows, drivesByDynimo };
 }
 
 export default async function DashboardPage() {
@@ -55,7 +66,7 @@ export default async function DashboardPage() {
       </main>
     );
   }
-  const { dynimoRows, recentMemories, epitaphRows, drivesByDynimo } = data;
+  const { dynimoRows, recentMemories, recentDreams, epitaphRows, drivesByDynimo } = data;
 
   return (
     <main>
@@ -168,6 +179,20 @@ export default async function DashboardPage() {
                       <dt>Geboortedatum</dt>
                       <dd>{formatDate(dynimo.bornAt)}</dd>
                     </dl>
+                    <h4>Recente dromen</h4>
+                    {recentDreams[index]!.length ? (
+                      <ul>
+                        {recentDreams[index]!.map((dream) => (
+                          <li key={dream.id}>
+                            <time dateTime={dream.createdAt.toISOString()}>{formatDateTime(dream.createdAt)}</time>
+                            <em> — {dream.emotion} ({Math.round(dream.intensity * 100)}%)</em>
+                            <p style={{ whiteSpace: "pre-wrap" }}>{dream.text}</p>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p>nog geen</p>
+                    )}
                     <h4>Recente herinneringen</h4>
                     {recentMemories[index]!.length ? (
                       <ul>

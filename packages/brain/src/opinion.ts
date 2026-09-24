@@ -63,7 +63,8 @@ export function matchDrives(utterance: string, rows: readonly DriveRow[]): { dri
     if (!isActiveDrive(row)) continue;
     const own = words(row.text);
     const shared = [...own].filter((word) => said.has(word)).length;
-    if (shared > 0) matches.push({ driveId: row.id, score: shared / Math.min(own.size, said.size) });
+    // Eén gedeeld woord is geen 'duidelijk' Standpunt, tenzij de Drijfveer zelf maar 1-2 inhoudswoorden heeft.
+    if (shared >= (own.size <= 2 ? 1 : 2)) matches.push({ driveId: row.id, score: shared / Math.min(own.size, said.size) });
   }
   return matches;
 }

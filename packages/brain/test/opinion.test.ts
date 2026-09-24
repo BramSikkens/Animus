@@ -95,6 +95,17 @@ describe("matchDrives (woord-overlap)", () => {
     expect(matchDrives("Ik wil ook graag voetbal kijken", rows).map((m) => m.driveId)).toEqual([2]);
   });
 
+  it("vereist minstens 2 gedeelde inhoudswoorden (geen vals Standpunt op één woord)", () => {
+    expect(matchDrives("Kom je laat?", rows)).toEqual([]);
+    expect(matchDrives("Laat", rows)).toEqual([]);
+  });
+
+  it("bij een Drijfveer van 1-2 inhoudswoorden volstaat 1 gedeeld woord", () => {
+    const short: DriveRow[] = [{ id: 4, kind: "wens", text: "Voetbal spelen", status: null }, { id: 5, kind: "wens", text: "Schaken", status: null }];
+    expect(matchDrives("Zullen we voetbal kijken?", short).map((m) => m.driveId)).toEqual([4]);
+    expect(matchDrives("Ik hou van schaken", short).map((m) => m.driveId)).toEqual([5]);
+  });
+
   it("negeert gedropte en niet-actieve Drijfveren", () => {
     const inactive: DriveRow[] = [{ ...rows[1]!, droppedAt: new Date() }, { ...rows[2]!, status: "bereikt" }];
     expect(matchDrives("voetbal spelen en tekenen leren", inactive)).toEqual([]);

@@ -46,3 +46,15 @@ describe("applyTtsEmotion", () => {
     expect(tts.updateOptions).not.toHaveBeenCalled();
   });
 });
+
+describe("applyTtsEmotion: tempo uit pacing", () => {
+  it("herstart niet bij een speed-verschil binnen de afronding", () => {
+    const tts = { updateOptions: vi.fn() };
+    const s = { stability: 0.4, style: 0.3, speed: 1.05, similarity_boost: 0.75 };
+    applyTtsEmotion("elevenlabs", tts, s);
+    applyTtsEmotion("elevenlabs", tts, { ...s, speed: 1.06 });
+    expect(tts.updateOptions).toHaveBeenCalledTimes(1);
+    applyTtsEmotion("elevenlabs", tts, { ...s, speed: 0.9 });
+    expect(tts.updateOptions).toHaveBeenCalledTimes(2);
+  });
+});

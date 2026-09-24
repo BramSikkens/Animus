@@ -20,6 +20,7 @@ import { archetypeOfferText, getArchetype, pickOffer } from "./archetypes.js";
 import { DRIVE_DESCRIPTIONS, DRIVE_KINDS, drivesPromptBlock, isActiveDrive, type DriveRow } from "./drives.js";
 import { decideBehavior, type Behavior } from "./behavior.js";
 import { pickSpeechSound, SPEECH_SOUND_MIN_LENGTH } from "./speech-sounds.js";
+import { createPacer, pacingFor } from "./speech-pacing.js";
 import { applyDeltas, baseEmotionOf, currentMood, moodOfRow, singleEmotionValues, storedMoodOf, type Mood, type MoodDeltas, type MoodValues, type StoredMood } from "./mood.js";
 import { isVisibleMoodChange, soundKindFor, type SoundKind } from "./sound.js";
 import { AXIS_DESCRIPTIONS, type Axes, axisGuidelines, mbtiType, rowAxes } from "./personality.js";
@@ -1004,12 +1005,23 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     // eventueel een geluid ervoor doorgegeven aan TTS. `full` (Herinnering/Werkgeheugen) blijft de schone tekst.
     let pending = "";
     let soundDecided = false;
+    // Pauzes (interpunctie) per zin, na het Spraakgeluid; verwerkt streaming, dus geen extra wachttijd bij niveau 0.
+    const pacing = axes ? pacingFor({ values: mood.values, expressiveness: axes.expressiveness }) : null;
+    const pacer = createPacer(pacing?.pauseLevel ?? 0, pacing?.halting);
+    function* emitText(delta: string): Generator<BrainEvent> {
+      const paced = pacer.push(delta);
+      if (paced) yield { type: "text", delta: paced };
+    }
     function* flushPending(): Generator<BrainEvent> {
       if (soundDecided) return;
       soundDecided = true;
       const sound = axes ? pickSpeechSound({ textLength: pending.length, values: mood.values, axes, rng: random, isShort: behavior === "kort", previous: lastSpeechSound }) : null;
       if (sound) lastSpeechSound = sound;
-      if (pending) yield { type: "text", delta: sound ? `${sound} ${pending}` : pending };
+      if (pending) yield* emitText(sound ? `${sound} ${pending}` : pending);
+    }
+    function* flushPacer(): Generator<BrainEvent> {
+      const rest = pacer.flush();
+      if (rest) yield { type: "text", delta: rest };
     }
     // "interrupted" tot het tegendeel bewezen is: stopt de consument vroegtijdig (barge-in), dan
     // draait enkel de finally hieronder.
@@ -1020,7 +1032,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
         if (part.type === "error") throw part.error;
         if (part.type === "text-delta") {
           full += part.text;
-          if (soundDecided) yield { type: "text", delta: part.text };
+          if (soundDecided) yield* emitText(part.text);
           else {
             pending += part.text;
             if (pending.length >= SPEECH_SOUND_MIN_LENGTH) yield* flushPending();
@@ -1028,6 +1040,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
         }
         if (part.type === "tool-call") {
           yield* flushPending();
+          yield* flushPacer();
           yield { type: "tool-call", toolName: part.toolName, input: part.input };
         }
         if (part.type === "tool-result") yield { type: "tool-result", toolName: part.toolName, output: part.output };
@@ -1037,6 +1050,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
         }
       }
       yield* flushPending();
+      yield* flushPacer();
       outcome = "completed";
     } catch (error) {
       outcome = "failed";

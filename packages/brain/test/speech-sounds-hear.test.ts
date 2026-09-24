@@ -59,7 +59,7 @@ function light() {
   });
 }
 
-async function insertDynimo(emotion: "blij") {
+async function insertDynimo(emotion: "blij" | "droevig" | "neutraal") {
   await db.insert(dynimos).values({
     name: "Vero",
     coreCharacter: "Rustig.",
@@ -111,5 +111,40 @@ describe("hear(): Spraakgeluiden", () => {
     const second = await collect(brain.hear("Twee"));
 
     expect(textOf(second)).toBe(REPLY);
+  });
+});
+
+describe("hear(): spraakpauzes", () => {
+  const TWO = "Wat leuk dat je er bent, vertel me alles over jezelf. Ik ben zo benieuwd naar je!";
+  const twoSentences = () =>
+    new MockLanguageModelV4({
+      doStream: async () => ({
+        stream: simulateReadableStream({
+          chunks: [
+            { type: "stream-start" as const, warnings: [] },
+            { type: "text-start" as const, id: "1" },
+            ...TWO.match(/[^]{1,9}/g)!.map((delta) => ({ type: "text-delta" as const, id: "1", delta })),
+            { type: "text-end" as const, id: "1" },
+            { type: "finish" as const, usage: NULL_USAGE, finishReason: STOP },
+          ],
+        }),
+      }),
+    });
+
+  it("zet pauzes in de TTS-tekst maar bewaart de schone tekst", async () => {
+    await insertDynimo("droevig");
+    const events = await collect(brainWith(twoSentences()).hear("Hallo"));
+
+    expect(textOf(events)).toContain("jezelf. … Ik ben");
+    const stored = await db.select().from(memories);
+    expect(stored[0]!.text).toContain(TWO);
+    expect(stored[0]!.text).not.toContain("…");
+  });
+
+  it("laat de tekst ongemoeid bij een emotie zonder pauzes", async () => {
+    await insertDynimo("neutraal");
+    const events = await collect(brainWith(twoSentences()).hear("Hallo"));
+
+    expect(textOf(events)).toBe(TWO);
   });
 });

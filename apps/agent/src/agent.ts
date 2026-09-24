@@ -37,6 +37,7 @@ import { createInitiativeTimer, initiativeIntervalMs, parseInitiativeMinutes } f
 import { createReflectionDisplay } from "./reflection-display.js";
 import { createSilenceTimer, parseSilenceMinutes } from "./silence-timer.js";
 import { voiceSettingsFor } from "@animus/brain/voice-emotion";
+import { pacingFor, withPacingSpeed } from "@animus/brain/speech-pacing";
 import { applyTtsEmotion, applyTtsVoice } from "./tts-voice.js";
 import { textStream } from "./text-stream.js";
 import { resolveDisplay, voiceDisplay } from "./voice-display.js";
@@ -300,7 +301,9 @@ export default defineAgent<AgentUserData>({
       reflectionDisplay.onUtterance();
     }, (values) => {
       // Expressiviteit uit de gecachete assen (refresh bij start, wissel en initiatief-check).
-      applyTtsEmotion(speechProvider(process.env), tts, voiceSettingsFor({ values, expressiveness: initiativeAxes?.expressiveness ?? 0.5 }));
+      const expressiveness = initiativeAxes?.expressiveness ?? 0.5;
+      // Tempo per Emotie (#70) via speed; de afronding in applyTtsEmotion voorkomt extra websocket-herstarts.
+      applyTtsEmotion(speechProvider(process.env), tts, withPacingSpeed(voiceSettingsFor({ values, expressiveness }), pacingFor({ values, expressiveness }).speedFactor));
     });
     const initiative = createInitiativeTimer({
       intervalMs: () => initiativeIntervalMs(initiativeAxes, initiativeBaseMs.ms, initiativeMoodFactor),

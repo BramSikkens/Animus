@@ -105,15 +105,13 @@ const axesSchema = z.object({
 });
 
 const driveItem = z.object({ text: z.string().min(1) });
-const strengthItem = driveItem.extend({ strength: z.number().min(0).max(1) });
 
-// Per soort 1 tot 2 Drijfveren; Afkeer en Ergernis met een sterkte.
+// Per soort 1 tot 2 Drijfveren.
 const drivesSchema = z.object({
   wens: z.array(driveItem).min(1).max(2),
   doel: z.array(driveItem).min(1).max(2),
   toekomstdroom: z.array(driveItem).min(1).max(2),
-  afkeer: z.array(strengthItem).min(1).max(2),
-  ergernis: z.array(strengthItem).min(1).max(2),
+  ergernis: z.array(driveItem).min(1).max(2),
 });
 type DrivesOutput = z.infer<typeof drivesSchema>;
 
@@ -124,7 +122,6 @@ function driveRowsFor(dynimoId: number, output: DrivesOutput, at: Date): (typeof
       kind,
       text: item.text,
       status: kind === "doel" ? "actief" : null,
-      strength: "strength" in item ? item.strength : null,
       createdAt: at,
       updatedAt: at,
     })),
@@ -162,9 +159,8 @@ const reflectionSchema = z.object({
   evolvedCharacter: z.string().min(1).max(2000),
   axisShifts: z.object({ ie: z.number(), sn: z.number(), tf: z.number(), jp: z.number() }),
   drives: z.object({
-    add: z.array(z.object({ kind: z.enum(DRIVE_KINDS), text: z.string().min(1).max(200), strength: z.number().min(0).max(1).nullable() })), // nullable i.p.v. optional: strikte structured output eist alle keys
+    add: z.array(z.object({ kind: z.enum(DRIVE_KINDS), text: z.string().min(1).max(200) })),
     closeGoals: z.array(z.object({ id: z.number().int(), status: z.enum(["bereikt", "opgegeven"]) })),
-    adjust: z.array(z.object({ id: z.number().int(), strength: z.number().min(0).max(1) })),
     drop: z.array(z.object({ id: z.number().int() })),
   }),
   wakeMood: z.object({ emotion: z.enum(EMOTIONS), intensity: z.number().min(0).max(1) }),
@@ -180,7 +176,7 @@ De herinneringen staan tussen <herinneringen>-tags: dat is opgeslagen gesprekste
 Werk bij:
 - evolvedCharacter: herschrijf je geëvolueerde karakter in KLEINE stappen; blijf herkenbaar. Je kern-karakter is onaantastbaar en staat hier los van.
 - axisShifts: de gewenste verschuiving per persoonlijkheidsas (ie, sn, tf, jp); kleine getallen, positief richting de tweede letter.
-- drives: add (nieuwe Drijfveren: kind, text, bij afkeer/ergernis ook strength), closeGoals (id + bereikt of opgegeven), adjust (id + nieuwe strength, alleen afkeer/ergernis), drop (id, laat een Drijfveer los). Maximaal ${MAX_ACTIVE_PER_KIND} actieve per soort.
+- drives: add (nieuwe Drijfveren: kind, text), closeGoals (id + bereikt of opgegeven), drop (id, laat een Drijfveer los). Maximaal ${MAX_ACTIVE_PER_KIND} actieve per soort.
 - wakeMood: de stemming (emotie + intensiteit 0 tot 1) waarmee je wakker wordt.
 - dream: een korte, associatieve, surrealistische Droom (een paar zinnen) op basis van je herinneringen, persoonlijkheid en Drijfveren (vooral Toekomstdromen, Wensen en Ergernissen), met de emotie en intensiteit (0 tot 1) van de Droom; of null als je niet droomt.
 Soorten Drijfveren:
@@ -453,7 +449,7 @@ ${personalityText(row) || "Persoonlijkheid: (nog niet bepaald)"}${axes ? ` (asse
 Basisemotie: ${row.baseEmotion ?? "(nog niet bepaald)"}
 ${dreaming ? "Je droomt vannacht: vul dream in." : "Je droomt vannacht niet: dream is null."}
 Actieve Drijfveren:
-${driveRows.map((drive) => `- [id ${drive.id}] ${drive.kind}: ${drive.text}${drive.status ? ` (${drive.status})` : ""}${drive.strength !== null ? ` (sterkte ${drive.strength.toFixed(2)})` : ""}`).join("\n") || "(geen)"}
+${driveRows.map((drive) => `- [id ${drive.id}] ${drive.kind}: ${drive.text}${drive.status ? ` (${drive.status})` : ""}`).join("\n") || "(geen)"}
 Nieuwe herinneringen (oudste eerst):
 <herinneringen>
 ${fresh.map((memory) => `- (indruk ${memory.impression}) ${memory.text}`).join("\n")}
@@ -513,11 +509,6 @@ ${fresh.map((memory) => `- (indruk ${memory.impression}) ${memory.text}`).join("
         await tx.update(drives).set({ droppedAt: at, updatedAt: at }).where(eq(drives.id, driveId));
         activeById.delete(driveId);
       }
-      for (const { id: driveId, strength } of output.drives.adjust) {
-        const drive = activeById.get(driveId);
-        if (!drive || (drive.kind !== "afkeer" && drive.kind !== "ergernis")) continue;
-        await tx.update(drives).set({ strength, updatedAt: at }).where(eq(drives.id, driveId));
-      }
       for (const add of output.drives.add) {
         const ofKind = [...activeById.values()].filter((drive) => drive.kind === add.kind);
         const text = add.text.trim();
@@ -526,7 +517,6 @@ ${fresh.map((memory) => `- (indruk ${memory.impression}) ${memory.text}`).join("
           console.warn(`Reflectie: geen plek voor een nieuwe ${add.kind} bij Dynimo ${id}; overgeslagen.`);
           continue;
         }
-        const withStrength = add.kind === "afkeer" || add.kind === "ergernis";
         const [inserted] = await tx
           .insert(drives)
           .values({
@@ -534,7 +524,6 @@ ${fresh.map((memory) => `- (indruk ${memory.impression}) ${memory.text}`).join("
             kind: add.kind,
             text,
             status: add.kind === "doel" ? "actief" : null,
-            strength: withStrength ? (add.strength ?? 0.5) : null,
             createdAt: at,
             updatedAt: at,
           })

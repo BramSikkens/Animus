@@ -32,8 +32,7 @@ const MID_DRIVES = {
   wens: [{ text: "Een zachte wens" }],
   doel: [{ text: "Een concreet streven" }],
   toekomstdroom: [{ text: "Een verre droom" }],
-  afkeer: [{ text: "Een diepe weerzin", strength: 0.6 }],
-  ergernis: [{ text: "Een kleine ergernis", strength: 0.3 }],
+  ergernis: [{ text: "Een kleine ergernis" }],
 };
 
 function genesisModel(result: {
@@ -1638,8 +1637,7 @@ describe("createBrain", () => {
         wens: [{ text: "Sterren tellen" }],
         doel: [{ text: "Een lied leren" }, { text: "Een vriend maken" }],
         toekomstdroom: [{ text: "Een vuurtoren zijn" }],
-        afkeer: [{ text: "Stilstaand water", strength: 0.9 }],
-        ergernis: [{ text: "Tikkende klokken", strength: 0.2 }],
+        ergernis: [{ text: "Tikkende klokken" }],
       },
     };
 
@@ -1672,17 +1670,16 @@ describe("createBrain", () => {
 
     async function insertDrive(
       dynimoId: number,
-      kind: "wens" | "doel" | "toekomstdroom" | "afkeer" | "ergernis",
+      kind: "wens" | "doel" | "toekomstdroom" | "ergernis",
       text: string,
-      extra: { status?: "actief" | "bereikt" | "opgegeven"; strength?: number } = {},
+      extra: { status?: "actief" | "bereikt" | "opgegeven" } = {},
     ) {
       await db.insert(drives).values({
         dynimoId,
         kind,
         text,
         status: kind === "doel" ? (extra.status ?? "actief") : null,
-        strength: kind === "afkeer" || kind === "ergernis" ? (extra.strength ?? 0.5) : null,
-        createdAt: bornAt,
+                createdAt: bornAt,
         updatedAt: bornAt,
       });
     }
@@ -1691,7 +1688,7 @@ describe("createBrain", () => {
       return contentsByRole(light.doStreamCalls[index]?.prompt, "system").join(" ");
     }
 
-    it("bewaart de Drijfveren uit de genesis-call, met Doelen actief en sterkte bij Afkeer en Ergernis", async () => {
+    it("bewaart de Drijfveren uit de genesis-call, met Doelen actief", async () => {
       const brain = brainWith(
         new MockLanguageModelV4({
           doGenerate: [
@@ -1709,18 +1706,14 @@ describe("createBrain", () => {
         "doel:Een lied leren",
         "doel:Een vriend maken",
         "toekomstdroom:Een vuurtoren zijn",
-        "afkeer:Stilstaand water",
         "ergernis:Tikkende klokken",
       ]);
       expect(rows.filter((row) => row.kind === "doel").every((row) => row.status === "actief")).toBe(true);
-      expect(rows.find((row) => row.kind === "afkeer")?.strength).toBeCloseTo(0.9);
-      expect(rows.find((row) => row.kind === "wens")?.strength).toBeNull();
     });
 
     it.each([
       ["een soort zonder items", { ...DRIVES_RESULT.drives, wens: [] }],
       ["drie items in een soort", { ...DRIVES_RESULT.drives, wens: [{ text: "a" }, { text: "b" }, { text: "c" }] }],
-      ["een sterkte buiten 0..1", { ...DRIVES_RESULT.drives, afkeer: [{ text: "Kou", strength: 1.5 }] }],
       ["een lege tekst", { ...DRIVES_RESULT.drives, wens: [{ text: "" }] }],
     ])("faalt bringToLife() zonder Dynimo of Drijfveren bij %s", async (_label, badDrives) => {
       const brain = brainWith(
@@ -1742,7 +1735,7 @@ describe("createBrain", () => {
       await insertDrive(vero.id, "doel", "Lopend doel");
       await insertDrive(vero.id, "doel", "Afgerond doel", { status: "bereikt" });
       await insertDrive(vero.id, "doel", "Losgelaten doel", { status: "opgegeven" });
-      await insertDrive(vero.id, "afkeer", "Harde kou", { strength: 0.9 });
+      await insertDrive(vero.id, "ergernis", "Harde kou");
       const light = textModel(["Hoi."]);
 
       await collectText(brainWith(unusedModel(), light).hear("Hallo!"));
@@ -1750,7 +1743,8 @@ describe("createBrain", () => {
       const system = await systemOfFirstTurn(light);
       expect(system).toContain("Een lentewens");
       expect(system).toContain("Lopend doel");
-      expect(system).toContain("Harde kou (sterk)");
+      expect(system).toContain("Harde kou");
+      expect(system).not.toContain("(sterk)");
       expect(system).not.toContain("Afgerond doel");
       expect(system).not.toContain("Losgelaten doel");
     });
@@ -1825,7 +1819,7 @@ describe("createBrain", () => {
         expect(await brainWith(heavy).backfill()).toBe(1);
 
         const rows = await db.select().from(drives).where(eq(drives.dynimoId, lumi.id));
-        expect(rows).toHaveLength(6);
+        expect(rows).toHaveLength(5);
         expect(rows.filter((row) => row.kind === "doel").every((row) => row.status === "actief")).toBe(true);
       });
 
@@ -1879,7 +1873,7 @@ describe("createBrain", () => {
 
         const rows = await db.select().from(drives);
         expect(rows.some((row) => row.dynimoId === first.id)).toBe(false);
-        expect(rows.filter((row) => row.dynimoId === second.id)).toHaveLength(6);
+        expect(rows.filter((row) => row.dynimoId === second.id)).toHaveLength(5);
       });
 
       it("vult in één run zowel assen als Drijfveren aan, en de Drijfveren-prompt bevat de net bepaalde assen", async () => {
@@ -1897,7 +1891,7 @@ describe("createBrain", () => {
         expect(JSON.stringify(heavy.doGenerateCalls[1]?.prompt)).toContain("INFJ");
         const [row] = await db.select().from(dynimos).where(eq(dynimos.id, lumi.id));
         expect(row?.axisIe).toBeCloseTo(0.2);
-        expect(await db.select().from(drives).where(eq(drives.dynimoId, lumi.id))).toHaveLength(6);
+        expect(await db.select().from(drives).where(eq(drives.dynimoId, lumi.id))).toHaveLength(5);
       });
 
       it("gebruikt in de Drijfveren-prompt de assen die een andere instantie tussen de stappen zette", async () => {
@@ -1918,7 +1912,7 @@ describe("createBrain", () => {
         await brainWith(heavy).backfill();
 
         expect(JSON.stringify(heavy.doGenerateCalls[1]?.prompt)).toContain("ENFP");
-        expect(await db.select().from(drives).where(eq(drives.dynimoId, lumi.id))).toHaveLength(6);
+        expect(await db.select().from(drives).where(eq(drives.dynimoId, lumi.id))).toHaveLength(5);
       });
 
       it("maakt maar één set Drijfveren bij twee gelijktijdige backfills", async () => {
@@ -1933,7 +1927,7 @@ describe("createBrain", () => {
 
         await Promise.all([brainWith(model()).backfill(), brainWith(model()).backfill()]);
 
-        expect(await db.select().from(drives).where(eq(drives.dynimoId, lumi.id))).toHaveLength(6);
+        expect(await db.select().from(drives).where(eq(drives.dynimoId, lumi.id))).toHaveLength(5);
       });
     });
   });
@@ -2428,16 +2422,11 @@ describe("createBrain", () => {
     const bornAt = new Date("2026-01-01T12:00:00.000Z");
     const MIN = 60_000;
 
-    const noOps = { add: [], closeGoals: [], adjust: [], drop: [] };
+    const noOps = { add: [], closeGoals: [], drop: [] };
     const reflection = (over: Record<string, unknown> = {}, driveOps: Record<string, unknown> = {}) => ({
       evolvedCharacter: "Wat rustiger geworden.",
       axisShifts: { ie: 0, sn: 0, tf: 0, jp: 0 },
-      // Strikte structured output (OpenAI) eist alle keys: strength is verplicht, null = niet van toepassing.
-      drives: {
-        ...noOps,
-        ...driveOps,
-        add: ((driveOps.add as object[] | undefined) ?? []).map((item) => ({ strength: null, ...item })),
-      },
+      drives: { ...noOps, ...driveOps },
       wakeMood: { emotion: "kalm", intensity: 0.4 },
       dream: null, // strikte structured output: key verplicht, null = geen Droom
       ...over,
@@ -2497,9 +2486,9 @@ describe("createBrain", () => {
 
     async function addDrive(
       dynimoId: number,
-      kind: "wens" | "doel" | "toekomstdroom" | "afkeer" | "ergernis",
+      kind: "wens" | "doel" | "toekomstdroom" | "ergernis",
       text: string,
-      extra: { status?: "actief" | "bereikt" | "opgegeven"; strength?: number } = {},
+      extra: { status?: "actief" | "bereikt" | "opgegeven" } = {},
     ) {
       const [row] = await db
         .insert(drives)
@@ -2508,8 +2497,7 @@ describe("createBrain", () => {
           kind,
           text,
           status: kind === "doel" ? (extra.status ?? "actief") : null,
-          strength: kind === "afkeer" || kind === "ergernis" ? (extra.strength ?? 0.5) : null,
-          createdAt: bornAt,
+                    createdAt: bornAt,
           updatedAt: bornAt,
         })
         .returning();
@@ -2607,7 +2595,7 @@ describe("createBrain", () => {
       expect(row.evolvedCharacter).toBe("Wat rustiger geworden.");
     });
 
-    it("voegt een Drijfveer toe (afkeer zonder sterkte krijgt 0.5, strength bij een wens wordt genegeerd)", async () => {
+    it("voegt een Drijfveer toe", async () => {
       const vero = await insertDynimo();
       await addMemory(vero.id, "iets", 1);
 
@@ -2617,8 +2605,8 @@ describe("createBrain", () => {
             {},
             {
               add: [
-                { kind: "afkeer", text: "Kou" },
-                { kind: "wens", text: "Sneeuw zien", strength: 0.9 },
+                { kind: "ergernis", text: "Kou" },
+                { kind: "wens", text: "Sneeuw zien" },
                 { kind: "doel", text: "Een lied leren" },
               ],
             },
@@ -2628,17 +2616,15 @@ describe("createBrain", () => {
 
       const rows = await driveTexts(vero.id);
       const byText = new Map(rows.map((row) => [row.text, row]));
-      expect(byText.get("Kou")?.strength).toBeCloseTo(0.5);
-      expect(byText.get("Sneeuw zien")?.strength).toBeNull();
+      expect(byText.get("Kou")?.kind).toBe("ergernis");
       expect(byText.get("Een lied leren")?.status).toBe("actief");
     });
 
-    it("sluit Doelen als bereikt of opgegeven, past een sterkte aan en dropt een Drijfveer zacht", async () => {
+    it("sluit Doelen als bereikt of opgegeven en dropt een Drijfveer zacht", async () => {
       const vero = await insertDynimo();
       await addMemory(vero.id, "iets", 1);
       const goalA = await addDrive(vero.id, "doel", "Doel A");
       const goalB = await addDrive(vero.id, "doel", "Doel B");
-      const dislike = await addDrive(vero.id, "afkeer", "Kou", { strength: 0.4 });
       const wish = await addDrive(vero.id, "wens", "Sterren");
 
       await brainWith(
@@ -2650,7 +2636,6 @@ describe("createBrain", () => {
                 { id: goalA.id, status: "bereikt" },
                 { id: goalB.id, status: "opgegeven" },
               ],
-              adjust: [{ id: dislike.id, strength: 0.9 }],
               drop: [{ id: wish.id }],
             },
           ),
@@ -2658,10 +2643,9 @@ describe("createBrain", () => {
       ).sleep();
 
       const all = await db.select().from(drives).where(eq(drives.dynimoId, vero.id)).orderBy(drives.id);
-      expect(all).toHaveLength(4); // niets hard verwijderd
+      expect(all).toHaveLength(3); // niets hard verwijderd
       expect(all.find((row) => row.id === goalA.id)?.status).toBe("bereikt");
       expect(all.find((row) => row.id === goalB.id)?.status).toBe("opgegeven");
-      expect(all.find((row) => row.id === dislike.id)?.strength).toBeCloseTo(0.9);
       expect(all.find((row) => row.id === wish.id)?.droppedAt).toEqual(bornAt);
     });
 
@@ -2704,14 +2688,12 @@ describe("createBrain", () => {
       expect(texts).toContain("Doel 6");
     });
 
-    it("negeert onbekende ids, ids van een andere Dynimo, en adjust op een soort zonder sterkte", async () => {
+    it("negeert onbekende ids en ids van een andere Dynimo", async () => {
       const vero = await insertDynimo();
       const mira = await insertDynimo({ name: "Mira", awakeSince: null });
       await addMemory(vero.id, "iets", 1);
       const miraWish = await addDrive(mira.id, "wens", "Miras wens");
       const miraGoal = await addDrive(mira.id, "doel", "Miras doel");
-      const wish = await addDrive(vero.id, "wens", "Sterren");
-
       await brainWith(
         heavyReturning(
           reflection(
@@ -2722,7 +2704,6 @@ describe("createBrain", () => {
                 { id: miraGoal.id, status: "bereikt" },
               ],
               drop: [{ id: miraWish.id }, { id: 99998 }],
-              adjust: [{ id: wish.id, strength: 0.9 }],
             },
           ),
         ),
@@ -2731,7 +2712,6 @@ describe("createBrain", () => {
       const all = await db.select().from(drives);
       expect(all.find((row) => row.id === miraGoal.id)?.status).toBe("actief");
       expect(all.find((row) => row.id === miraWish.id)?.droppedAt).toBeNull();
-      expect(all.find((row) => row.id === wish.id)?.strength).toBeNull();
     });
 
     it("negeert een toevoeging met dezelfde tekst als een actieve Drijfveer van die soort (hoofdletterongevoelig)", async () => {
@@ -2741,13 +2721,13 @@ describe("createBrain", () => {
 
       await brainWith(
         heavyReturning(
-          reflection({}, { add: [{ kind: "wens", text: "  sterren TELLEN " }, { kind: "afkeer", text: "Sterren tellen" }] }),
+          reflection({}, { add: [{ kind: "wens", text: "  sterren TELLEN " }, { kind: "ergernis", text: "Sterren tellen" }] }),
         ),
       ).sleep();
 
       const rows = await driveTexts(vero.id);
       expect(rows.filter((row) => row.kind === "wens")).toHaveLength(1);
-      expect(rows.filter((row) => row.kind === "afkeer")).toHaveLength(1); // andere soort mag wel
+      expect(rows.filter((row) => row.kind === "ergernis")).toHaveLength(1); // andere soort mag wel
     });
 
     it("wijzigt Kernkarakter en Basisemotie nooit, ook al probeert het model dat mee te sturen", async () => {
@@ -3336,7 +3316,7 @@ describe("createBrain", () => {
               JSON.stringify({
                 evolvedCharacter: "x",
                 axisShifts: { ie: 0, sn: 0, tf: 0, jp: 0 },
-                drives: { add: [], closeGoals: [], adjust: [], drop: [] },
+                drives: { add: [], closeGoals: [], drop: [] },
                 wakeMood: { emotion: "kalm", intensity: 0.4 },
               }),
             ),

@@ -79,7 +79,7 @@ Het MBTI-type van een Dynimo, afgeleid uit vier assen (I↔E, S↔N, T↔F, J↔
 _Avoid_: karakter (dat is de vrije tekst), Big Five
 
 **Drijfveer**:
-Iets wat een Dynimo wil of niet wil, van één van vijf soorten: Wens, Doel (kan bereikt of opgegeven worden), Toekomstdroom, Afkeer (mild) of Ergernis (sterk). Kleurt welke Emotie een uiting oproept.
+Iets wat een Dynimo wil of niet wil, van één van vier soorten: Wens, Doel (kan bereikt of opgegeven worden), Toekomstdroom of Ergernis (zonder waarde of sterkte). Kleurt welke Emotie een uiting oproept.
 _Avoid_: voorkeur, interesse; een Toekomstdroom is geen Droom (de nachtelijke droomtekst)
 
 **Reflectie**:

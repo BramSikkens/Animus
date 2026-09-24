@@ -134,18 +134,6 @@ export default async function DashboardPage() {
                                 <li key={drive.id}>
                                   {drive.text}
                                   {drive.status && <em> — {drive.status}</em>}
-                                  {drive.strength !== null && (
-                                    <>
-                                      <span
-                                        className="bar"
-                                        role="img"
-                                        aria-label={`sterkte ${Math.round(drive.strength * 100)}%`}
-                                      >
-                                        <span className="bar-fill" style={{ width: `${Math.round(drive.strength * 100)}%` }} />
-                                      </span>
-                                      {Math.round(drive.strength * 100)}%
-                                    </>
-                                  )}
                                 </li>
                               ))}
                             </ul>

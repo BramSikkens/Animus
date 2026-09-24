@@ -17,7 +17,7 @@ export type Keyframe = {
   mouth: Mouth;
   /** #rrggbb */
   background: string;
-  /** Enkel gezet voor verrast/boos/bang; de rest gebruikt de neutraal-rechte stand. */
+  /** Enkel gezet voor verrast/boos/bang/droevig; de rest gebruikt de neutraal-rechte stand. */
   brow?: Brow;
 };
 
@@ -90,6 +90,31 @@ export const KEYFRAMES = {
     brow: { angle: -20, raise: 8 },
   },
   neutraal: NEUTRAL,
+  droevig: {
+    eyes: {
+      left: { open: 0.55, scale: 0.95, pupilX: 0, pupilY: 4 },
+      right: { open: 0.55, scale: 0.95, pupilX: 0, pupilY: 4 },
+    },
+    mouth: { width: 32, curve: -0.5, open: 0 },
+    background: "#3d4a5c",
+    brow: { angle: -15, raise: 2 },
+  },
+  vredig: {
+    eyes: {
+      left: { open: 0.25, scale: 0.95, pupilX: 0, pupilY: 0 },
+      right: { open: 0.25, scale: 0.95, pupilX: 0, pupilY: 0 },
+    },
+    mouth: { width: 40, curve: 0.5, open: 0 },
+    background: "#5a6b58",
+  },
+  druk: {
+    eyes: {
+      left: { open: 1, scale: 1.1, pupilX: 3, pupilY: -1 },
+      right: { open: 1, scale: 1.1, pupilX: 3, pupilY: -1 },
+    },
+    mouth: { width: 40, curve: 0.1, open: 0.35 },
+    background: "#7a4f6b",
+  },
 } satisfies Record<Emotion, Keyframe>;
 
 /** Weergavetoestand "slapend": ogen (bijna) dicht, vlakke mond, gedempte donkere achtergrond, geen emotie. */

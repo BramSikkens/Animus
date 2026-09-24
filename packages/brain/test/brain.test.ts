@@ -2126,6 +2126,29 @@ describe("createBrain", () => {
       expect(criteria[8]).toBe("+100");
     });
 
+    it("stelt Type1 ook delta-vragen voor droevig, vredig en druk, en vertelt dat tegenpolen vanzelf meebewegen", async () => {
+      await insertDynimo();
+      const { model, calls } = type1Sequence([{ deltas: {} }]);
+
+      await collectText(brainWith({ type1: model, light: textModel(["Hoi."]) }).hear("Hoi"));
+
+      for (const emotion of ["droevig", "vredig", "druk"]) expect(calls[0]!.questions[`delta_${emotion}`]).toBeDefined();
+      expect(calls[0]!.questions.delta_blij!.instructions).toContain("tegenpool");
+    });
+
+    it("laat een blij-delta de opgeslagen droevig-waarde afremmen (emotieparen)", async () => {
+      await insertDynimo({ moodValues: singleEmotionValues("droevig", 0.6), moodAt: bornAt });
+      const { model } = type1Sequence([{ deltas: { blij: 50 } }]);
+      const moods: { values: Record<string, number> }[] = [];
+
+      for await (const event of brainWith({ type1: model, light: textModel(["Hoi."]) }).hear("Goed nieuws!")) {
+        if (event.type === "mood") moods.push(event);
+      }
+
+      expect(moods[0]!.values.blij).toBeCloseTo(50);
+      expect(moods[0]!.values.droevig).toBeCloseTo(35); // 60 - 0.5 * 50
+    });
+
     it("stelt Type1 alleen Score-vragen met hoogstens 10 niveaus (limiet van de typesafe-Score)", async () => {
       await insertDynimo();
       const { model, calls } = type1Sequence([{ deltas: {} }]);

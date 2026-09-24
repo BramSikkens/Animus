@@ -22,7 +22,7 @@ import { decideBehavior, type Behavior } from "./behavior.js";
 import { applyDeltas, baseEmotionOf, currentMood, moodOfRow, singleEmotionValues, storedMoodOf, type Mood, type MoodDeltas, type MoodValues, type StoredMood } from "./mood.js";
 import { isVisibleMoodChange, soundKindFor, type SoundKind } from "./sound.js";
 import { AXIS_DESCRIPTIONS, type Axes, axisGuidelines, mbtiType, rowAxes } from "./personality.js";
-import { EMOTIONS, type Emotion } from "./emotion.js";
+import { EMOTIONS, oppositeOf, type Emotion } from "./emotion.js";
 import { SEEDS } from "./seeds.js";
 import { createTools } from "./tools.js";
 
@@ -294,6 +294,12 @@ function moodMessage(mood: Mood): SystemModelMessage {
   };
 }
 
+// De tegenpool remt vanzelf af (ADR-0015); Type1 hoeft die niet ook nog omlaag te scoren.
+const pairHint = (emotion: Emotion) => {
+  const opposite = oppositeOf(emotion);
+  return opposite ? ` De tegenpool "${opposite}" zakt vanzelf mee als deze stijgt; scoor die niet apart omlaag.` : "";
+};
+
 // Eén Type1-call per beurt: per emotie de verandering (delta) die de uiting bij de Dynimo zelf teweegbrengt (reactie,
 // niet de emotie van de uiting) + intent-routering. De context (persoonlijkheid, Drijfveren, Stemming) zit in de state naast de uiting.
 async function classify(type1: Experimental_EvaluationModel, text: string, context: string): Promise<Type1Result> {
@@ -306,7 +312,7 @@ async function classify(type1: Experimental_EvaluationModel, text: string, conte
           `delta_${emotion}`,
           {
             type: "score" as const,
-            instructions: `Hoeveel verandert de emotie "${emotion}" van de Dynimo zelf door deze uiting, gegeven zijn persoonlijkheid, Drijfveren en huidige stemming? Het middelste niveau is geen verandering; hoger is meer, lager is minder (de emotie zakt). De meeste emoties veranderen niet; gebruik uitersten alleen voor echt sterke reacties.`,
+            instructions: `Hoeveel verandert de emotie "${emotion}" van de Dynimo zelf door deze uiting, gegeven zijn persoonlijkheid, Drijfveren en huidige stemming? Het middelste niveau is geen verandering; hoger is meer, lager is minder (de emotie zakt). De meeste emoties veranderen niet; gebruik uitersten alleen voor echt sterke reacties.${pairHint(emotion)}`,
             criteria: DELTA_TABLE.map((delta) => (delta === 0 ? "geen verandering" : `${delta > 0 ? "+" : ""}${delta}`)),
           },
         ]),

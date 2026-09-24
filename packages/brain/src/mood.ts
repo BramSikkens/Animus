@@ -1,5 +1,5 @@
 // Browser-veilig: geen node-imports. Brein, agent en dashboard delen dit.
-import { EMOTIONS, isEmotion, type Emotion } from "./emotion.js";
+import { EMOTIONS, EMOTION_PAIRS, isEmotion, oppositeOf, type Emotion } from "./emotion.js";
 
 /** Halveringstijd waarmee elke emotiewaarde naar haar ruststand uitdooft. */
 export const MOOD_HALF_LIFE_MS = 3 * 60_000;
@@ -21,6 +21,22 @@ export type StoredMood = { values: MoodValues; at: Date } | null;
 export type Mood = { emotion: Emotion; intensity: number; values: MoodValues };
 
 const clamp = (value: number) => Math.min(100, Math.max(0, value));
+
+/** Trek van een positieve delta op de tegenpool, als fractie van die delta (blij +30 -> droevig -15). */
+export const PAIR_PULL = 0.5;
+
+/**
+ * Houdt de paren consistent (ADR-0015): van een paar is de kleinste nooit hoger dan 100 minus de grootste, dus twee hoge
+ * waarden tegelijk kunnen niet. Idempotent, zodat opgeslagen en uitgedoofde waarden dezelfde regel delen.
+ */
+function reconcilePairs(values: MoodValues): MoodValues {
+  const out = { ...values };
+  for (const [a, b] of EMOTION_PAIRS) {
+    const [low, high] = out[a] <= out[b] ? [a, b] : [b, a];
+    out[low] = Math.min(out[low], 100 - out[high]);
+  }
+  return out;
+}
 
 function restValues(base: Emotion): MoodValues {
   return Object.fromEntries(EMOTIONS.map((emotion) => [emotion, emotion === base ? BASE_LEVEL : 0])) as MoodValues;
@@ -50,7 +66,7 @@ export function currentMood(stored: StoredMood, baseEmotion: Emotion | null, now
   const values = Object.fromEntries(
     EMOTIONS.map((emotion) => [emotion, rest[emotion] + (stored.values[emotion] - rest[emotion]) * decay]),
   ) as MoodValues;
-  return moodOf(values, base);
+  return moodOf(reconcilePairs(values), base);
 }
 
 export type MoodDeltas = Partial<Record<Emotion, number>>;
@@ -69,9 +85,16 @@ export function applyDeltas(
   const current = currentMood(stored, baseEmotion, now, reactivity);
   const scale = reactivityFactor(reactivity);
   if (EMOTIONS.every((emotion) => !deltas[emotion])) return { mood: current, next: stored };
-  const values = Object.fromEntries(
-    EMOTIONS.map((emotion) => [emotion, clamp(current.values[emotion] + (deltas[emotion] ?? 0) * scale)]),
-  ) as MoodValues;
+  // Een positieve delta trekt de tegenpool PAIR_PULL van die delta de andere kant op.
+  const values = reconcilePairs(
+    Object.fromEntries(
+      EMOTIONS.map((emotion) => {
+        const opposite = oppositeOf(emotion);
+        const pull = opposite ? Math.max(0, deltas[opposite] ?? 0) * PAIR_PULL : 0;
+        return [emotion, clamp(current.values[emotion] + ((deltas[emotion] ?? 0) - pull) * scale)];
+      }),
+    ) as MoodValues,
+  );
   return { mood: moodOf(values, baseEmotion ?? "neutraal"), next: { values, at: now } };
 }
 

@@ -97,11 +97,11 @@ _Avoid_: niet te verwarren met een Toekomstdroom (een Drijfveer, geen nachtelijk
 ### Expressie
 
 **Emotie**:
-Een vaste, eindige categorie uit de set {blij, boos, verrast, kalm, verveeld, nieuwsgierig, bang, neutraal}. Elke Emotie heeft in de Stemming altijd een waarde van 0 tot 100. Type1 levert per uiting per Emotie een delta (positief of negatief) die de waarde verschuift; vanaf fase 2 is dat hoe de Dynimo zich bij de uiting voelt (met zijn Drijfveren en persoonlijkheid als context), niet de emotie van de Gesprekspartner. Een delta verschuift enkel de Stemming; ze wordt zelf niet getoond.
+Een vaste, eindige categorie uit de set {blij, boos, verrast, kalm, verveeld, nieuwsgierig, bang, neutraal, droevig, vredig, druk}. Drie **paren** zijn tegenpolen: boos↔vredig, blij↔droevig en druk↔kalm (`EMOTION_PAIRS`); de overige Emoties hebben geen tegenpool. Elke Emotie heeft in de Stemming altijd een waarde van 0 tot 100. Type1 levert per uiting per Emotie een delta (positief of negatief) die de waarde verschuift; vanaf fase 2 is dat hoe de Dynimo zich bij de uiting voelt (met zijn Drijfveren en persoonlijkheid als context), niet de emotie van de Gesprekspartner. Een delta verschuift enkel de Stemming; ze wordt zelf niet getoond.
 _Avoid_: sentiment
 
 **Stemming**:
-De emotionele toestand van een Dynimo die over beurten heen blijft hangen: een vector met voor elke Emotie een waarde 0–100, plus een tijdstip. De Type1-delta's van een uiting worden opgeteld en geclampt op 0–100; tussendoor dooft elke waarde exponentieel uit naar haar ruststand (halveringstijd 3 minuten). De zichtbare, dominante Emotie is de hoogste waarde (bij gelijkstand de Basisemotie, anders de eerste in de set); het gezichtje en de toon van Type2 volgen die. Zie [ADR-0012](docs/adr/0012-stemming-als-vector.md).
+De emotionele toestand van een Dynimo die over beurten heen blijft hangen: een vector met voor elke Emotie een waarde 0–100, plus een tijdstip. De Type1-delta's van een uiting worden opgeteld en geclampt op 0–100; tussendoor dooft elke waarde exponentieel uit naar haar ruststand (halveringstijd 3 minuten). De zichtbare, dominante Emotie is de hoogste waarde (bij gelijkstand de Basisemotie, anders de eerste in de set); het gezichtje en de toon van Type2 volgen die. Van een paar tegenpolen remt de ene kant de andere af: een positieve delta trekt de tegenpool met de helft van die delta omlaag (blij +30 → droevig −15), en de kleinste van een paar is nooit hoger dan 100 min de grootste, dus twee hoge waarden van een paar bestaan nooit tegelijk (ook niet na het uitdoven). Zie [ADR-0012](docs/adr/0012-stemming-als-vector.md) en [ADR-0015](docs/adr/0015-emoties-in-tegengestelde-paren.md).
 _Avoid_: humeur, emotie (voor de blijvende toestand)
 
 **Gedrag**:
@@ -113,7 +113,7 @@ De Emotie die in de ruststand van de Stemming op 30 staat, terwijl alle andere E
 _Avoid_: default-emotie, rustemotie
 
 **Emotiekeyframe**:
-De visuele definitie van één emotie: oogvorm/scale/pupil-offset, mondkromming (bezier), achtergrondkleur en, voor een subset van emoties (verrast, boos, bang), een wenkbrauwstand — de overige emoties gebruiken een neutraal-rechte wenkbrauw. Bij een emotiewissel wordt hiertussen getweend.
+De visuele definitie van één emotie: oogvorm/scale/pupil-offset, mondkromming (bezier), achtergrondkleur en, voor een subset van emoties (verrast, boos, bang, droevig), een wenkbrauwstand — de overige emoties gebruiken een neutraal-rechte wenkbrauw. Bij een emotiewissel wordt hiertussen getweend.
 _Avoid_: expressie-state, animatie (te generiek)
 
 **Weergavetoestand** (fase 2b):

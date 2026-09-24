@@ -9,6 +9,8 @@ try {
 
 const nextConfig: NextConfig = {
   transpilePackages: ["@animus/db", "@animus/brain"],
+  // Stem-cloning uploadt audio tot 10 MB (zie voice-design.ts); standaard is 1 MB.
+  experimental: { serverActions: { bodySizeLimit: "10mb" } },
   // @animus/brain importeert zijn eigen bestanden als "./x.js" (NodeNext); Turbopack mapt dat niet naar .ts.
   // Daarom draait het dashboard op webpack (zie de scripts in package.json).
   webpack: (config) => {

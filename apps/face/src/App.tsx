@@ -3,6 +3,8 @@ import { LiveKitRoom, RoomAudioRenderer, StartAudio, useConnectionState, useData
 import { ConnectionState } from "livekit-client";
 import { DISPLAY_STATES, DISPLAY_TOPIC, isDisplayState, type DisplayState } from "@animus/brain/display";
 import { EMOTION_TOPIC, EMOTIONS, isEmotion, type EmotionMessage } from "@animus/brain/emotion";
+import { isSoundKind, SOUND_TOPIC } from "@animus/brain/sound";
+import { clipUrl } from "./sound.js";
 import { Face } from "./face/Face.js";
 
 type TokenSession = { serverUrl: string; token: string };
@@ -64,6 +66,25 @@ function DisplayListener({ onDisplay }: { onDisplay: (state: DisplayState) => vo
       }
     } catch (error) {
       console.error("Display-event kon niet verwerkt worden:", error instanceof Error ? error.message : error);
+    }
+  });
+  return null;
+}
+
+// Speelt bij een sound-event (SoundMessage op SOUND_TOPIC) een vooraf opgenomen clip af; niet tijdens slapend/reflecterend.
+function SoundListener({ display }: { display: DisplayState }) {
+  useDataChannel(SOUND_TOPIC, (msg) => {
+    if (!msg.from?.isAgent || display !== "wakker") return;
+    try {
+      const payload: unknown = JSON.parse(new TextDecoder().decode(msg.payload));
+      if (payload !== null && typeof payload === "object" && "kind" in payload && isSoundKind(payload.kind)) {
+        // Autoplay is ontgrendeld door StartAudio; een geweigerde play() is geen fout voor de sessie.
+        void new Audio(clipUrl(payload.kind)).play().catch(() => {});
+      } else {
+        console.error("Sound-event heeft onverwachte vorm:", payload);
+      }
+    } catch (error) {
+      console.error("Sound-event kon niet verwerkt worden:", error instanceof Error ? error.message : error);
     }
   });
   return null;
@@ -160,6 +181,7 @@ export function App() {
           >
             <EmotionListener onEmotion={setEmotionState} />
             <DisplayListener onDisplay={setDisplayState} />
+            <SoundListener display={displayState} />
             <ConnectionStatus />
             <RoomAudioRenderer />
             <StartAudio label="Zet geluid aan" />

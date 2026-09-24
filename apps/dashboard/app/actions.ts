@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { isEmotion } from "@animus/brain/emotion";
 import { parseMoodValues } from "@animus/brain/mood";
 import { parseAxes } from "@animus/brain/personality";
+import { parseVoice, speechProvider } from "@animus/brain/voice";
 import { getBrain } from "../lib/brain";
 
 export type ActionState = { error?: string };
@@ -86,6 +87,16 @@ export async function setAxes(_prev: ActionState, formData: FormData): Promise<A
     const axes = parseAxes((name) => formData.get(name));
     if (!axes) return "Ongeldige persoonlijkheidsassen.";
     if (!(await getBrain().setAxes(id, axes))) return DYNIMO_GONE;
+  });
+}
+
+export async function setVoice(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  return run(async () => {
+    const id = parseId(formData);
+    if (id === null) return INVALID_ID;
+    const parsed = parseVoice(speechProvider(process.env), formData.get("voice"));
+    if (!parsed) return "Ongeldige stem.";
+    if (!(await getBrain().setVoice(id, parsed.voice))) return DYNIMO_GONE;
   });
 }
 

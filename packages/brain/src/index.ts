@@ -74,6 +74,8 @@ export type Brain = {
   setMood(id: number, values: MoodValues): Promise<boolean>;
   /** Dashboard-override: zet de vier Persoonlijkheidsassen (0–1) direct; gesprekken en Reflecties schuiven ze daarna weer op. False bij een onbekende id. */
   setAxes(id: number, axes: Axes): Promise<boolean>;
+  /** Dashboard: zet de TTS-stem (null = default van de agent); de agent past die direct toe. False bij een onbekende id. */
+  setVoice(id: number, voice: string | null): Promise<boolean>;
   /**
    * Dashboard-override: voegt een Herinnering toe met dezelfde embed-stap als een normale beurt en de neutrale
    * Indruk 0.5. False bij een onbekende id; gooit als het embedden of opslaan faalt.
@@ -809,6 +811,15 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     return updated.length > 0;
   }
 
+  async function setVoice(id: number, voice: string | null): Promise<boolean> {
+    return deps.db.transaction(async (tx) => {
+      const updated = await tx.update(dynimos).set({ voice }).where(eq(dynimos.id, id)).returning({ id: dynimos.id });
+      // Payload "voice:" laat de agent enkel de stem verversen, zonder het lopende antwoord af te breken.
+      if (updated.length > 0) await notifyStateChange(tx, `voice:${id}`);
+      return updated.length > 0;
+    });
+  }
+
   async function setMood(id: number, values: MoodValues): Promise<boolean> {
     return deps.db.transaction(async (tx) => {
       const updated = await tx
@@ -1026,5 +1037,5 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     }
   }
 
-  return { bringToLife, wake, sleep, kill, list, backfill, reflect, considerInitiative, hear, forceMood, setMood, setAxes, addMemory, removeMemory };
+  return { bringToLife, wake, sleep, kill, list, backfill, reflect, considerInitiative, hear, forceMood, setMood, setAxes, setVoice, addMemory, removeMemory };
 }

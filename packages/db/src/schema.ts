@@ -33,6 +33,8 @@ export const dynimos = pgTable(
     axisSn: real("axis_sn"),
     axisTf: real("axis_tf"),
     axisJp: real("axis_jp"),
+    // TTS-stem (model/stemnaam van de actieve spraakprovider). NULL = default van de agent.
+    voice: text("voice"),
   },
   // Hooguit één Wakker: alle wakkere rijen delen dezelfde constante indexwaarde.
   (table) => [

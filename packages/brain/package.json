@@ -11,7 +11,8 @@
     "./personality": "./src/personality.ts",
     "./drives": "./src/drives.ts",
     "./mood": "./src/mood.ts",
-    "./sound": "./src/sound.ts"
+    "./sound": "./src/sound.ts",
+    "./voice": "./src/voice.ts"
   },
   "scripts": {
     "test": "vitest run",

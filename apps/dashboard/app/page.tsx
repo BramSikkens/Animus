@@ -4,10 +4,11 @@ import { formatAge } from "@animus/brain/age";
 import { moodOfRow } from "@animus/brain/mood";
 import { DRIVE_KINDS, DRIVE_LABELS, type DriveKind } from "@animus/brain/drives";
 import { AXES, AXIS_LETTERS, mbtiType, rowAxes } from "@animus/brain/personality";
+import { speechProvider, voicesFor } from "@animus/brain/voice";
 import { dreams, drives, dynimos, epitaphs, memories } from "@animus/db/schema";
 import { db } from "../lib/db";
 import { ActionForm } from "./action-form";
-import { addMemory, bringToLife, forceMood, kill, removeMemory, setAxes, setMood, sleep, wake } from "./actions";
+import { addMemory, bringToLife, forceMood, kill, removeMemory, setAxes, setMood, setVoice, sleep, wake } from "./actions";
 import { formatDate, formatDateTime } from "../lib/format";
 
 export const dynamic = "force-dynamic";
@@ -68,6 +69,7 @@ export default async function DashboardPage() {
     );
   }
   const { dynimoRows, recentMemories, recentDreams, epitaphRows, drivesByDynimo } = data;
+  const voices = voicesFor(speechProvider(process.env));
 
   return (
     <main>
@@ -174,6 +176,16 @@ export default async function DashboardPage() {
                         <input name={`axis_${axis}`} type="range" min={0} max={1} step={0.01} defaultValue={axes?.[axis] ?? 0.5} />
                       </label>
                     ))}
+                  </ActionForm>
+                  <ActionForm action={setVoice} label="Stem zetten" pendingLabel="Zet…" id={dynimo.id}>
+                    <select name="voice" aria-label="Stem" defaultValue={dynimo.voice && voices.includes(dynimo.voice) ? dynimo.voice : ""}>
+                      <option value="">standaard</option>
+                      {voices.map((voice) => (
+                        <option key={voice} value={voice}>
+                          {voice}
+                        </option>
+                      ))}
+                    </select>
                   </ActionForm>
                   <ActionForm action={kill} label="Doden" pendingLabel="Neemt afscheid…" id={dynimo.id} confirmName />
                   <details>

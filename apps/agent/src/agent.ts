@@ -5,6 +5,7 @@ import { DISPLAY_TOPIC, type DisplayMessage, type DisplayState } from "@animus/b
 import { SOUND_TOPIC, type SoundMessage } from "@animus/brain/sound";
 import { EMOTION_TOPIC, type EmotionMessage } from "@animus/brain/emotion";
 import { rowAxes } from "@animus/brain/personality";
+import { resolveVoice, speechProvider } from "@animus/brain/voice";
 import { EMBEDDING_MODEL, loadType2Config, TYPE1_MODEL } from "@animus/brain/config";
 import { createDb, migrate } from "@animus/db";
 import {
@@ -45,7 +46,7 @@ type AgentUserData = { vad: VAD };
 
 // Zonder DEEPGRAM_API_KEY valt dit terug op OpenAI, spec-conform is Deepgram.
 function speechProviders(): { stt: deepgram.STT | openai.STT; tts: deepgram.TTS | openai.TTS } {
-  if (process.env.DEEPGRAM_API_KEY) {
+  if (speechProvider(process.env) === "deepgram") {
     console.log("Spraakproviders: Deepgram (STT nova-3 nl, TTS aura-2-beatrix-nl)");
     return {
       stt: new deepgram.STT({ model: "nova-3", language: "nl" }),
@@ -155,6 +156,12 @@ export default defineAgent<AgentUserData>({
     await ctx.connect();
 
     const { stt, tts } = speechProviders();
+    // De stem van de wakkere Dynimo (fallback: de default van de provider) op de gedeelde TTS zetten.
+    const applyVoice = (stored: string | null): void => {
+      const chosen = resolveVoice(speechProvider(process.env), stored);
+      if (tts instanceof deepgram.TTS) tts.updateOptions({ model: chosen });
+      else tts.updateOptions({ voice: chosen as openai.TTSVoices });
+    };
     const session = new voice.AgentSession({
       vad: ctx.proc.userData.vad,
       stt,
@@ -263,7 +270,9 @@ export default defineAgent<AgentUserData>({
       databaseUrl,
       brain,
       onMood: () => void publishState(),
-      onChange: () => {
+      onVoice: () => void readState(brain).then((state) => applyVoice(state.voice)).catch(() => {}),
+      onChange: (state) => {
+        applyVoice(state.voice);
         // Een wissel beëindigt het reflecterende gezicht; een lopende Reflectie mag doorlopen maar publiceert
         // dan niets meer (sleutel-guard in reflectionDisplay).
         reflectionDisplay.onSwitch();
@@ -280,6 +289,7 @@ export default defineAgent<AgentUserData>({
       },
     });
     ctx.addShutdownCallback(() => watcher.close());
+    applyVoice(watcher.current().voice);
     void publishState();
     silence.arm();
     void refreshInitiativeAxes().catch(() => {});

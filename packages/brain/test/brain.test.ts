@@ -2150,6 +2150,87 @@ describe("createBrain", () => {
       expect((await db.select().from(dynimos))[0]?.moodEmotion).toBe("boos");
     });
 
+    describe("Verjaardag", () => {
+      const born = new Date("2025-06-15T08:00:00.000Z");
+      const birthday = new Date("2026-06-15T10:00:00.000Z");
+
+      it("geeft bij het eerste contact op de verjaardag een sterke blije Stemming, ook als Type1 niets voelt", async () => {
+        await insertDynimo({ bornAt: born });
+        const { model } = type1Sequence([{ emotion: "neutraal", intensity: 0 }]);
+
+        await collectText(brainWith({ type1: model, light: textModel(["Hoi."]), now: () => birthday }).hear("Hoi"));
+
+        const row = (await db.select().from(dynimos))[0];
+        expect(row?.moodEmotion).toBe("blij");
+        expect(row?.moodIntensity).toBeGreaterThanOrEqual(0.8);
+      });
+
+      it("geeft de boost maar één keer per kalenderdag, ook niet bij een tweede uiting of na een herstart", async () => {
+        await insertDynimo({ bornAt: born });
+        const { model } = type1Sequence([{ emotion: "neutraal", intensity: 0 }]);
+        await collectText(brainWith({ type1: model, light: textModel(["Hoi."]), now: () => birthday }).hear("Hoi"));
+
+        // Een uur later is de boost uitgedoofd; een nieuwe brain-instantie (herstart) hoort niet opnieuw te boosten.
+        const later = new Date(birthday.getTime() + 60 * MIN);
+        const restarted = brainWith({ type1: type1Sequence([{ emotion: "neutraal", intensity: 0 }]).model, light: textModel(["Hoi."]), now: () => later });
+        const events: BrainEvent[] = [];
+        for await (const event of restarted.hear("Nog eens")) events.push(event);
+
+        expect(events.find((event) => event.type === "mood")).toMatchObject({ emotion: "kalm" });
+        expect((await db.select().from(dynimos))[0]?.moodAt).toEqual(birthday);
+      });
+
+      it("laat een sterkere bestaande Stemming staan, maar telt de boost van vandaag wel als gegeven", async () => {
+        await insertDynimo({ bornAt: born, moodEmotion: "boos", moodIntensity: 1, moodAt: birthday });
+        const { model } = type1Sequence([{ emotion: "neutraal", intensity: 0 }]);
+
+        await collectText(brainWith({ type1: model, light: textModel(["Hoi."]), now: () => birthday }).hear("Hoi"));
+
+        const row = (await db.select().from(dynimos))[0];
+        expect(row?.moodEmotion).toBe("boos");
+        expect(row?.lastBirthdayBoostOn).toBe("2026-06-15");
+      });
+
+      it("wijzigt de Basisemotie nooit", async () => {
+        await insertDynimo({ bornAt: born });
+        const { model } = type1Sequence([{ emotion: "neutraal", intensity: 0 }]);
+
+        await collectText(brainWith({ type1: model, light: textModel(["Hoi."]), now: () => birthday }).hear("Hoi"));
+
+        expect((await db.select().from(dynimos))[0]?.baseEmotion).toBe("kalm");
+      });
+
+      const birthdayFlag = (light: MockLanguageModelV4) =>
+        contentsByRole(light.doStreamCalls[0]?.prompt, "system").find((text) => text.includes("verjaardag"));
+
+      it("geeft Type2 alleen op de verjaardag een vlag met de leeftijd in jaren, buiten het gecachete deel", async () => {
+        await insertDynimo({ bornAt: born });
+        const onBirthday = textModel(["Hoi."]);
+        const otherDay = textModel(["Hoi."]);
+        const t1 = () => type1Sequence([{ emotion: "neutraal", intensity: 0 }]).model;
+
+        await collectText(brainWith({ type1: t1(), light: onBirthday, now: () => birthday }).hear("Hoi"));
+        await collectText(
+          brainWith({ type1: t1(), light: otherDay, now: () => new Date("2026-06-16T10:00:00.000Z") }).hear("Hoi"),
+        );
+
+        expect(birthdayFlag(onBirthday)).toContain("1 jaar");
+        expect(contentsByRole(onBirthday.doStreamCalls[0]?.prompt, "system")[0]).not.toContain("verjaardag");
+        expect(birthdayFlag(otherDay)).toBeUndefined();
+      });
+
+      it("boost opnieuw op de volgende verjaardag", async () => {
+        await insertDynimo({ bornAt: born });
+        const t1 = () => type1Sequence([{ emotion: "neutraal", intensity: 0 }]).model;
+        await collectText(brainWith({ type1: t1(), light: textModel(["Hoi."]), now: () => birthday }).hear("Hoi"));
+        const nextYear = new Date("2027-06-15T10:00:00.000Z");
+
+        await collectText(brainWith({ type1: t1(), light: textModel(["Hoi."]), now: () => nextYear }).hear("Hoi"));
+
+        expect((await db.select().from(dynimos))[0]?.moodAt).toEqual(nextYear);
+      });
+    });
+
     describe("backfill van de Basisemotie", () => {
       const legacy = () => insertDynimo({ baseEmotion: null });
       const heavyWith = (...results: object[]) =>

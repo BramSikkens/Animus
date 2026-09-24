@@ -17,7 +17,7 @@ import type { Db } from "@animus/db";
 import { drives, dynimos, epitaphs, memories } from "@animus/db/schema";
 import { formatAge } from "./age.js";
 import { DRIVE_DESCRIPTIONS, DRIVE_KINDS, drivesPromptBlock, isActiveDrive, type DriveRow } from "./drives.js";
-import { applyEmotion, baseEmotionOf, moodOfRow, storedMoodOf, type Mood } from "./mood.js";
+import { applyEmotion, baseEmotionOf, currentMood, storedMoodOf, type Mood, type StoredMood } from "./mood.js";
 import { AXIS_DESCRIPTIONS, axisGuidelines, mbtiType, rowAxes } from "./personality.js";
 import { EMOTIONS, isEmotion, type Emotion } from "./emotion.js";
 import { SEEDS } from "./seeds.js";
@@ -196,6 +196,11 @@ const FAREWELL_PROMPT = `Je wordt zo meteen voor altijd verwijderd: je naam, je 
 Schrijf je Afscheidsreflectie: je laatste woorden, in karakter, in een paar zinnen.`;
 
 const RECALL_LIMIT = 5;
+const BIRTHDAY_INTENSITY = 0.9;
+
+// Kalenderdag in dezelfde tijdzone als tools.ts (ADR-0002: kalendertijd). Vanaf één jaar oud; 29 feb: ponytail, geen bijzondere behandeling.
+const dayOf = (date: Date) => date.toLocaleDateString("sv-SE", { timeZone: "Europe/Brussels" });
+const isBirthday = (bornAt: Date, at: Date) => dayOf(at) > dayOf(bornAt) && dayOf(at).slice(5) === dayOf(bornAt).slice(5);
 
 // Na het cachepunt: de herinneringen verschillen per beurt.
 function recallPrompt(recalled: string[]): SystemModelMessage {
@@ -690,6 +695,19 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     }
   }
 
+  // Verjaardag (#39): een sterke blije Emotie via dezelfde Stemming-verschuiving; de Basisemotie blijft ongemoeid.
+  const birthdayBoostDue = (row: Dynimo) => isBirthday(row.bornAt, now()) && row.lastBirthdayBoostOn !== dayOf(now());
+  function boostOnBirthday(row: Dynimo, stored: StoredMood, baseEmotion: Emotion | null): StoredMood {
+    return birthdayBoostDue(row) ? applyEmotion(stored, baseEmotion, "blij", BIRTHDAY_INTENSITY, now()).next : stored;
+  }
+
+  // De vlag staat de hele verjaardag aan; Type2 beslist zelf of/hoe hij het vermeldt.
+  function birthdayMessages(row: Dynimo): SystemModelMessage[] {
+    if (!isBirthday(row.bornAt, now())) return [];
+    const years = Number(dayOf(now()).slice(0, 4)) - Number(dayOf(row.bornAt).slice(0, 4));
+    return [{ role: "system", content: `Vandaag is je verjaardag: je bent nu ${years} jaar oud. Jij beslist of en hoe je dat vermeldt.` }];
+  }
+
   async function* hear(text: string): AsyncIterable<BrainEvent> {
     // Elke beurt opnieuw: een ander proces (dashboard) kan intussen wisselen van Wakker Dynimo.
     const [awake] = await deps.db.select().from(dynimos).where(isNotNull(dynimos.awakeSince));
@@ -701,7 +719,8 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     const driveRows = await loadDrives(awake.id);
     const baseEmotion = baseEmotionOf(awake);
     const stored = storedMoodOf(awake);
-    const before = moodOfRow(awake, now());
+    const boosted = boostOnBirthday(awake, stored, baseEmotion);
+    const before = currentMood(boosted, baseEmotion, now());
     const context = [
       personalityText(awake),
       drivesPromptBlock(driveRows),
@@ -716,13 +735,17 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
       return { emotion: "neutraal", intensity: 0, indruk: 0, intent: "simpel" };
     });
 
-    const { mood, next } = applyEmotion(stored, baseEmotion, emotion, intensity, now());
+    const { mood, next } = applyEmotion(boosted, baseEmotion, emotion, intensity, now());
     // ponytail: last-writer-wins zonder guard; volstaat bij één wakkere Dynimo. Guard op mood_at zodra er ooit
     // meerdere schrijvers tegelijk zijn.
-    if (next !== stored && next) {
+    const birthdayBoost = birthdayBoostDue(awake);
+    if ((next !== stored && next) || birthdayBoost) {
       const updated = await deps.db
         .update(dynimos)
-        .set({ moodEmotion: next.emotion, moodIntensity: next.intensity, moodAt: next.at })
+        .set({
+          ...(next && { moodEmotion: next.emotion, moodIntensity: next.intensity, moodAt: next.at }),
+          ...(birthdayBoost && { lastBirthdayBoostOn: dayOf(now()) }),
+        })
         .where(eq(dynimos.id, being.id))
         .returning({ id: dynimos.id });
       // Een andere instantie kan de Dynimo intussen gedood hebben: dan is niemand wakker.
@@ -748,7 +771,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     const result = streamText({
       abortSignal: abort.signal,
       model: intent === "complex" ? deps.type2.heavy : deps.type2.light,
-      instructions: [stable, ageMessage(being), moodMessage(mood), recallPrompt(recalled)],
+      instructions: [stable, ageMessage(being), ...birthdayMessages(awake), moodMessage(mood), recallPrompt(recalled)],
       messages: [...workingMemory, userMessage],
       tools,
       // Genoeg stappen om een tool te gebruiken en daarna het resultaat te verwoorden.

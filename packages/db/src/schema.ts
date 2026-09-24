@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { check, index, integer, pgTable, real, serial, text, timestamp, uniqueIndex, vector } from "drizzle-orm/pg-core";
+import { check, date, index, integer, pgTable, real, serial, text, timestamp, uniqueIndex, vector } from "drizzle-orm/pg-core";
 
 // Meerdere rijen mogelijk: elke rij is een Dynimo.
 export const dynimos = pgTable(
@@ -24,6 +24,8 @@ export const dynimos = pgTable(
     lastReflectedAt: timestamp("last_reflected_at", { withTimezone: true }),
     wakeMoodEmotion: text("wake_mood_emotion"),
     wakeMoodIntensity: real("wake_mood_intensity"),
+    // Verjaardag (#39): de kalenderdag waarop de verjaardagsboost al gegeven is (idempotent over herstarts).
+    lastBirthdayBoostOn: date("last_birthday_boost_on", { mode: "string" }),
     // NULL = Slapend; gezet = Wakker (en de marker van deze wake-generatie).
     awakeSince: timestamp("awake_since", { withTimezone: true }),
     // Persoonlijkheid: 0..1 = positie richting de tweede letter (I↔E, S↔N, T↔F, J↔P). NULL = nog te backfillen.

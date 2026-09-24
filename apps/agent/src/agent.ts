@@ -108,13 +108,12 @@ class AnimusAgent extends voice.Agent {
     this.#onUtterance();
     // tool-*-events uit brain.hear() worden hier genegeerd (ticket #7).
     return textStream(this.#brain.hear(text, { initiatief: initiative !== undefined }), {
-      onMood: (emotion, intensity) => {
+      onMood: (message) => {
         const participant = this.#room.localParticipant;
         if (!participant) {
           console.error("Emotie niet gepubliceerd: agent is (nog) niet verbonden met de room.");
           return;
         }
-        const message: EmotionMessage = { emotion, intensity };
         // Fire-and-forget: een mislukte publicatie mag de beurt niet breken.
         participant
           .publishData(new TextEncoder().encode(JSON.stringify(message)), { reliable: true, topic: EMOTION_TOPIC })

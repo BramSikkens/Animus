@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import type { BrainEvent } from "@animus/brain";
 import { textStream } from "./text-stream.js";
 
+const VALUES = { blij: 0, boos: 0, verrast: 0, kalm: 0, verveeld: 0, nieuwsgierig: 0, bang: 0, neutraal: 0 };
+
 async function* gen(events: BrainEvent[]): AsyncGenerator<BrainEvent> {
   for (const event of events) yield event;
 }
@@ -25,7 +27,7 @@ describe("textStream", () => {
 
   it("slaat mood- en tool-*-events over", async () => {
     const events: BrainEvent[] = [
-      { type: "mood", emotion: "blij", intensity: 0.8 },
+      { type: "mood", emotion: "blij", intensity: 0.8, values: VALUES },
       { type: "text", delta: "Hoi" },
       { type: "tool-call", toolName: "huidige_tijd", input: {} },
       { type: "tool-result", toolName: "huidige_tijd", output: "12:00" },
@@ -44,19 +46,19 @@ describe("textStream", () => {
     expect(chunks).toEqual(["Voor de fout"]);
   });
 
-  it("roept onMood aan met de juiste emotie en intensiteit", async () => {
+  it("roept onMood aan met de emotie, intensiteit en de volledige vector", async () => {
     const events: BrainEvent[] = [
-      { type: "mood", emotion: "blij", intensity: 0.8 },
+      { type: "mood", emotion: "blij", intensity: 0.8, values: VALUES },
       { type: "text", delta: "Hoi" },
     ];
-    const calls: Array<[string, number]> = [];
-    await collect(textStream(gen(events), { onMood: (emotion, intensity) => calls.push([emotion, intensity]) }));
-    expect(calls).toEqual([["blij", 0.8]]);
+    const calls: unknown[] = [];
+    await collect(textStream(gen(events), { onMood: (mood) => calls.push(mood) }));
+    expect(calls).toEqual([{ emotion: "blij", intensity: 0.8, values: VALUES }]);
   });
 
   it("roept onMood aan vóór de eerste tekst gelezen kan worden", async () => {
     const events: BrainEvent[] = [
-      { type: "mood", emotion: "boos", intensity: 0.5 },
+      { type: "mood", emotion: "boos", intensity: 0.5, values: VALUES },
       { type: "text", delta: "Hoi" },
     ];
     const order: string[] = [];
@@ -70,7 +72,7 @@ describe("textStream", () => {
 
   it("werkt zonder onMood zoals voorheen", async () => {
     const events: BrainEvent[] = [
-      { type: "mood", emotion: "kalm", intensity: 0.3 },
+      { type: "mood", emotion: "kalm", intensity: 0.3, values: VALUES },
       { type: "text", delta: "Hoi" },
     ];
     const chunks = await collect(textStream(gen(events)));
@@ -79,7 +81,7 @@ describe("textStream", () => {
 
   it("roept onSound aan met de soort en houdt het event uit de tekst", async () => {
     const events: BrainEvent[] = [
-      { type: "mood", emotion: "boos", intensity: 0.8 },
+      { type: "mood", emotion: "boos", intensity: 0.8, values: VALUES },
       { type: "sound", kind: "brommen" },
       { type: "text", delta: "Hoi" },
     ];

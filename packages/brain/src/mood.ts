@@ -1,48 +1,74 @@
 // Browser-veilig: geen node-imports. Brein, agent en dashboard delen dit.
-import { isEmotion, type Emotion } from "./emotion.js";
+import { EMOTIONS, isEmotion, type Emotion } from "./emotion.js";
 
-/** Halveringstijd van de intensiteit van de Stemming. */
-export const MOOD_HALF_LIFE_MS = 10 * 60_000;
-/** Onder deze uitgedoofde intensiteit valt de Stemming terug op de Basisemotie. */
-export const MOOD_FLOOR = 0.1;
-/** Intensiteit waarmee de Basisemotie zelf getoond wordt. */
-export const BASE_INTENSITY = 0.3;
+/** Halveringstijd waarmee elke emotiewaarde naar haar ruststand uitdooft. */
+export const MOOD_HALF_LIFE_MS = 3 * 60_000;
+/** Ruststand (0–100) van de Basisemotie; alle andere emoties rusten op 0. */
+export const BASE_LEVEL = 30;
 
-export type StoredMood = { emotion: Emotion; intensity: number; at: Date } | null;
-export type Mood = { emotion: Emotion; intensity: number };
+/** Elke emotie uit EMOTIONS heeft altijd een waarde 0–100. */
+export type MoodValues = Record<Emotion, number>;
+export type StoredMood = { values: MoodValues; at: Date } | null;
+/** De Stemming: de volledige vector, plus de zichtbare (hoogste) emotie en haar waarde als 0–1. */
+export type Mood = { emotion: Emotion; intensity: number; values: MoodValues };
 
-/** De effectieve Stemming: de opgeslagen Emotie, uitgedoofd over de tijd, of de Basisemotie. */
-export function currentMood(stored: StoredMood, baseEmotion: Emotion | null, now: Date): Mood {
-  if (stored) {
-    // Max(0, …): een klok die terugloopt (at in de toekomst) mag de intensiteit niet boven de opgeslagen waarde tillen.
-    const elapsed = Math.max(0, now.getTime() - stored.at.getTime());
-    const intensity = stored.intensity * 0.5 ** (elapsed / MOOD_HALF_LIFE_MS);
-    if (intensity >= MOOD_FLOOR) return { emotion: stored.emotion, intensity };
-  }
-  return { emotion: baseEmotion ?? "neutraal", intensity: BASE_INTENSITY };
+const clamp = (value: number) => Math.min(100, Math.max(0, value));
+
+function restValues(base: Emotion): MoodValues {
+  return Object.fromEntries(EMOTIONS.map((emotion) => [emotion, emotion === base ? BASE_LEVEL : 0])) as MoodValues;
 }
 
+/** De hoogste emotie; bij een gelijkstand de Basisemotie, anders de eerste in EMOTIONS. */
+function dominantOf(values: MoodValues, base: Emotion): Emotion {
+  let best: Emotion = EMOTIONS[0];
+  for (const emotion of EMOTIONS) {
+    if (values[emotion] > values[best] || (values[emotion] === values[best] && emotion === base && best !== base)) best = emotion;
+  }
+  return best;
+}
+
+function moodOf(values: MoodValues, base: Emotion): Mood {
+  const emotion = dominantOf(values, base);
+  return { emotion, intensity: values[emotion] / 100, values };
+}
+
+/** De effectieve Stemming: de opgeslagen waarden, per emotie exponentieel uitgedoofd naar de ruststand. */
+export function currentMood(stored: StoredMood, baseEmotion: Emotion | null, now: Date): Mood {
+  const base = baseEmotion ?? "neutraal";
+  const rest = restValues(base);
+  if (!stored) return moodOf(rest, base);
+  // Max(0, …): een klok die terugloopt (at in de toekomst) mag de waarden niet boven de opgeslagen waarde tillen.
+  const decay = 0.5 ** (Math.max(0, now.getTime() - stored.at.getTime()) / MOOD_HALF_LIFE_MS);
+  const values = Object.fromEntries(
+    EMOTIONS.map((emotion) => [emotion, rest[emotion] + (stored.values[emotion] - rest[emotion]) * decay]),
+  ) as MoodValues;
+  return moodOf(values, base);
+}
+
+export type MoodDeltas = Partial<Record<Emotion, number>>;
+
 /**
- * Verwerkt een nieuwe Emotie: die vervangt de Stemming enkel als haar intensiteit STRIKT hoger is dan de
- * uitgedoofde huidige (incl. het Basisniveau). Anders blijft `next` ongewijzigd (tijdstip niet verversen).
+ * Verwerkt de Type1-delta's van één uiting: opgeteld bij de uitgedoofde waarden en geclampt op 0–100. Zonder
+ * enige delta blijft `next` ongewijzigd (tijdstip niet verversen).
  */
-export function applyEmotion(
+export function applyDeltas(
   stored: StoredMood,
   baseEmotion: Emotion | null,
-  emotion: Emotion,
-  intensity: number,
+  deltas: MoodDeltas,
   now: Date,
 ): { mood: Mood; next: StoredMood } {
   const current = currentMood(stored, baseEmotion, now);
-  if (intensity > current.intensity) return { mood: { emotion, intensity }, next: { emotion, intensity, at: now } };
-  return { mood: current, next: stored };
+  if (EMOTIONS.every((emotion) => !deltas[emotion])) return { mood: current, next: stored };
+  const values = Object.fromEntries(
+    EMOTIONS.map((emotion) => [emotion, clamp(current.values[emotion] + (deltas[emotion] ?? 0))]),
+  ) as MoodValues;
+  return { mood: moodOf(values, baseEmotion ?? "neutraal"), next: { values, at: now } };
 }
 
-/** De mood-kolommen van een Dynimo-rij (text/real/timestamptz uit de database). */
+/** De mood-kolommen van een Dynimo-rij (text/jsonb/timestamptz uit de database). */
 export type MoodColumns = {
   baseEmotion: string | null;
-  moodEmotion: string | null;
-  moodIntensity: number | null;
+  moodValues: unknown;
   moodAt: Date | null;
 };
 
@@ -50,13 +76,23 @@ export function baseEmotionOf(row: Pick<MoodColumns, "baseEmotion">): Emotion | 
   return isEmotion(row.baseEmotion) ? row.baseEmotion : null;
 }
 
-export function storedMoodOf(row: MoodColumns): StoredMood {
-  return isEmotion(row.moodEmotion) && row.moodIntensity !== null && row.moodAt
-    ? { emotion: row.moodEmotion, intensity: row.moodIntensity, at: row.moodAt }
-    : null;
+/** Ontbrekende of ongeldige emoties tellen als 0; waarden worden geclampt. */
+export function storedMoodOf(row: Pick<MoodColumns, "moodValues" | "moodAt">): StoredMood {
+  const raw = row.moodValues;
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw) || !row.moodAt) return null;
+  const record = raw as Record<string, unknown>;
+  const values = Object.fromEntries(
+    EMOTIONS.map((emotion) => [emotion, typeof record[emotion] === "number" ? clamp(record[emotion]) : 0]),
+  ) as MoodValues;
+  return { values, at: row.moodAt };
 }
 
 /** De effectieve Stemming van een rij op tijdstip `now`. */
 export function moodOfRow(row: MoodColumns, now: Date): Mood {
   return currentMood(storedMoodOf(row), baseEmotionOf(row), now);
+}
+
+/** Eén emotie op `intensity` (0–1), de rest op 0: voor Ontwaakstemming en handmatige override. */
+export function singleEmotionValues(emotion: Emotion, intensity: number): MoodValues {
+  return { ...restValues(emotion), [emotion]: clamp(intensity * 100) } as MoodValues;
 }

@@ -17,7 +17,8 @@ import { clipUrl } from "./sound.js";
 import { Face } from "./face/Face.js";
 
 type TokenSession = { serverUrl: string; token: string };
-type EmotionState = EmotionMessage;
+// De gezichtje-app tekent voorlopig enkel de dominante emotie; de volledige vector (balken) volgt in #55.
+type EmotionState = Pick<EmotionMessage, "emotion" | "intensity">;
 
 const NEUTRAL_STATE: EmotionState = { emotion: "neutraal", intensity: 0 };
 const DEFAULT_DISPLAY: DisplayState = "wakker";

@@ -93,15 +93,15 @@ _Avoid_: niet te verwarren met een Toekomstdroom (een Drijfveer, geen nachtelijk
 ### Expressie
 
 **Emotie**:
-Een vaste, eindige categorie uit de set {blij, boos, verrast, kalm, verveeld, nieuwsgierig, bang, neutraal}, met een intensiteit (0–1), die Type1 per uiting aflevert. Vanaf fase 2 is dat hoe de Dynimo zich bij de uiting voelt (met zijn Drijfveren en persoonlijkheid als context), niet de emotie van de Gesprekspartner. Een Emotie verschuift enkel de Stemming; ze wordt zelf niet getoond.
+Een vaste, eindige categorie uit de set {blij, boos, verrast, kalm, verveeld, nieuwsgierig, bang, neutraal}. Elke Emotie heeft in de Stemming altijd een waarde van 0 tot 100. Type1 levert per uiting per Emotie een delta (positief of negatief) die de waarde verschuift; vanaf fase 2 is dat hoe de Dynimo zich bij de uiting voelt (met zijn Drijfveren en persoonlijkheid als context), niet de emotie van de Gesprekspartner. Een delta verschuift enkel de Stemming; ze wordt zelf niet getoond.
 _Avoid_: sentiment
 
 **Stemming**:
-De emotionele toestand van een Dynimo die over beurten heen blijft hangen: elke nieuwe Emotie duwt ertegen, en tussendoor dooft ze geleidelijk uit naar de Basisemotie. Het gezichtje en de toon van Type2 volgen de Stemming.
+De emotionele toestand van een Dynimo die over beurten heen blijft hangen: een vector met voor elke Emotie een waarde 0–100, plus een tijdstip. De Type1-delta's van een uiting worden opgeteld en geclampt op 0–100; tussendoor dooft elke waarde exponentieel uit naar haar ruststand (halveringstijd 3 minuten). De zichtbare, dominante Emotie is de hoogste waarde (bij gelijkstand de Basisemotie, anders de eerste in de set); het gezichtje en de toon van Type2 volgen die. Zie [ADR-0012](docs/adr/0012-stemming-als-vector.md).
 _Avoid_: humeur, emotie (voor de blijvende toestand)
 
 **Basisemotie**:
-De emotie waar de Stemming van een Dynimo naartoe uitdooft, bij genesis door Type2 gekozen als deel van het temperament en daarna vrijwel onveranderlijk.
+De Emotie die in de ruststand van de Stemming op 30 staat, terwijl alle andere Emoties op 0 rusten; de Stemming dooft er dus naartoe uit. Bij genesis door Type2 gekozen als deel van het temperament en daarna vrijwel onveranderlijk.
 _Avoid_: default-emotie, rustemotie
 
 **Emotiekeyframe**:

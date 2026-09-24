@@ -1,12 +1,13 @@
 import { ReadableStream } from "node:stream/web";
-import type { BrainEvent, Emotion } from "@animus/brain";
+import type { BrainEvent } from "@animus/brain";
+import type { EmotionMessage } from "@animus/brain/emotion";
 import type { SoundKind } from "@animus/brain/sound";
 
 export type TextStreamOptions = {
   /** Aangeroepen zodra een `sound`-event (zichtbare Stemmingsverandering) voorbijkomt (ticket #40). */
   onSound?: (kind: SoundKind) => void;
   /** Aangeroepen zodra een `mood`-event (de Stemming) voorbijkomt, vóór er tekst in de stream komt. */
-  onMood?: (emotion: Emotion, intensity: number) => void;
+  onMood?: (mood: EmotionMessage) => void;
 };
 
 /**
@@ -41,7 +42,7 @@ export function textStream(events: AsyncIterable<BrainEvent>, options?: TextStre
           return;
         }
         if (result.value.type === "mood") {
-          options?.onMood?.(result.value.emotion, result.value.intensity);
+          options?.onMood?.({ emotion: result.value.emotion, intensity: result.value.intensity, values: result.value.values });
           continue;
         }
         if (result.value.type === "sound") {

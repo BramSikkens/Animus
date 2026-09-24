@@ -1,109 +1,116 @@
 import { describe, expect, it } from "vitest";
-import {
-  applyEmotion,
-  BASE_INTENSITY,
-  currentMood,
-  MOOD_HALF_LIFE_MS,
-  moodOfRow,
-  storedMoodOf,
-  type StoredMood,
-} from "../src/mood.js";
+import { EMOTIONS } from "../src/emotion.js";
+import { applyDeltas, BASE_LEVEL, currentMood, MOOD_HALF_LIFE_MS, moodOfRow, singleEmotionValues, storedMoodOf, type MoodValues, type StoredMood } from "../src/mood.js";
 
 const T0 = new Date("2026-01-01T12:00:00.000Z");
 const after = (ms: number) => new Date(T0.getTime() + ms);
-const stored = (emotion: "boos" | "blij", intensity: number): StoredMood => ({ emotion, intensity, at: T0 });
+const zeros = Object.fromEntries(EMOTIONS.map((e) => [e, 0])) as MoodValues;
+const values = (over: Partial<MoodValues>): MoodValues => ({ ...zeros, ...over });
+const stored = (over: Partial<MoodValues>): StoredMood => ({ values: values(over), at: T0 });
 
 describe("currentMood", () => {
-  it("houdt de intensiteit vers op het moment zelf", () => {
-    expect(currentMood(stored("boos", 0.8), "kalm", T0)).toEqual({ emotion: "boos", intensity: 0.8 });
+  it("geeft zonder opgeslagen Stemming de ruststand: Basisemotie op 30, de rest op 0", () => {
+    const mood = currentMood(null, "blij", T0);
+    expect(mood.values).toEqual(values({ blij: BASE_LEVEL }));
+    expect(mood.emotion).toBe("blij");
+    expect(mood.intensity).toBeCloseTo(0.3);
   });
 
-  it("halveert de intensiteit na 10 minuten en kwart na 20", () => {
-    expect(MOOD_HALF_LIFE_MS).toBe(10 * 60_000);
-    expect(currentMood(stored("boos", 0.8), "kalm", after(MOOD_HALF_LIFE_MS)).intensity).toBeCloseTo(0.4);
-    expect(currentMood(stored("boos", 0.8), "kalm", after(2 * MOOD_HALF_LIFE_MS)).intensity).toBeCloseTo(0.2);
+  it("gebruikt neutraal als Basisemotie ontbreekt", () => {
+    expect(currentMood(null, null, T0)).toMatchObject({ emotion: "neutraal", values: values({ neutraal: BASE_LEVEL }) });
   });
 
-  it("valt terug op de Basisemotie zodra de uitgedoofde intensiteit onder de drempel komt", () => {
-    // 0.4 na 10 min, 0.2 na 20, 0.1 (= drempel, nog Stemming) na 30 min, daarna Basisemotie.
-    expect(currentMood(stored("boos", 0.8), "kalm", after(3 * MOOD_HALF_LIFE_MS)).emotion).toBe("boos");
-    expect(currentMood(stored("boos", 0.8), "kalm", after(3 * MOOD_HALF_LIFE_MS + 60_000))).toEqual({
-      emotion: "kalm",
-      intensity: BASE_INTENSITY,
-    });
+  it("houdt de waarden vers op het moment zelf en kiest de hoogste als zichtbare emotie", () => {
+    const mood = currentMood(stored({ boos: 80, blij: 20 }), "kalm", T0);
+    expect(mood.emotion).toBe("boos");
+    expect(mood.intensity).toBeCloseTo(0.8);
+    expect(mood.values.blij).toBeCloseTo(20);
   });
 
-  it("laat de intensiteit nooit boven de opgeslagen waarde uitkomen als de klok terugloopt (at in de toekomst)", () => {
-    expect(currentMood(stored("boos", 0.8), "kalm", after(-5 * MOOD_HALF_LIFE_MS)).intensity).toBeLessThanOrEqual(0.8);
+  it("dooft elke emotie exponentieel uit naar de ruststand met een halveringstijd van 3 minuten", () => {
+    expect(MOOD_HALF_LIFE_MS).toBe(3 * 60_000);
+    const mood = currentMood(stored({ boos: 80, kalm: 0 }), "kalm", after(MOOD_HALF_LIFE_MS));
+    expect(mood.values.boos).toBeCloseTo(40);
+    expect(mood.values.kalm).toBeCloseTo(15); // 0 -> 30: halverwege
+    expect(currentMood(stored({ boos: 80 }), "kalm", after(2 * MOOD_HALF_LIFE_MS)).values.boos).toBeCloseTo(20);
   });
 
-  it("geeft zonder opgeslagen Stemming de Basisemotie, en neutraal als de Basisemotie ontbreekt", () => {
-    expect(currentMood(null, "blij", T0)).toEqual({ emotion: "blij", intensity: BASE_INTENSITY });
-    expect(currentMood(null, null, T0)).toEqual({ emotion: "neutraal", intensity: BASE_INTENSITY });
+  it("dooft ook een emotie boven de ruststand van de Basisemotie omlaag uit", () => {
+    expect(currentMood(stored({ kalm: 100 }), "kalm", after(MOOD_HALF_LIFE_MS)).values.kalm).toBeCloseTo(65);
+  });
+
+  it("wint bij een gelijkstand de Basisemotie, anders de eerste in EMOTIONS", () => {
+    expect(currentMood(stored({ blij: 50, kalm: 50 }), "kalm", T0).emotion).toBe("kalm");
+    expect(currentMood(stored({ bang: 50, boos: 50 }), "kalm", T0).emotion).toBe("boos");
+  });
+
+  it("laat een klok die terugloopt de waarden niet boven de opgeslagen waarde tillen", () => {
+    expect(currentMood(stored({ boos: 80 }), "kalm", after(-5 * MOOD_HALF_LIFE_MS)).values.boos).toBeLessThanOrEqual(80);
   });
 });
 
-describe("applyEmotion", () => {
-  it("laat een sterkere Emotie de Stemming vervangen en zet het tijdstip", () => {
-    const result = applyEmotion(stored("boos", 0.5), "kalm", "blij", 0.9, after(60_000));
-    expect(result.mood).toEqual({ emotion: "blij", intensity: 0.9 });
-    expect(result.next).toEqual({ emotion: "blij", intensity: 0.9, at: after(60_000) });
+describe("applyDeltas", () => {
+  it("telt de delta's per emotie op bij de uitgedoofde waarden en slaat ze met het tijdstip op", () => {
+    const { mood, next } = applyDeltas(stored({ boos: 80 }), "kalm", { blij: 20, boos: -15 }, after(MOOD_HALF_LIFE_MS));
+    expect(mood.values.blij).toBeCloseTo(20);
+    expect(mood.values.boos).toBeCloseTo(25); // 80 -> 40 uitgedoofd, dan -15
+    expect(next?.at).toEqual(after(MOOD_HALF_LIFE_MS));
+    expect(next?.values).toEqual(mood.values);
   });
 
-  it("laat een zwakkere Emotie de sterkere Stemming niet vervangen, en ververst het tijdstip niet", () => {
-    const start = stored("boos", 0.8);
-    const result = applyEmotion(start, "kalm", "blij", 0.3, after(60_000));
-    expect(result.next).toBe(start);
-    expect(result.mood.emotion).toBe("boos");
+  it("clampt elke emotie op 0–100", () => {
+    const { mood } = applyDeltas(stored({ boos: 90, blij: 5 }), "kalm", { boos: 50, blij: -40 }, T0);
+    expect(mood.values.boos).toBe(100);
+    expect(mood.values.blij).toBe(0);
   });
 
-  it("vervangt bij een gelijke intensiteit niet", () => {
-    const start = stored("boos", 0.6);
-    const result = applyEmotion(start, "kalm", "blij", 0.6, T0);
-    expect(result.next).toBe(start);
-    expect(result.mood).toEqual({ emotion: "boos", intensity: 0.6 });
+  it("laat vanuit de ruststand een delta op de Basisemotie of een andere emotie meetellen", () => {
+    const { mood } = applyDeltas(null, "kalm", { blij: 40 }, T0);
+    expect(mood).toMatchObject({ emotion: "blij" });
+    expect(mood.values.kalm).toBeCloseTo(30);
   });
 
-  it("vergelijkt met de uitgedoofde Stemming: een zwakke Emotie wint van een sterke van lang geleden", () => {
-    const result = applyEmotion(stored("boos", 0.8), "kalm", "blij", 0.35, after(MOOD_HALF_LIFE_MS)); // boos is nu 0.4... 0.35 < 0.4
-    expect(result.next?.emotion).toBe("boos");
-    const later = applyEmotion(stored("boos", 0.8), "kalm", "blij", 0.35, after(2 * MOOD_HALF_LIFE_MS)); // boos is nu 0.2
-    expect(later.next).toEqual({ emotion: "blij", intensity: 0.35, at: after(2 * MOOD_HALF_LIFE_MS) });
+  it("laat een lege of nul-delta de opgeslagen Stemming (en haar tijdstip) ongemoeid", () => {
+    const start = stored({ boos: 80 });
+    expect(applyDeltas(start, "kalm", {}, after(1000)).next).toBe(start);
+    expect(applyDeltas(start, "kalm", { blij: 0 }, after(1000)).next).toBe(start);
+    expect(applyDeltas(null, "kalm", {}, T0).next).toBeNull();
   });
 
-  it("vergelijkt zonder Stemming met het Basisemotie-niveau: alleen strikt sterkere Emotie wint", () => {
-    expect(applyEmotion(null, "kalm", "blij", BASE_INTENSITY, T0)).toEqual({
-      mood: { emotion: "kalm", intensity: BASE_INTENSITY },
-      next: null,
-    });
-    expect(applyEmotion(null, "kalm", "blij", BASE_INTENSITY + 0.01, T0).next).toEqual({
-      emotion: "blij",
-      intensity: BASE_INTENSITY + 0.01,
-      at: T0,
-    });
-  });
-
-  it("laat een Emotie met intensiteit 0 (mislukte Type1) de Stemming ongemoeid", () => {
-    const start = stored("boos", 0.8);
-    expect(applyEmotion(start, "kalm", "neutraal", 0, after(1000)).next).toBe(start);
+  it("laat boos van 96 bij herhaalde geruststelling zakken tot een andere emotie wint", () => {
+    let state: StoredMood = stored({ boos: 96 });
+    let mood = currentMood(state, "kalm", T0);
+    for (let i = 1; i <= 4; i++) {
+      ({ mood, next: state } = applyDeltas(state, "kalm", { boos: -30, kalm: 20 }, after(i * 10_000)));
+    }
+    expect(mood.values.boos).toBeLessThan(mood.values.kalm);
+    expect(mood.emotion).toBe("kalm");
   });
 });
 
 describe("moodOfRow", () => {
-  const empty = { baseEmotion: null, moodEmotion: null, moodIntensity: null, moodAt: null };
+  const empty = { baseEmotion: null, moodValues: null, moodAt: null };
 
-  it("geeft zonder Stemming de Basisemotie, en neutraal zonder Basisemotie", () => {
-    expect(moodOfRow({ ...empty, baseEmotion: "blij" }, T0)).toEqual({ emotion: "blij", intensity: BASE_INTENSITY });
-    expect(moodOfRow(empty, T0)).toEqual({ emotion: "neutraal", intensity: BASE_INTENSITY });
+  it("geeft zonder Stemming de ruststand van de Basisemotie, en neutraal zonder Basisemotie", () => {
+    expect(moodOfRow({ ...empty, baseEmotion: "blij" }, T0)).toMatchObject({ emotion: "blij", intensity: 0.3 });
+    expect(moodOfRow(empty, T0).emotion).toBe("neutraal");
   });
 
-  it("leest de opgeslagen Stemming uit de kolommen en dooft ze uit", () => {
-    const row = { ...empty, baseEmotion: "kalm", moodEmotion: "boos", moodIntensity: 0.8, moodAt: T0 };
-    expect(storedMoodOf(row)).toEqual({ emotion: "boos", intensity: 0.8, at: T0 });
-    expect(moodOfRow(row, after(MOOD_HALF_LIFE_MS)).intensity).toBeCloseTo(0.4);
+  it("leest de opgeslagen vector uit de kolommen en dooft hem uit", () => {
+    const row = { ...empty, baseEmotion: "kalm", moodValues: values({ boos: 80 }), moodAt: T0 };
+    expect(storedMoodOf(row)).toEqual({ values: values({ boos: 80 }), at: T0 });
+    expect(moodOfRow(row, after(MOOD_HALF_LIFE_MS)).values.boos).toBeCloseTo(40);
   });
 
-  it("negeert een ongeldige emotie in de kolommen", () => {
-    expect(storedMoodOf({ ...empty, moodEmotion: "woedend", moodIntensity: 0.8, moodAt: T0 })).toBeNull();
+  it("negeert een onbruikbare vector, en telt ontbrekende of ongeldige emoties als 0", () => {
+    expect(storedMoodOf({ ...empty, moodValues: "boos", moodAt: T0 })).toBeNull();
+    expect(storedMoodOf({ ...empty, moodValues: { boos: 80 }, moodAt: null })).toBeNull();
+    expect(storedMoodOf({ ...empty, moodValues: { boos: 80, woedend: 99, blij: "x" }, moodAt: T0 })?.values).toEqual(values({ boos: 80 }));
+  });
+});
+
+describe("singleEmotionValues", () => {
+  it("zet één emotie op intensiteit*100 en de rest op 0", () => {
+    expect(singleEmotionValues("boos", 0.8)).toEqual(values({ boos: 80 }));
   });
 });

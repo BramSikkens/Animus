@@ -4,6 +4,7 @@ import { simulateReadableStream } from "ai";
 import { EMBEDDING_DIMENSIONS, drives, dynimos, memories } from "@animus/db/schema";
 import { eq } from "drizzle-orm";
 import { createBrain, type BrainEvent } from "../src/index.js";
+import { singleEmotionValues } from "../src/mood.js";
 import { createTestDb, truncateAll } from "./db.js";
 
 const db = createTestDb();
@@ -99,7 +100,7 @@ describe("considerInitiative()", () => {
 
 describe("considerInitiative(): Type1-check", () => {
   it("geeft een instructie als Type1 wil spreken, met Persoonlijkheid, Drijfveren en Stemming als context", async () => {
-    const dynimo = await insertDynimo({ moodEmotion: "blij", moodIntensity: 0.9, moodAt: bornAt });
+    const dynimo = await insertDynimo({ moodValues: singleEmotionValues("blij", 0.9), moodAt: bornAt });
     await db.insert(drives).values({ dynimoId: dynimo.id, kind: "doel", text: "Leer de zee tekenen", status: "actief", createdAt: bornAt, updatedAt: bornAt });
     const type1 = initiativeType1({ spreken: "ja" });
 
@@ -232,7 +233,7 @@ describe("hear(..., { initiatief: true })", () => {
   }
 
   it("spreekt zonder Type1-classificatie, laat de Stemming ongemoeid en bewaart geen Gesprekspartner-regel", async () => {
-    const dynimo = await insertDynimo({ moodEmotion: "blij", moodIntensity: 0.9, moodAt: bornAt });
+    const dynimo = await insertDynimo({ moodValues: singleEmotionValues("blij", 0.9), moodAt: bornAt });
     const type1 = initiativeType1({ spreken: "ja" });
     const light = textStreamModel("Zeg, ik dacht net aan de zee.");
     const brain = brainWith(type1.model, unusedModel(), light);
@@ -245,7 +246,7 @@ describe("hear(..., { initiatief: true })", () => {
     );
     expect(events[0]).toMatchObject({ type: "mood", emotion: "blij" });
     const [row] = await db.select().from(dynimos).where(eq(dynimos.id, dynimo.id));
-    expect(row).toMatchObject({ moodEmotion: "blij", moodIntensity: 0.9 });
+    expect(row).toMatchObject({ moodValues: { blij: 90 } });
     const stored = await db.select().from(memories);
     expect(stored).toHaveLength(1);
     expect(stored[0]!.text).toBe("Vero: Zeg, ik dacht net aan de zee.");

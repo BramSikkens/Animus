@@ -19,6 +19,7 @@ import { formatAge } from "./age.js";
 import { archetypeOfferText, getArchetype, pickOffer } from "./archetypes.js";
 import { DRIVE_DESCRIPTIONS, DRIVE_KINDS, drivesPromptBlock, isActiveDrive, type DriveRow } from "./drives.js";
 import { decideBehavior, type Behavior } from "./behavior.js";
+import { pickSpeechSound, SPEECH_SOUND_MIN_LENGTH } from "./speech-sounds.js";
 import { applyDeltas, baseEmotionOf, currentMood, moodOfRow, singleEmotionValues, storedMoodOf, type Mood, type MoodDeltas, type MoodValues, type StoredMood } from "./mood.js";
 import { isVisibleMoodChange, soundKindFor, type SoundKind } from "./sound.js";
 import { AXIS_DESCRIPTIONS, type Axes, axisGuidelines, mbtiType, rowAxes } from "./personality.js";
@@ -365,6 +366,7 @@ export function createBrain(deps: {
   const random = deps.random ?? Math.random;
   const voices = deps.voices ?? elevenLabsGenesisVoices(process.env);
   let lastIgnored = false; // vorige beurt genegeerd? Voorkomt twee keer achter elkaar negeren.
+  let lastSpeechSound: string | undefined; // Spraakgeluid van de vorige beurt: nooit twee keer hetzelfde.
   let current: Dynimo | undefined;
   const tools = createTools({ now, remember });
   const workingMemory: ModelMessage[] = [];
@@ -998,6 +1000,17 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     });
 
     let full = "";
+    // Spraakgeluid: de eerste tekst wordt vastgehouden tot de lengte bekend is (of de stream eindigt), en dan met
+    // eventueel een geluid ervoor doorgegeven aan TTS. `full` (Herinnering/Werkgeheugen) blijft de schone tekst.
+    let pending = "";
+    let soundDecided = false;
+    function* flushPending(): Generator<BrainEvent> {
+      if (soundDecided) return;
+      soundDecided = true;
+      const sound = axes ? pickSpeechSound({ textLength: pending.length, values: mood.values, axes, rng: random, isShort: behavior === "kort", previous: lastSpeechSound }) : null;
+      if (sound) lastSpeechSound = sound;
+      if (pending) yield { type: "text", delta: sound ? `${sound} ${pending}` : pending };
+    }
     // "interrupted" tot het tegendeel bewezen is: stopt de consument vroegtijdig (barge-in), dan
     // draait enkel de finally hieronder.
     let outcome: "completed" | "failed" | "interrupted" = "interrupted";
@@ -1007,15 +1020,23 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
         if (part.type === "error") throw part.error;
         if (part.type === "text-delta") {
           full += part.text;
-          yield { type: "text", delta: part.text };
+          if (soundDecided) yield { type: "text", delta: part.text };
+          else {
+            pending += part.text;
+            if (pending.length >= SPEECH_SOUND_MIN_LENGTH) yield* flushPending();
+          }
         }
-        if (part.type === "tool-call") yield { type: "tool-call", toolName: part.toolName, input: part.input };
+        if (part.type === "tool-call") {
+          yield* flushPending();
+          yield { type: "tool-call", toolName: part.toolName, input: part.input };
+        }
         if (part.type === "tool-result") yield { type: "tool-result", toolName: part.toolName, output: part.output };
         if (part.type === "tool-error") {
           const message = part.error instanceof Error ? part.error.message : String(part.error);
           yield { type: "tool-result", toolName: part.toolName, output: { error: message } };
         }
       }
+      yield* flushPending();
       outcome = "completed";
     } catch (error) {
       outcome = "failed";
@@ -1039,6 +1060,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
   function forgetBeing(): void {
     current = undefined;
     lastIgnored = false;
+    lastSpeechSound = undefined;
     workingMemory.length = 0;
     sessionMemoryIds.length = 0;
   }

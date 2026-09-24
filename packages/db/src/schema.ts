@@ -86,6 +86,8 @@ export const memories = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
     // Hoe vormend de uiting was (Type1, 0..1); zware Indruk weegt zwaar in de Reflectie. Default = neutraal.
     impression: real("impression").notNull().default(0.5),
+    // Laatst spontaan aangehaald (Spontane herinnering, cooldown); null = nog nooit.
+    lastRecalledAt: timestamp("last_recalled_at", { withTimezone: true }),
   },
   (table) => [
     index("memories_embedding_idx").using("hnsw", table.embedding.op("vector_cosine_ops")),

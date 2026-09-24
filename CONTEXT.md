@@ -36,6 +36,10 @@ _Avoid_: memory (in proza), log
 Een score (0–1) die Type1 per uiting geeft voor hoe vormend die is voor de Dynimo (een expliciet verzoek zoals "praat wat minder" = hoog, gewone babbel = laag). Bewaard bij de Herinnering; de Reflectie weegt ermee, binnen haar grens.
 _Avoid_: prioriteit, urgentie, gewicht
 
+**Spontane herinnering**:
+Een oude, vormende Herinnering waar de Dynimo zelf op terugkomt ('Je zei vorige week dat je ziek was, ben je beter?'). Pure kiezer `pickSpontaneousMemory` (`recall-spontaneous.ts`): alleen Herinneringen ouder dan 1 dag met Indruk ≥ 0.5 en niet aangehaald in de laatste 7 dagen (kolom `memories.last_recalled_at`), gewogen op Indruk × ouderdom; de kans schaalt met F (T↔F) en expressiviteit. Bij een initiatief-moment (hoge basiskans) gaat de Herinnering in de initiatief-instructie mee naar Type2; in een normale beurt (heel lage basiskans) als optionele aanleiding in de systeem-prompt. Pas na de voltooide beurt gemarkeerd als aangehaald.
+_Avoid_: terugval, flashback
+
 **Langetermijngeheugen**:
 Het geheel van alle Herinneringen van één Dynimo (tabel `memories`). Wordt hard gewist bij verwijderen.
 _Avoid_: database, archief (dat is het Grafschrift)

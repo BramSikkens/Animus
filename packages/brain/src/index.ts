@@ -11,7 +11,7 @@ import {
   type ModelMessage,
   type SystemModelMessage,
 } from "ai";
-import { and, asc, cosineDistance, desc, eq, gt, isNotNull, isNull, notInArray, sql } from "drizzle-orm";
+import { and, asc, cosineDistance, desc, eq, gt, gte, isNotNull, isNull, lte, notInArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { Db } from "@animus/db";
 import { dreams, drives, dynimos, epitaphs, memories } from "@animus/db/schema";
@@ -21,6 +21,7 @@ import { DRIVE_DESCRIPTIONS, DRIVE_KINDS, drivesPromptBlock, isActiveDrive, type
 import { decideBehavior, type Behavior } from "./behavior.js";
 import { pickSpeechSound, SPEECH_SOUND_MIN_LENGTH } from "./speech-sounds.js";
 import { createPacer, pacingFor } from "./speech-pacing.js";
+import { pickSpontaneousMemory, SPONTANEOUS_INITIATIVE_CHANCE, SPONTANEOUS_MIN_AGE_MS, SPONTANEOUS_MIN_IMPRESSION, SPONTANEOUS_TURN_CHANCE, type SpontaneousCandidate } from "./recall-spontaneous.js";
 import { applyDeltas, baseEmotionOf, currentMood, moodOfRow, singleEmotionValues, storedMoodOf, type Mood, type MoodDeltas, type MoodValues, type StoredMood } from "./mood.js";
 import { isVisibleMoodChange, soundKindFor, type SoundKind } from "./sound.js";
 import { AXIS_DESCRIPTIONS, type Axes, axisGuidelines, mbtiType, rowAxes } from "./personality.js";
@@ -267,6 +268,14 @@ function recallPrompt(recalled: string[]): SystemModelMessage {
   };
 }
 
+const SPONTANEOUS_CANDIDATE_LIMIT = 200;
+const SPONTANEOUS_HOW = "Kom er natuurlijk op terug, kort, in het Nederlands, met één vraag (bv. 'Je zei vorige week dat …, ben je …?').";
+
+// Na het cachepunt: alleen aanwezig op de beurten waarop de kans meezit; het onderwerp is optioneel.
+function spontaneousPrompt(memory: string): SystemModelMessage {
+  return { role: "system", content: `Spontane herinnering (alleen als het past bij het gesprek): iets uit een eerder gesprek waar je op terug kunt komen: "${memory}". ${SPONTANEOUS_HOW}` };
+}
+
 // Na het cachepunt: alleen aanwezig op de beurten waarop de kans meezit.
 function dreamPrompt(dream: string): SystemModelMessage {
   return {
@@ -373,6 +382,8 @@ export function createBrain(deps: {
   const workingMemory: ModelMessage[] = [];
   // Herinneringen uit deze sessie staan al in het werkgeheugen; niet dubbel ophalen.
   const sessionMemoryIds: number[] = [];
+  // Spontane herinnering die considerInitiative koos: pas na de initiatief-beurt als aangehaald gemarkeerd.
+  let pendingSpontaneousId: number | undefined;
 
   async function genesis(): Promise<{ dynimo: typeof dynimos.$inferInsert; drives: DrivesOutput; voice: { voice: string; description: string } | null }> {
     const seed = pickSeed(random);
@@ -799,6 +810,22 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     }
   }
 
+  // Kiest (pure kiezer) een Spontane herinnering uit de oude, vormende Herinneringen; faalt stil naar null.
+  async function pickSpontaneous(dynimoId: number, axes: Axes, baseChance: number): Promise<SpontaneousCandidate | null> {
+    try {
+      const candidates = await deps.db
+        .select({ id: memories.id, createdAt: memories.createdAt, impression: memories.impression, lastRecalledAt: memories.lastRecalledAt, text: memories.text })
+        .from(memories)
+        .where(and(eq(memories.dynimoId, dynimoId), gte(memories.impression, SPONTANEOUS_MIN_IMPRESSION), lte(memories.createdAt, new Date(now().getTime() - SPONTANEOUS_MIN_AGE_MS))))
+        .orderBy(desc(memories.impression), desc(memories.createdAt))
+        .limit(SPONTANEOUS_CANDIDATE_LIMIT);
+      return pickSpontaneousMemory({ memories: candidates, now: now(), axes, rng: random, baseChance });
+    } catch (error) {
+      console.warn("Spontane herinnering kiezen faalde:", error instanceof Error ? error.message : error);
+      return null;
+    }
+  }
+
   async function insertMemory(memoryText: string, dynimoId: number, impression: number): Promise<number> {
     const { embedding } = await embed({ model: deps.embedder, value: memoryText });
     const [row] = await deps.db
@@ -979,6 +1006,17 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
 
     // ponytail: sequentieel na de emotie; parallel met Type1 als de latency ooit telt.
     const recalled = await recall(text, being.id);
+    // Spontane herinnering: bij initiatief die van considerInitiative (al in `text`), anders heel zelden een aanleiding.
+    let spontaneousId = options.initiatief ? pendingSpontaneousId : undefined;
+    if (options.initiatief) pendingSpontaneousId = undefined;
+    let spontaneousPromptMessage: SystemModelMessage[] = [];
+    if (!options.initiatief && axes) {
+      const picked = await pickSpontaneous(being.id, axes, SPONTANEOUS_TURN_CHANCE);
+      if (picked) {
+        spontaneousId = picked.id;
+        spontaneousPromptMessage = [spontaneousPrompt(picked.text)];
+      }
+    }
     const [dream] = random() < DREAM_RECALL_CHANCE
       ? await deps.db.select({ text: dreams.text }).from(dreams).where(eq(dreams.dynimoId, being.id)).orderBy(desc(dreams.createdAt), desc(dreams.id)).limit(1)
       : [];
@@ -993,7 +1031,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     const result = streamText({
       abortSignal: abort.signal,
       model: intent === "complex" ? deps.type2.heavy : deps.type2.light,
-      instructions: [stable, ageMessage(being), ...birthdayMessages(awake), moodMessage(mood), ...(BEHAVIOR_PROMPTS[behavior] ? [BEHAVIOR_PROMPTS[behavior]] : []), recallPrompt(recalled), ...(dream ? [dreamPrompt(dream.text)] : [])],
+      instructions: [stable, ageMessage(being), ...birthdayMessages(awake), moodMessage(mood), ...(BEHAVIOR_PROMPTS[behavior] ? [BEHAVIOR_PROMPTS[behavior]] : []), recallPrompt(recalled), ...spontaneousPromptMessage, ...(dream ? [dreamPrompt(dream.text)] : [])],
       messages: [...workingMemory, userMessage],
       tools,
       // Genoeg stappen om een tool te gebruiken en daarna het resultaat te verwoorden.
@@ -1063,6 +1101,9 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
         workingMemory.push(userMessage, ...(await result.responseMessages));
       } else if (outcome === "interrupted" && full) {
         workingMemory.push(userMessage, { role: "assistant", content: full });
+      }
+      if (outcome === "completed" && spontaneousId !== undefined) {
+        await deps.db.update(memories).set({ lastRecalledAt: now() }).where(eq(memories.id, spontaneousId));
       }
       if (outcome !== "failed" && full.trim()) {
         await remember(options.initiatief ? `${being.name}: ${full}` : `Gesprekspartner: ${text}\n${being.name}: ${full}`, being.id, indruk);
@@ -1149,6 +1190,10 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
         },
       });
       if (answers.spreken.choice !== "ja") return null;
+      const axes = rowAxes(awake);
+      const spontaneous = axes ? await pickSpontaneous(awake.id, axes, SPONTANEOUS_INITIATIVE_CHANCE) : null;
+      pendingSpontaneousId = spontaneous?.id;
+      if (spontaneous) return `Je begint uit jezelf een gesprek en komt spontaan terug op iets uit een eerder gesprek: "${spontaneous.text}". ${SPONTANEOUS_HOW}`;
       return answers.onderwerp.choice === "doel" && hasGoal
         ? "Je begint uit jezelf een gesprek, want je wilt praten over een van je actieve Doelen."
         : "Je begint uit jezelf een gesprek over iets wat je bezighoudt of waar je nieuwsgierig naar bent.";

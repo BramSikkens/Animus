@@ -1,7 +1,7 @@
 import { ReadableStream } from "node:stream/web";
 import { fileURLToPath } from "node:url";
 import { createBrain, type Brain } from "@animus/brain";
-import { DISPLAY_TOPIC, type DisplayMessage } from "@animus/brain/display";
+import { DISPLAY_TOPIC, type DisplayMessage, type DisplayState } from "@animus/brain/display";
 import { EMOTION_TOPIC, type EmotionMessage } from "@animus/brain/emotion";
 import { EMBEDDING_MODEL, loadType2Config, TYPE1_MODEL } from "@animus/brain/config";
 import { createDb, migrate } from "@animus/db";
@@ -27,6 +27,7 @@ import { readState, watchDynimos } from "./dynimo-watch.js";
 import { createReflectionDisplay } from "./reflection-display.js";
 import { createSilenceTimer, parseSilenceMinutes } from "./silence-timer.js";
 import { textStream } from "./text-stream.js";
+import { resolveDisplay, voiceDisplay } from "./voice-display.js";
 
 try {
   process.loadEnvFile(fileURLToPath(new URL("../../../.env", import.meta.url)));
@@ -165,11 +166,25 @@ export default defineAgent<AgentUserData>({
       publishDisplay: (display) => publish(DISPLAY_TOPIC, { state: display }),
       publishState: () => void publishState(),
     });
+    // luisterend/spreekt volgen LiveKit's AgentState/UserState (ADR-0011); reflecterend/slapend winnen daarvan.
+    let agentState: voice.AgentState = "initializing";
+    let userState: voice.UserState = "listening";
+    const effectiveDisplay = (state: { key: string; display: DisplayState }): DisplayState =>
+      resolveDisplay(reflectionDisplay.displayFor(state.key, state.display), voiceDisplay(agentState, userState));
+    session.on(voice.AgentSessionEventTypes.AgentStateChanged, (event) => {
+      agentState = event.newState;
+      // `watcher` bestaat pas na session.start; eerdere events worden door de eerste publishState opgepikt.
+      if (watcher) publish(DISPLAY_TOPIC, { state: effectiveDisplay(watcher.current()) });
+    });
+    session.on(voice.AgentSessionEventTypes.UserStateChanged, (event) => {
+      userState = event.newState;
+      if (watcher) publish(DISPLAY_TOPIC, { state: effectiveDisplay(watcher.current()) });
+    });
     // Weergavetoestand plus, bij wakker, de HUIDIGE Stemming (vers gelezen), zodat het gezichtje na wekken direct klopt.
     const publishState = async (): Promise<void> => {
       try {
         const state = await readState(brain);
-        publish(DISPLAY_TOPIC, { state: reflectionDisplay.displayFor(state.key, state.display) });
+        publish(DISPLAY_TOPIC, { state: effectiveDisplay(state) });
         if (state.mood) publish(EMOTION_TOPIC, state.mood);
       } catch (error) {
         console.error("Toestand publiceren faalde:", error instanceof Error ? error.message : error);

@@ -1,5 +1,13 @@
-import { useMemo, useState } from "react";
-import { LiveKitRoom, RoomAudioRenderer, StartAudio, useConnectionState, useDataChannel } from "@livekit/components-react";
+import { useEffect, useMemo, useState } from "react";
+import {
+  LiveKitRoom,
+  RoomAudioRenderer,
+  StartAudio,
+  useConnectionState,
+  useDataChannel,
+  useTrackVolume,
+  useVoiceAssistant,
+} from "@livekit/components-react";
 import { ConnectionState } from "livekit-client";
 import { DISPLAY_STATES, DISPLAY_TOPIC, isDisplayState, type DisplayState } from "@animus/brain/display";
 import { EMOTION_TOPIC, EMOTIONS, isEmotion, type EmotionMessage } from "@animus/brain/emotion";
@@ -69,6 +77,16 @@ function DisplayListener({ onDisplay }: { onDisplay: (state: DisplayState) => vo
   return null;
 }
 
+// Leest het volume van de agent-audiotrack (buiten de room is er geen track, dus volume 0).
+function MouthVolumeListener({ onVolume }: { onVolume: (volume: number) => void }) {
+  const { audioTrack } = useVoiceAssistant();
+  const volume = useTrackVolume(audioTrack);
+  // Op 2 decimalen afgerond: beperkt het aantal re-renders van het gezicht.
+  const rounded = Math.round(volume * 100) / 100;
+  useEffect(() => onVolume(rounded), [rounded, onVolume]);
+  return null;
+}
+
 // ?debug: paneel om het gezicht handmatig of met Playwright te sturen, zonder LiveKit.
 function DebugPanel({
   state,
@@ -118,6 +136,7 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [emotionState, setEmotionState] = useState<EmotionState>(NEUTRAL_STATE);
   const [displayState, setDisplayState] = useState<DisplayState>(DEFAULT_DISPLAY);
+  const [mouthVolume, setMouthVolume] = useState(0);
   const debug = useMemo(() => new URLSearchParams(window.location.search).has("debug"), []);
 
   async function start(): Promise<void> {
@@ -135,11 +154,12 @@ export function App() {
     setSession(null);
     setEmotionState(NEUTRAL_STATE);
     setDisplayState(DEFAULT_DISPLAY);
+    setMouthVolume(0);
   }
 
   return (
     <>
-      <Face display={displayState} emotion={emotionState.emotion} intensity={emotionState.intensity} />
+      <Face display={displayState} emotion={emotionState.emotion} intensity={emotionState.intensity} mouthVolume={mouthVolume} />
 
       <main className="screen">
         {!session ? (
@@ -160,6 +180,7 @@ export function App() {
           >
             <EmotionListener onEmotion={setEmotionState} />
             <DisplayListener onDisplay={setDisplayState} />
+            <MouthVolumeListener onVolume={setMouthVolume} />
             <ConnectionStatus />
             <RoomAudioRenderer />
             <StartAudio label="Zet geluid aan" />

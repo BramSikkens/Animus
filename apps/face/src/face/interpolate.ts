@@ -57,9 +57,26 @@ export function frameFor(emotion: Emotion, intensity: number): Keyframe {
   };
 }
 
-/** Kiest het frame voor de weergavetoestand: slapend en reflecterend negeren de emotie, wakker toont `frameFor`. */
+// Luisterend: aandachtig — ogen iets groter, wenkbrauwen iets omhoog, bovenop het emotieframe.
+const LISTEN_EYE_SCALE = 1.1;
+const LISTEN_BROW_RAISE = 2;
+
+function listeningFrame(base: Keyframe): Keyframe {
+  const eye = (e: Keyframe["eyes"]["left"]) => ({ ...e, scale: e.scale * LISTEN_EYE_SCALE });
+  return {
+    ...base,
+    eyes: { left: eye(base.eyes.left), right: eye(base.eyes.right) },
+    brow: { angle: base.brow?.angle ?? 0, raise: (base.brow?.raise ?? 0) + LISTEN_BROW_RAISE },
+  };
+}
+
+/**
+ * Kiest het frame voor de weergavetoestand: slapend en reflecterend negeren de emotie, luisterend legt een
+ * aandachtige houding over `frameFor`; wakker en spreekt tonen `frameFor` (bij spreekt stuurt het volume de mond).
+ */
 export function frameForDisplay(display: DisplayState, emotion: Emotion, intensity: number): Keyframe {
   if (display === "slapend") return SLEEP;
   if (display === "reflecterend") return REFLECT;
+  if (display === "luisterend") return listeningFrame(frameFor(emotion, intensity));
   return frameFor(emotion, intensity);
 }

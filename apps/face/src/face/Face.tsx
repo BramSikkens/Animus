@@ -4,11 +4,14 @@ import type { Emotion } from "@animus/brain/emotion";
 import { idleOffsets } from "./idle.js";
 import { frameForDisplay } from "./interpolate.js";
 import type { Keyframe } from "./keyframes.js";
+import { mouthOpenForVolume } from "./mouth.js";
 
 // Eén lijn- en vulkleur voor het hele gezicht (ogen, mond, wenkbrauwen); de achtergrond
 // verandert per emotie, het gezicht zelf blijft monochroom.
 const FACE_COLOR = "#f4efe3";
 const TRANSITION = { duration: 0.4, ease: "easeInOut" } as const;
+// Tijdens spreekt volgt de mond het volume; een korte tween houdt hem vloeiend zonder te laten achterlopen.
+const MOUTH_SPEAK_TRANSITION = { duration: 0.08, ease: "linear" } as const;
 
 const EYE_X = { left: 72, right: 128 } as const;
 const EYE_Y = 85;
@@ -105,11 +108,19 @@ function Brow({ cx, side, brow, browY }: BrowProps) {
   );
 }
 
-export type FaceProps = { display: DisplayState; emotion: Emotion; intensity: number };
+export type FaceProps = {
+  display: DisplayState;
+  emotion: Emotion;
+  intensity: number;
+  /** Volume 0..1 van de agent-audiotrack; stuurt de mondopening alleen tijdens "spreekt". */
+  mouthVolume?: number;
+};
 
 /** Het gezichtje: achtergrond + ogen + mond + wenkbrauwen, getweend tussen emoties en de slaapstand (~300-500ms). */
-export function Face({ display, emotion, intensity }: FaceProps) {
+export function Face({ display, emotion, intensity, mouthVolume = 0 }: FaceProps) {
   const frame = frameForDisplay(display, emotion, intensity);
+  const speaking = display === "spreekt";
+  const mouth = speaking ? { ...frame.mouth, open: Math.max(frame.mouth.open, mouthOpenForVolume(mouthVolume)) } : frame.mouth;
   const blink = useMotionValue(1);
   const pupilX = useMotionValue(0);
   const pupilY = useMotionValue(0);
@@ -143,7 +154,7 @@ export function Face({ display, emotion, intensity }: FaceProps) {
           <Eye cx={EYE_X.right} eye={frame.eyes.right} background={frame.background} idle={idle} />
           <Brow cx={EYE_X.left} side="left" brow={frame.brow} browY={browY} />
           <Brow cx={EYE_X.right} side="right" brow={frame.brow} browY={browY} />
-          <motion.path initial={false} animate={{ d: mouthPath(frame.mouth) }} transition={TRANSITION} fill={FACE_COLOR} />
+          <motion.path initial={false} animate={{ d: mouthPath(mouth) }} transition={speaking ? MOUTH_SPEAK_TRANSITION : TRANSITION} fill={FACE_COLOR} />
         </motion.g>
       </svg>
     </div>

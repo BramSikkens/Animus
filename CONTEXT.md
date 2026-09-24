@@ -93,6 +93,10 @@ _Avoid_: karakter (dat is de vrije tekst), Big Five
 Iets wat een Dynimo wil of niet wil, van één van vier soorten: Wens, Doel (kan bereikt of opgegeven worden), Toekomstdroom of Ergernis (zonder waarde of sterkte). Kleurt welke Emotie een uiting oproept.
 _Avoid_: voorkeur, interesse; een Toekomstdroom is geen Droom (de nachtelijke droomtekst)
 
+**Standpunt**:
+Een eigen mening die een Dynimo in één beurt laat blijken (tegenspraak, voorkeur of "dit vind ik saai") omdat een Drijfveer duidelijk raakt aan de uiting van de Gesprekspartner. Een pure kiezer (`decideOpinion`) beslist: match boven een drempel (woord-overlap tussen Drijfveertekst en uiting), kans geschaald door Persoonlijkheid (zakelijk, stellig en expressief geeft er meer), en een cooldown van vier beurten zodat er nooit eindeloos wordt tegengesproken. Een Ergernis geeft tegenspraak of "saai" en verhoogt Boos via de gewone delta's; een Wens, Doel of Toekomstdroom geeft een enthousiaste voorkeur. Type2 krijgt er een korte systeemregel bij.
+_Avoid_: mening (in code), dwarsigheid
+
 **Reflectie**:
 Een Type2-verwerking van recente ervaringen die het geëvolueerde karakter, de persoonlijkheidsassen en de Drijfveren van een Dynimo bijstelt, telkens met een grens op hoeveel er mag verschuiven. Draait wanneer de Dynimo gaat slapen, en bij lange stilte terwijl hij wakker is; dat laatste is zichtbaar aan het gezichtje (reflecterend), maar zegt de Gesprekspartner iets, dan antwoordt de Dynimo gewoon en loopt de Reflectie op de achtergrond verder.
 _Avoid_: samenvatting, evaluatie; niet te verwarren met de Afscheidsreflectie

@@ -19,6 +19,7 @@ import { formatAge } from "./age.js";
 import { archetypeOfferText, getArchetype, pickOffer } from "./archetypes.js";
 import { DRIVE_DESCRIPTIONS, DRIVE_KINDS, drivesPromptBlock, isActiveDrive, type DriveRow } from "./drives.js";
 import { decideBehavior, type Behavior } from "./behavior.js";
+import { decideOpinion, matchDrives, opinionPrompt, OPINION_BOOS_DELTA } from "./opinion.js";
 import { pickSpeechSound, SPEECH_SOUND_MIN_LENGTH } from "./speech-sounds.js";
 import { createPacer, pacingFor } from "./speech-pacing.js";
 import { pickSpontaneousMemory, SPONTANEOUS_INITIATIVE_CHANCE, SPONTANEOUS_MIN_AGE_MS, SPONTANEOUS_MIN_IMPRESSION, SPONTANEOUS_TURN_CHANCE, type SpontaneousCandidate } from "./recall-spontaneous.js";
@@ -376,6 +377,8 @@ export function createBrain(deps: {
   const random = deps.random ?? Math.random;
   const voices = deps.voices ?? elevenLabsGenesisVoices(process.env);
   let lastIgnored = false; // vorige beurt genegeerd? Voorkomt twee keer achter elkaar negeren.
+  let turnCount = 0; // beurten (zonder initiatief) van deze brain-instantie, voor de cooldown van het Standpunt.
+  let lastOpinionTurn: number | undefined;
   let lastSpeechSound: string | undefined; // Spraakgeluid van de vorige beurt: nooit twee keer hetzelfde.
   let current: Dynimo | undefined;
   const tools = createTools({ now, remember });
@@ -955,7 +958,24 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
       .join("\n");
     // Type1 is een reflex: faalt hij, dan antwoordt Type2 toch. Zonder delta's blijft de Stemming ongemoeid (het
     // mood-event toont dan de bestaande Stemming of Basisemotie).
-    const { deltas, indruk, intent } = await (options.initiatief
+    const axes = rowAxes(awake);
+    // Standpunt (opinion.ts): een Drijfveer die duidelijk raakt aan de uiting; een Ergernis raakt ook boos, via dezelfde delta's.
+    let opinionMessage: SystemModelMessage[] = [];
+    let opinionBoos = 0;
+    if (!options.initiatief) {
+      turnCount++;
+      const opinion = axes
+        ? decideOpinion({ drives: driveRows, utteranceMatches: matchDrives(text, driveRows), axes, rng: random, lastOpinionTurnsAgo: lastOpinionTurn === undefined ? undefined : turnCount - lastOpinionTurn })
+        : { kind: "geen" as const };
+      const drive = driveRows.find((row) => row.id === opinion.driveId);
+      const prompt = drive && opinionPrompt(opinion.kind, drive);
+      if (drive && prompt) {
+        lastOpinionTurn = turnCount;
+        opinionMessage = [{ role: "system", content: prompt }];
+        if (drive.kind === "ergernis") opinionBoos = OPINION_BOOS_DELTA;
+      }
+    }
+    const { deltas: type1Deltas, indruk, intent } = await (options.initiatief
       ? Promise.resolve<Type1Result>({ deltas: {}, indruk: 0.2, intent: "simpel" })
       : classify(deps.type1, text, context)
     ).catch((error: unknown): Type1Result => {
@@ -963,6 +983,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
       return { deltas: {}, indruk: 0, intent: "simpel" };
     });
 
+    const deltas: MoodDeltas = opinionBoos ? { ...type1Deltas, boos: (type1Deltas.boos ?? 0) + opinionBoos } : type1Deltas;
     const { mood, next } = applyDeltas(boosted, baseEmotion, deltas, now(), awake.axisReactivity);
     // ponytail: last-writer-wins zonder guard; volstaat bij één wakkere Dynimo. Guard op mood_at zodra er ooit
     // meerdere schrijvers tegelijk zijn.
@@ -992,7 +1013,6 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     }
 
     // Emotie stuurt gedrag (behavior.ts). Een spontane uiting (initiatief) wordt nooit genegeerd of ingekort.
-    const axes = rowAxes(awake);
     const behavior = options.initiatief || !axes ? "normaal" : decideBehavior({ values: mood.values, axes, rng: random, vorigeGenegeerd: lastIgnored });
     if (!options.initiatief) lastIgnored = behavior === "negeren";
     const userMessage: ModelMessage = { role: "user", content: text };
@@ -1031,7 +1051,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     const result = streamText({
       abortSignal: abort.signal,
       model: intent === "complex" ? deps.type2.heavy : deps.type2.light,
-      instructions: [stable, ageMessage(being), ...birthdayMessages(awake), moodMessage(mood), ...(BEHAVIOR_PROMPTS[behavior] ? [BEHAVIOR_PROMPTS[behavior]] : []), recallPrompt(recalled), ...spontaneousPromptMessage, ...(dream ? [dreamPrompt(dream.text)] : [])],
+      instructions: [stable, ageMessage(being), ...birthdayMessages(awake), moodMessage(mood), ...(BEHAVIOR_PROMPTS[behavior] ? [BEHAVIOR_PROMPTS[behavior]] : []), ...opinionMessage, recallPrompt(recalled), ...spontaneousPromptMessage, ...(dream ? [dreamPrompt(dream.text)] : [])],
       messages: [...workingMemory, userMessage],
       tools,
       // Genoeg stappen om een tool te gebruiken en daarna het resultaat te verwoorden.

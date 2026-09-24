@@ -17,6 +17,7 @@ import type { Db } from "@animus/db";
 import { drives, dynimos, epitaphs, memories } from "@animus/db/schema";
 import { formatAge } from "./age.js";
 import { DRIVE_DESCRIPTIONS, DRIVE_KINDS, drivesPromptBlock, isActiveDrive, type DriveRow } from "./drives.js";
+import { isVisibleMoodChange, soundKindFor, type SoundKind } from "./sound.js";
 import { applyEmotion, baseEmotionOf, moodOfRow, storedMoodOf, type Mood } from "./mood.js";
 import { AXIS_DESCRIPTIONS, axisGuidelines, mbtiType, rowAxes } from "./personality.js";
 import { EMOTIONS, isEmotion, type Emotion } from "./emotion.js";
@@ -29,6 +30,8 @@ export { formatAge };
 export type BrainEvent =
   /** De effectieve Stemming na verwerking van deze beurt; komt vóór de eerste tekst. */
   | { type: "mood"; emotion: Emotion; intensity: number }
+  /** De Stemming is zichtbaar veranderd: een kort geluidje van deze soort; komt direct na het mood-event. */
+  | { type: "sound"; kind: SoundKind }
   | { type: "text"; delta: string }
   | { type: "tool-call"; toolName: string; input: unknown }
   | { type: "tool-result"; toolName: string; output: unknown };
@@ -733,6 +736,10 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     }
 
     yield { type: "mood", emotion: mood.emotion, intensity: mood.intensity };
+    if (isVisibleMoodChange(before, mood)) {
+      const kind = soundKindFor(mood.emotion);
+      if (kind) yield { type: "sound", kind };
+    }
 
     // ponytail: sequentieel na de emotie; parallel met Type1 als de latency ooit telt.
     const recalled = await recall(text, being.id);

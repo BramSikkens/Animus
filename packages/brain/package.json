@@ -5,6 +5,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./archetypes": "./src/archetypes.ts",
+    "./behavior": "./src/behavior.ts",
     "./age": "./src/age.ts",
     "./config": "./src/config.ts",
     "./emotion": "./src/emotion.ts",

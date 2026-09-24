@@ -4,6 +4,8 @@ import { createBrain, type Brain } from "@animus/brain";
 import { DISPLAY_TOPIC, type DisplayMessage, type DisplayState } from "@animus/brain/display";
 import { SOUND_TOPIC, type SoundMessage } from "@animus/brain/sound";
 import { EMOTION_TOPIC } from "@animus/brain/emotion";
+import { initiativeFactor } from "@animus/brain/behavior";
+import { moodOfRow } from "@animus/brain/mood";
 import { rowAxes } from "@animus/brain/personality";
 import { resolveVoice, speechProvider } from "@animus/brain/voice";
 import { EMBEDDING_MODEL, loadType2Config, TYPE1_MODEL } from "@animus/brain/config";
@@ -240,8 +242,12 @@ export default defineAgent<AgentUserData>({
     const initiativeBaseMs = parseInitiativeMinutes(process.env.INITIATIVE_CHECK_MINUTES);
     if (initiativeBaseMs.warning) console.warn(initiativeBaseMs.warning);
     let initiativeAxes: ReturnType<typeof rowAxes> = null;
+    let initiativeMoodFactor = 1;
     const refreshInitiativeAxes = async (): Promise<void> => {
-      initiativeAxes = rowAxes((await brain.list()).find((dynimo) => dynimo.awakeSince) ?? { axisIe: null, axisSn: null, axisTf: null, axisJp: null, axisReactivity: 0.5, axisExpressiveness: 0.5 });
+      const awake = (await brain.list()).find((dynimo) => dynimo.awakeSince);
+      initiativeAxes = rowAxes(awake ?? { axisIe: null, axisSn: null, axisTf: null, axisJp: null, axisReactivity: 0.5, axisExpressiveness: 0.5 });
+      // Zeer blij: vaker eigen initiatief (behavior.ts).
+      initiativeMoodFactor = awake && initiativeAxes ? initiativeFactor(moodOfRow(awake, new Date()).values, initiativeAxes) : 1;
     };
     const animusAgent = new AnimusAgent(brain, ctx.room, () => {
       silence.reset();
@@ -249,7 +255,7 @@ export default defineAgent<AgentUserData>({
       reflectionDisplay.onUtterance();
     });
     const initiative = createInitiativeTimer({
-      intervalMs: () => initiativeIntervalMs(initiativeAxes, initiativeBaseMs.ms),
+      intervalMs: () => initiativeIntervalMs(initiativeAxes, initiativeBaseMs.ms, initiativeMoodFactor),
       random: Math.random,
       isQuiet: () => (session.agentState === "idle" || session.agentState === "listening") && session.userState !== "speaking",
       onCheck: async () => {

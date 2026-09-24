@@ -104,6 +104,10 @@ _Avoid_: sentiment
 De emotionele toestand van een Dynimo die over beurten heen blijft hangen: een vector met voor elke Emotie een waarde 0–100, plus een tijdstip. De Type1-delta's van een uiting worden opgeteld en geclampt op 0–100; tussendoor dooft elke waarde exponentieel uit naar haar ruststand (halveringstijd 3 minuten). De zichtbare, dominante Emotie is de hoogste waarde (bij gelijkstand de Basisemotie, anders de eerste in de set); het gezichtje en de toon van Type2 volgen die. Zie [ADR-0012](docs/adr/0012-stemming-als-vector.md).
 _Avoid_: humeur, emotie (voor de blijvende toestand)
 
+**Gedrag**:
+Hoe een Dynimo een beurt van de Gesprekspartner beantwoordt, per beurt gekozen uit normaal, kort, lang of negeren door een pure beslisfunctie (`decideBehavior`) op basis van de Stemming, de Persoonlijkheidsassen en een rng. Zeer boos (dominant, ≥70) geeft kans op negeren of kortaf (geschaald door reactiviteit, gedempt door F op T↔F); zeer blij (≥70) geeft kans op lange antwoorden en vaker eigen initiatief; bang of verveeld (≥60) geeft kans op kort. Een robot (reactiviteit 0) is altijd normaal. Negeren gebeurt nooit twee beurten achter elkaar en nooit bij een initiatief-uiting; het gezichtje toont dan alleen de (boze) Stemming plus een geluid, er komt geen antwoord. De Herinnering wordt wel opgeslagen.
+_Avoid_: reactie (te vaag), weigeren
+
 **Basisemotie**:
 De Emotie die in de ruststand van de Stemming op 30 staat, terwijl alle andere Emoties op 0 rusten; de Stemming dooft er dus naartoe uit. Bij genesis door Type2 gekozen als deel van het temperament en daarna vrijwel onveranderlijk.
 _Avoid_: default-emotie, rustemotie

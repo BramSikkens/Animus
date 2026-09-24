@@ -18,6 +18,7 @@ import { dreams, drives, dynimos, epitaphs, memories } from "@animus/db/schema";
 import { formatAge } from "./age.js";
 import { archetypeOfferText, getArchetype, pickOffer } from "./archetypes.js";
 import { DRIVE_DESCRIPTIONS, DRIVE_KINDS, drivesPromptBlock, isActiveDrive, type DriveRow } from "./drives.js";
+import { decideBehavior, type Behavior } from "./behavior.js";
 import { applyDeltas, baseEmotionOf, currentMood, moodOfRow, singleEmotionValues, storedMoodOf, type Mood, type MoodDeltas, type MoodValues, type StoredMood } from "./mood.js";
 import { isVisibleMoodChange, soundKindFor, type SoundKind } from "./sound.js";
 import { AXIS_DESCRIPTIONS, type Axes, axisGuidelines, mbtiType, rowAxes } from "./personality.js";
@@ -277,6 +278,12 @@ const DELTA_STEP = 10;
 const NEUTRAL_LEVEL = (DELTA_LEVELS - 1) / 2;
 const BIRTHDAY_DELTA = 90;
 
+// Extra Type2-instructie per gedrag van de beurt (Nederlands); 'normaal' en 'negeren' krijgen er geen.
+const BEHAVIOR_PROMPTS: Partial<Record<Behavior, SystemModelMessage>> = {
+  kort: { role: "system", content: "Antwoord deze beurt heel kort: hooguit één korte zin, kortaf, zonder uitleg en zonder vraag terug." },
+  lang: { role: "system", content: "Antwoord deze beurt uitgebreid en enthousiast: vertel wat meer, weid gerust uit en laat je goede bui doorklinken." },
+};
+
 function moodMessage(mood: Mood): SystemModelMessage {
   const vector = Object.entries(mood.values)
     .sort(([, a], [, b]) => b - a)
@@ -348,6 +355,7 @@ export function createBrain(deps: {
 }): Brain {
   const now = deps.now ?? (() => new Date());
   const random = deps.random ?? Math.random;
+  let lastIgnored = false; // vorige beurt genegeerd? Voorkomt twee keer achter elkaar negeren.
   let current: Dynimo | undefined;
   const tools = createTools({ now, remember });
   const workingMemory: ModelMessage[] = [];
@@ -929,9 +937,24 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     }
 
     yield { type: "mood", emotion: mood.emotion, intensity: mood.intensity, values: mood.values };
-    if (isVisibleMoodChange(before, mood)) {
-      const kind = soundKindFor(mood.emotion);
-      if (kind) yield { type: "sound", kind };
+    const soundKind = soundKindFor(mood.emotion);
+    let soundYielded = false;
+    if (isVisibleMoodChange(before, mood) && soundKind) {
+      soundYielded = true;
+      yield { type: "sound", kind: soundKind };
+    }
+
+    // Emotie stuurt gedrag (behavior.ts). Een spontane uiting (initiatief) wordt nooit genegeerd of ingekort.
+    const axes = rowAxes(awake);
+    const behavior = options.initiatief || !axes ? "normaal" : decideBehavior({ values: mood.values, axes, rng: random, vorigeGenegeerd: lastIgnored });
+    if (!options.initiatief) lastIgnored = behavior === "negeren";
+    const userMessage: ModelMessage = { role: "user", content: text };
+    if (behavior === "negeren") {
+      // Zichtbaar op het gezichtje via de (boze) Stemming plus een non-verbaal geluid; geen antwoord en geen TTS.
+      if (soundKind && !soundYielded) yield { type: "sound", kind: soundKind };
+      workingMemory.push(userMessage, { role: "assistant", content: "(je negeert dit)" });
+      await remember(`Gesprekspartner: ${text}\n${being.name} negeert dit.`, being.id, indruk);
+      return;
     }
 
     // ponytail: sequentieel na de emotie; parallel met Type1 als de latency ooit telt.
@@ -946,12 +969,11 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
       providerOptions: { anthropic: { cacheControl: { type: "ephemeral" } } },
     };
 
-    const userMessage: ModelMessage = { role: "user", content: text };
     const abort = new AbortController();
     const result = streamText({
       abortSignal: abort.signal,
       model: intent === "complex" ? deps.type2.heavy : deps.type2.light,
-      instructions: [stable, ageMessage(being), ...birthdayMessages(awake), moodMessage(mood), recallPrompt(recalled), ...(dream ? [dreamPrompt(dream.text)] : [])],
+      instructions: [stable, ageMessage(being), ...birthdayMessages(awake), moodMessage(mood), ...(BEHAVIOR_PROMPTS[behavior] ? [BEHAVIOR_PROMPTS[behavior]] : []), recallPrompt(recalled), ...(dream ? [dreamPrompt(dream.text)] : [])],
       messages: [...workingMemory, userMessage],
       tools,
       // Genoeg stappen om een tool te gebruiken en daarna het resultaat te verwoorden.
@@ -999,6 +1021,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
   // Alles wat deze instantie over het wezen weet; na verwijdering mag niets doorsijpelen naar een nieuw wezen.
   function forgetBeing(): void {
     current = undefined;
+    lastIgnored = false;
     workingMemory.length = 0;
     sessionMemoryIds.length = 0;
   }

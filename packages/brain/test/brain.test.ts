@@ -402,7 +402,7 @@ describe("createBrain", () => {
       type1: type1Model({ deltas }),
       type2: { light, heavy: genesisModel({ name: "Nova", coreCharacter: "x", birthStory: "y" }) },
       now: () => new Date("2026-01-01T00:00:00.000Z"),
-      random: () => 0,
+      random: () => 0.99, // boven elke gedragskans: geen negeren/kort
     });
     await brain.bringToLife();
     for await (const _ of brain.hear("Hoi!")) void _;
@@ -435,7 +435,7 @@ describe("createBrain", () => {
       type1: type1Model({ deltas: { blij: 80 } }),
       type2: { light, heavy: genesisModel({ name: "Nova", coreCharacter: "x", birthStory: "y" }) },
       now: () => bornAt,
-      random: () => 0,
+      random: () => 0.99, // boven elke gedragskans: geen negeren/kort
     });
     await brain.bringToLife();
 
@@ -2041,7 +2041,7 @@ describe("createBrain", () => {
         type1: options.type1,
         type2: { light: options.light, heavy: options.heavy ?? unusedModel() },
         now: options.now ?? (() => bornAt),
-        random: () => 0,
+        random: () => 0.99, // boven elke gedragskans: geen negeren/kort
       });
     }
 

@@ -1,9 +1,12 @@
-/** Hoe vaak initiatief voorkomt hangt af van de N/P-kant van Persoonlijkheid (sn en jp, 1 = N resp. P). */
-export function initiativeIntervalMs(axes: { sn: number; jp: number } | null, baseMs: number): number {
-  if (!axes) return baseMs;
+/**
+ * Hoe vaak initiatief voorkomt hangt af van de N/P-kant van Persoonlijkheid (sn en jp, 1 = N resp. P).
+ * `moodFactor` (>= 1, zie initiativeFactor in behavior.ts) verkort het interval, bv. bij zeer blij.
+ */
+export function initiativeIntervalMs(axes: { sn: number; jp: number } | null, baseMs: number, moodFactor = 1): number {
+  if (!axes) return baseMs / moodFactor;
   const score = (axes.sn + axes.jp) / 2;
   // 0 -> 2x basis (zeldzaam), 0.5 -> basis, 1 -> 0.5x basis (vaak).
-  return baseMs * 2 ** (1 - 2 * score);
+  return (baseMs * 2 ** (1 - 2 * score)) / moodFactor;
 }
 
 const MAX_TIMER_MS = 2 ** 31 - 1;

@@ -107,7 +107,8 @@ export async function setVoice(_prev: ActionState, formData: FormData): Promise<
     if (id === null) return INVALID_ID;
     const parsed = parseVoice(speechProvider(process.env), formData.get("voice"));
     if (!parsed) return "Ongeldige stem.";
-    if (!(await getBrain().setVoice(id, parsed.voice))) return DYNIMO_GONE;
+    const description = String(formData.get("voiceDescription") ?? "").trim().slice(0, 500) || null;
+    if (!(await getBrain().setVoiceProfile(id, { voice: parsed.voice, description }))) return DYNIMO_GONE;
   });
 }
 

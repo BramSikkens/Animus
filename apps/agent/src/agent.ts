@@ -24,6 +24,7 @@ import {
   type VAD,
 } from "@livekit/agents";
 import * as deepgram from "@livekit/agents-plugin-deepgram";
+import * as elevenlabs from "@livekit/agents-plugin-elevenlabs";
 import * as livekit from "@livekit/agents-plugin-livekit";
 import * as openai from "@livekit/agents-plugin-openai";
 import * as silero from "@livekit/agents-plugin-silero";
@@ -33,6 +34,7 @@ import { createStateRepublisher, emotionMessageFor } from "./state-republish.js"
 import { createInitiativeTimer, initiativeIntervalMs, parseInitiativeMinutes } from "./initiative-timer.js";
 import { createReflectionDisplay } from "./reflection-display.js";
 import { createSilenceTimer, parseSilenceMinutes } from "./silence-timer.js";
+import { applyTtsVoice } from "./tts-voice.js";
 import { textStream } from "./text-stream.js";
 import { resolveDisplay, voiceDisplay } from "./voice-display.js";
 
@@ -48,8 +50,20 @@ process.env.LIVEKIT_API_SECRET ??= "secret";
 type AgentUserData = { vad: VAD };
 
 // Zonder DEEPGRAM_API_KEY valt dit terug op OpenAI, spec-conform is Deepgram.
-function speechProviders(): { stt: deepgram.STT | openai.STT; tts: deepgram.TTS | openai.TTS } {
-  if (speechProvider(process.env) === "deepgram") {
+function speechProviders(): { stt: deepgram.STT | openai.STT; tts: elevenlabs.TTS | deepgram.TTS | openai.TTS } {
+  const provider = speechProvider(process.env);
+  if (provider === "elevenlabs") {
+    console.log("Spraakproviders: ElevenLabs TTS (Flash v2.5, nl), Deepgram/OpenAI STT");
+    // Plugin leest zelf ELEVEN_API_KEY; onze env heet ELEVENLABS_API_KEY, dus expliciet meegeven.
+    const tts = new elevenlabs.TTS({ apiKey: process.env.ELEVENLABS_API_KEY, model: "eleven_flash_v2_5", language: "nl" });
+    return {
+      stt: process.env.DEEPGRAM_API_KEY
+        ? new deepgram.STT({ model: "nova-3", language: "nl" })
+        : new openai.STT({ model: "gpt-4o-transcribe", useRealtime: false, language: "nl" }),
+      tts,
+    };
+  }
+  if (provider === "deepgram") {
     console.log("Spraakproviders: Deepgram (STT nova-3 nl, TTS aura-2-beatrix-nl)");
     return {
       stt: new deepgram.STT({ model: "nova-3", language: "nl" }),
@@ -161,9 +175,8 @@ export default defineAgent<AgentUserData>({
     const { stt, tts } = speechProviders();
     // De stem van de wakkere Dynimo (fallback: de default van de provider) op de gedeelde TTS zetten.
     const applyVoice = (stored: string | null): void => {
-      const chosen = resolveVoice(speechProvider(process.env), stored);
-      if (tts instanceof deepgram.TTS) tts.updateOptions({ model: chosen });
-      else tts.updateOptions({ voice: chosen as openai.TTSVoices });
+      const provider = speechProvider(process.env);
+      applyTtsVoice(provider, tts, resolveVoice(provider, stored, process.env.ELEVENLABS_DEFAULT_VOICE_ID));
     };
     const session = new voice.AgentSession({
       vad: ctx.proc.userData.vad,

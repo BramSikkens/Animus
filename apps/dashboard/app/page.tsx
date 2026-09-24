@@ -197,6 +197,7 @@ export default async function DashboardPage() {
                         </option>
                       ))}
                     </select>
+                    <input name="voiceDescription" aria-label="Stembeschrijving" placeholder="Stembeschrijving (bv. warm, laag, rustig)" maxLength={500} defaultValue={dynimo.voiceDescription ?? ""} />
                   </ActionForm>
                   <ActionForm action={kill} label="Doden" pendingLabel="Neemt afscheid…" id={dynimo.id} confirmName />
                   <details>

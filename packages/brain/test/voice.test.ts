@@ -36,7 +36,24 @@ describe("parseVoice", () => {
   });
 });
 
+describe("elevenlabs", () => {
+  it("kent een startlijst met Rachel als default", () => {
+    expect(voicesFor("elevenlabs")[0]).toBe("21m00Tcm4TlvDq8ikWAM");
+    expect(resolveVoice("elevenlabs", null)).toBe("21m00Tcm4TlvDq8ikWAM");
+  });
+
+  it("gebruikt een meegegeven default (env ELEVENLABS_DEFAULT_VOICE_ID) bij null", () => {
+    expect(resolveVoice("elevenlabs", null, "abc123")).toBe("abc123");
+    expect(resolveVoice("elevenlabs", "pNInz6obpgDQGcFmaJgB", "abc123")).toBe("pNInz6obpgDQGcFmaJgB");
+  });
+});
+
 describe("speechProvider", () => {
+  it("kiest ElevenLabs met ELEVENLABS_API_KEY, v\u00f3\u00f3r Deepgram", () => {
+    expect(speechProvider({ ELEVENLABS_API_KEY: "x", DEEPGRAM_API_KEY: "y" })).toBe("elevenlabs");
+    expect(speechProvider({ ELEVENLABS_API_KEY: "" })).toBe("openai");
+  });
+
   it("kiest Deepgram met een DEEPGRAM_API_KEY, anders OpenAI", () => {
     expect(speechProvider({ DEEPGRAM_API_KEY: "x" })).toBe("deepgram");
     expect(speechProvider({})).toBe("openai");

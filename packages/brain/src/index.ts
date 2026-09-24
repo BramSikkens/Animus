@@ -77,7 +77,7 @@ export type Brain = {
   /** Dashboard-override: zet de vier Persoonlijkheidsassen (0–1) direct; gesprekken en Reflecties schuiven ze daarna weer op. False bij een onbekende id. */
   setAxes(id: number, axes: Axes): Promise<boolean>;
   /** Dashboard: zet de TTS-stem (null = default van de agent); de agent past die direct toe. False bij een onbekende id. */
-  setVoice(id: number, voice: string | null): Promise<boolean>;
+  setVoiceProfile(id: number, profile: { voice: string | null; description: string | null }): Promise<boolean>;
   /** Dashboard-override: kiest een archetype en zet zijn zes assen en Basisemotie als startpunt (geen pinning). False bij een onbekende id of een onbekend archetype. */
   setArchetype(id: number, archetypeId: string): Promise<boolean>;
   /**
@@ -864,9 +864,9 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     return updated.length > 0;
   }
 
-  async function setVoice(id: number, voice: string | null): Promise<boolean> {
+  async function setVoiceProfile(id: number, { voice, description }: { voice: string | null; description: string | null }): Promise<boolean> {
     return deps.db.transaction(async (tx) => {
-      const updated = await tx.update(dynimos).set({ voice }).where(eq(dynimos.id, id)).returning({ id: dynimos.id });
+      const updated = await tx.update(dynimos).set({ voice, voiceDescription: description }).where(eq(dynimos.id, id)).returning({ id: dynimos.id });
       // Payload "voice:" laat de agent enkel de stem verversen, zonder het lopende antwoord af te breken.
       if (updated.length > 0) await notifyStateChange(tx, `voice:${id}`);
       return updated.length > 0;
@@ -1105,5 +1105,5 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     }
   }
 
-  return { bringToLife, wake, sleep, kill, list, backfill, reflect, considerInitiative, hear, forceMood, setMood, setAxes, setVoice, setArchetype, addMemory, removeMemory };
+  return { bringToLife, wake, sleep, kill, list, backfill, reflect, considerInitiative, hear, forceMood, setMood, setAxes, setVoiceProfile, setArchetype, addMemory, removeMemory };
 }

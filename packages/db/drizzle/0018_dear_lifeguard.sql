@@ -1,0 +1,1 @@
+ALTER TABLE "dynimos" ADD COLUMN "voice_description" text;

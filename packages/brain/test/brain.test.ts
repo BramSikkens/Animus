@@ -3541,20 +3541,20 @@ describe("createBrain", () => {
       });
     });
 
-    describe("setVoice", () => {
-      it("slaat de stem op en wist die weer met null", async () => {
+    describe("setVoiceProfile", () => {
+      it("slaat stem en beschrijving op en wist ze weer met null", async () => {
         const vero = await insertDynimo();
 
-        expect(await brainWith().setVoice(vero.id, "nova")).toBe(true);
-        expect(await rowOf(vero.id)).toMatchObject({ voice: "nova" });
+        expect(await brainWith().setVoiceProfile(vero.id, { voice: "nova", description: "warm, laag" })).toBe(true);
+        expect(await rowOf(vero.id)).toMatchObject({ voice: "nova", voiceDescription: "warm, laag" });
 
-        expect(await brainWith().setVoice(vero.id, null)).toBe(true);
-        expect(await rowOf(vero.id)).toMatchObject({ voice: null });
+        expect(await brainWith().setVoiceProfile(vero.id, { voice: null, description: null })).toBe(true);
+        expect(await rowOf(vero.id)).toMatchObject({ voice: null, voiceDescription: null });
       });
 
       it("geeft false bij een onbekende Dynimo", async () => {
         const vero = await insertDynimo();
-        expect(await brainWith().setVoice(vero.id + 999, "nova")).toBe(false);
+        expect(await brainWith().setVoiceProfile(vero.id + 999, { voice: "nova", description: null })).toBe(false);
       });
     });
 

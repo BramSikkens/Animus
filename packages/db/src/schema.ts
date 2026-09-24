@@ -38,6 +38,8 @@ export const dynimos = pgTable(
     axisExpressiveness: real("axis_expressiveness").notNull().default(0.5),
     // TTS-stem (model/stemnaam van de actieve spraakprovider). NULL = default van de agent.
     voice: text("voice"),
+    // Vrije stembeschrijving (#62), input voor Voice Design (#64). NULL = geen.
+    voiceDescription: text("voice_description"),
     // Archetype (#60): id uit @animus/brain/archetypes; startpunt voor assen/spreekstijl, geen pinning. NULL = geen.
     archetype: text("archetype"),
   },

@@ -5,7 +5,7 @@ import { eq, isNotNull } from "drizzle-orm";
 import { EMBEDDING_DIMENSIONS, dreams, drives, dynimos, epitaphs, memories } from "@animus/db/schema";
 import postgres from "postgres";
 import { EMOTIONS } from "../src/emotion.js";
-import { moodOfRow, singleEmotionValues } from "../src/mood.js";
+import { moodOfRow, singleEmotionValues, type MoodValues } from "../src/mood.js";
 import { createBrain, STATE_CHANNEL, type BrainEvent } from "../src/index.js";
 import { createTestDb, databaseUrl, TEST_DB_NAME, truncateAll } from "./db.js";
 
@@ -3370,6 +3370,40 @@ describe("createBrain", () => {
           await client.end();
         }
       });
+
+    describe("setMood", () => {
+      const zeros = Object.fromEntries(EMOTIONS.map((e) => [e, 0])) as MoodValues;
+
+      it("zet de hele Stemmingsvector direct met tijdstip nu, en laat de Basisemotie ongemoeid", async () => {
+        const vero = await insertDynimo({ moodValues: singleEmotionValues("boos", 0.9), moodAt: new Date(0) });
+
+        expect(await brainWith().setMood(vero.id, { ...zeros, blij: 40, kalm: 70 })).toBe(true);
+
+        expect(await rowOf(vero.id)).toMatchObject({ moodValues: { blij: 40, kalm: 70, boos: 0 }, moodAt: bornAt, baseEmotion: "kalm" });
+      });
+
+      it("geeft false en wijzigt niets bij een onbekende Dynimo", async () => {
+        const vero = await insertDynimo();
+
+        expect(await brainWith().setMood(vero.id + 999, zeros)).toBe(false);
+        expect((await rowOf(vero.id)).moodValues).toBeNull();
+      });
+    });
+
+    describe("setAxes", () => {
+      it("overschrijft de opgeslagen assen", async () => {
+        const vero = await insertDynimo();
+
+        expect(await brainWith().setAxes(vero.id, { ie: 0.1, sn: 0.9, tf: 0.3, jp: 0.7 })).toBe(true);
+
+        expect(await rowOf(vero.id)).toMatchObject({ axisIe: 0.1, axisSn: 0.9, axisTf: 0.3, axisJp: 0.7 });
+      });
+
+      it("geeft false bij een onbekende Dynimo", async () => {
+        const vero = await insertDynimo();
+        expect(await brainWith().setAxes(vero.id + 999, { ie: 0.1, sn: 0.9, tf: 0.3, jp: 0.7 })).toBe(false);
+      });
+    });
 
       // OVERRIDES-APPEND
     });

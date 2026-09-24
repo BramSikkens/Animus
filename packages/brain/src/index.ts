@@ -17,9 +17,9 @@ import type { Db } from "@animus/db";
 import { dreams, drives, dynimos, epitaphs, memories } from "@animus/db/schema";
 import { formatAge } from "./age.js";
 import { DRIVE_DESCRIPTIONS, DRIVE_KINDS, drivesPromptBlock, isActiveDrive, type DriveRow } from "./drives.js";
-import { applyDeltas, baseEmotionOf, currentMood, moodOfRow, singleEmotionValues, storedMoodOf, type Mood, type MoodDeltas, type StoredMood } from "./mood.js";
+import { applyDeltas, baseEmotionOf, currentMood, moodOfRow, singleEmotionValues, storedMoodOf, type Mood, type MoodDeltas, type MoodValues, type StoredMood } from "./mood.js";
 import { isVisibleMoodChange, soundKindFor, type SoundKind } from "./sound.js";
-import { AXIS_DESCRIPTIONS, axisGuidelines, mbtiType, rowAxes } from "./personality.js";
+import { AXIS_DESCRIPTIONS, type Axes, axisGuidelines, mbtiType, rowAxes } from "./personality.js";
 import { EMOTIONS, type Emotion } from "./emotion.js";
 import { SEEDS } from "./seeds.js";
 import { createTools } from "./tools.js";
@@ -70,6 +70,10 @@ export type Brain = {
    * gewoon uit, de Basisemotie blijft ongewijzigd. False bij een onbekende id; gooit bij een ongeldige intensiteit.
    */
   forceMood(id: number, emotion: Emotion, intensity: number): Promise<boolean>;
+  /** Dashboard-override: zet de volledige Stemmingsvector (0–100 per emotie) met tijdstip nu; geen pinning, ze dooft gewoon uit. False bij een onbekende id. */
+  setMood(id: number, values: MoodValues): Promise<boolean>;
+  /** Dashboard-override: zet de vier Persoonlijkheidsassen (0–1) direct; gesprekken en Reflecties schuiven ze daarna weer op. False bij een onbekende id. */
+  setAxes(id: number, axes: Axes): Promise<boolean>;
   /**
    * Dashboard-override: voegt een Herinnering toe met dezelfde embed-stap als een normale beurt en de neutrale
    * Indruk 0.5. False bij een onbekende id; gooit als het embedden of opslaan faalt.
@@ -793,10 +797,23 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
   }
 
   async function forceMood(id: number, emotion: Emotion, intensity: number): Promise<boolean> {
+    return setMood(id, singleEmotionValues(emotion, intensity));
+  }
+
+  async function setAxes(id: number, axes: Axes): Promise<boolean> {
+    const updated = await deps.db
+      .update(dynimos)
+      .set({ axisIe: axes.ie, axisSn: axes.sn, axisTf: axes.tf, axisJp: axes.jp })
+      .where(eq(dynimos.id, id))
+      .returning({ id: dynimos.id });
+    return updated.length > 0;
+  }
+
+  async function setMood(id: number, values: MoodValues): Promise<boolean> {
     return deps.db.transaction(async (tx) => {
       const updated = await tx
         .update(dynimos)
-        .set({ moodValues: singleEmotionValues(emotion, intensity), moodAt: now() })
+        .set({ moodValues: values, moodAt: now() })
         .where(eq(dynimos.id, id))
         .returning({ id: dynimos.id });
       // Payload "mood:" laat de agent enkel het gezichtje verversen, zonder het lopende antwoord af te breken.
@@ -1009,5 +1026,5 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     }
   }
 
-  return { bringToLife, wake, sleep, kill, list, backfill, reflect, considerInitiative, hear, forceMood, addMemory, removeMemory };
+  return { bringToLife, wake, sleep, kill, list, backfill, reflect, considerInitiative, hear, forceMood, setMood, setAxes, addMemory, removeMemory };
 }

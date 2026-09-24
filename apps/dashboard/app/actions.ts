@@ -2,6 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { isEmotion } from "@animus/brain/emotion";
+import { parseMoodValues } from "@animus/brain/mood";
+import { parseAxes } from "@animus/brain/personality";
 import { getBrain } from "../lib/brain";
 
 export type ActionState = { error?: string };
@@ -64,6 +66,26 @@ export async function forceMood(_prev: ActionState, formData: FormData): Promise
     if (!isEmotion(emotion)) return "Ongeldige emotie.";
     if (!(intensity >= 0 && intensity <= 1)) return "Intensiteit moet tussen 0 en 1 liggen.";
     if (!(await getBrain().forceMood(id, emotion, intensity))) return DYNIMO_GONE;
+  });
+}
+
+export async function setMood(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  return run(async () => {
+    const id = parseId(formData);
+    if (id === null) return INVALID_ID;
+    const values = parseMoodValues((name) => formData.get(name));
+    if (!values) return "Ongeldige emotiewaarden.";
+    if (!(await getBrain().setMood(id, values))) return DYNIMO_GONE;
+  });
+}
+
+export async function setAxes(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  return run(async () => {
+    const id = parseId(formData);
+    if (id === null) return INVALID_ID;
+    const axes = parseAxes((name) => formData.get(name));
+    if (!axes) return "Ongeldige persoonlijkheidsassen.";
+    if (!(await getBrain().setAxes(id, axes))) return DYNIMO_GONE;
   });
 }
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { EMOTIONS } from "../src/emotion.js";
-import { applyDeltas, BASE_LEVEL, currentMood, MOOD_HALF_LIFE_MS, moodOfRow, singleEmotionValues, storedMoodOf, type MoodValues, type StoredMood } from "../src/mood.js";
+import { applyDeltas, BASE_LEVEL, currentMood, MOOD_HALF_LIFE_MS, moodOfRow, parseMoodValues, singleEmotionValues, storedMoodOf, type MoodValues, type StoredMood } from "../src/mood.js";
 
 const T0 = new Date("2026-01-01T12:00:00.000Z");
 const after = (ms: number) => new Date(T0.getTime() + ms);
@@ -112,5 +112,26 @@ describe("moodOfRow", () => {
 describe("singleEmotionValues", () => {
   it("zet één emotie op intensiteit*100 en de rest op 0", () => {
     expect(singleEmotionValues("boos", 0.8)).toEqual(values({ boos: 80 }));
+  });
+});
+
+describe("parseMoodValues", () => {
+  const field = (over: Record<string, unknown>) => (name: string) => over[name] ?? null;
+
+  it("leest elke emotie uit veld `mood_<emotie>` als getal", () => {
+    const parsed = parseMoodValues(field(Object.fromEntries(EMOTIONS.map((e, i) => [`mood_${e}`, String(i * 10)]))));
+    expect(parsed).toEqual(Object.fromEntries(EMOTIONS.map((e, i) => [e, i * 10])));
+  });
+
+  it("clampt op 0–100", () => {
+    const parsed = parseMoodValues(field({ ...Object.fromEntries(EMOTIONS.map((e) => [`mood_${e}`, "5"])), mood_blij: "150", mood_boos: "-3" }));
+    expect(parsed).toMatchObject({ blij: 100, boos: 0, kalm: 5 });
+  });
+
+  it("geeft null bij een ontbrekende of niet-numerieke waarde", () => {
+    const all = Object.fromEntries(EMOTIONS.map((e) => [`mood_${e}`, "5"]));
+    expect(parseMoodValues(field({ ...all, mood_bang: "abc" }))).toBeNull();
+    expect(parseMoodValues(field({ ...all, mood_bang: "" }))).toBeNull();
+    expect(parseMoodValues(field({}))).toBeNull();
   });
 });

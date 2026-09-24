@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AXES, axisGuidelines, mbtiType, type Axes } from "../src/personality.js";
+import { AXES, axisGuidelines, mbtiType, parseAxes, type Axes } from "../src/personality.js";
 
 const MIDDLE: Axes = { ie: 0.5, sn: 0.5, tf: 0.5, jp: 0.5 };
 
@@ -80,5 +80,18 @@ describe("drempels van axisGuidelines", () => {
   it("kent de uiterste waarden 0 en 1 een sterke richtlijn toe", () => {
     expect(line(0)).toContain("sterk");
     expect(line(1)).toContain("sterk");
+  });
+});
+
+describe("parseAxes", () => {
+  const field = (over: Record<string, unknown>) => (name: string) => over[name] ?? null;
+
+  it("leest elke as uit veld `axis_<as>` als getal en clampt op 0–1", () => {
+    expect(parseAxes(field({ axis_ie: "0.25", axis_sn: "1.5", axis_tf: "-1", axis_jp: "0.5" }))).toEqual({ ie: 0.25, sn: 1, tf: 0, jp: 0.5 });
+  });
+
+  it("geeft null bij een ontbrekende of niet-numerieke waarde", () => {
+    expect(parseAxes(field({ axis_ie: "0.2", axis_sn: "0.2", axis_tf: "0.2" }))).toBeNull();
+    expect(parseAxes(field({ axis_ie: "0.2", axis_sn: "x", axis_tf: "0.2", axis_jp: "0.2" }))).toBeNull();
   });
 });

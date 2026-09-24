@@ -96,3 +96,14 @@ export function moodOfRow(row: MoodColumns, now: Date): Mood {
 export function singleEmotionValues(emotion: Emotion, intensity: number): MoodValues {
   return { ...restValues(emotion), [emotion]: clamp(intensity * 100) } as MoodValues;
 }
+
+/** Dashboard-formulier: veld `mood_<emotie>` (0–100, geclampt) voor elke emotie; null als er één ontbreekt of geen getal is. */
+export function parseMoodValues(field: (name: string) => unknown): MoodValues | null {
+  const values: Partial<MoodValues> = {};
+  for (const emotion of EMOTIONS) {
+    const raw = field(`mood_${emotion}`);
+    if (typeof raw !== "string" || raw.trim() === "" || Number.isNaN(Number(raw))) return null;
+    values[emotion] = clamp(Number(raw));
+  }
+  return values as MoodValues;
+}

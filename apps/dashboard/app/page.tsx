@@ -7,7 +7,7 @@ import { AXES, AXIS_LETTERS, mbtiType, rowAxes } from "@animus/brain/personality
 import { dreams, drives, dynimos, epitaphs, memories } from "@animus/db/schema";
 import { db } from "../lib/db";
 import { ActionForm } from "./action-form";
-import { addMemory, bringToLife, forceMood, kill, removeMemory, sleep, wake } from "./actions";
+import { addMemory, bringToLife, forceMood, kill, removeMemory, setAxes, setMood, sleep, wake } from "./actions";
 import { formatDate, formatDateTime } from "../lib/format";
 
 export const dynamic = "force-dynamic";
@@ -158,6 +158,22 @@ export default async function DashboardPage() {
                       ))}
                     </select>
                     <input name="intensity" type="number" min={0} max={1} step={0.05} defaultValue={0.8} aria-label="Intensiteit (0 tot 1)" required />
+                  </ActionForm>
+                  <ActionForm action={setMood} label="Stemming zetten" pendingLabel="Zet…" id={dynimo.id}>
+                    {EMOTIONS.map((emotion) => (
+                      <label key={emotion} className="slider">
+                        {emotion}
+                        <input name={`mood_${emotion}`} type="range" min={0} max={100} step={1} defaultValue={Math.round(moodOfRow(dynimo, new Date()).values[emotion])} />
+                      </label>
+                    ))}
+                  </ActionForm>
+                  <ActionForm action={setAxes} label="Persoonlijkheid zetten" pendingLabel="Zet…" id={dynimo.id}>
+                    {AXES.map((axis) => (
+                      <label key={axis} className="slider">
+                        {AXIS_LETTERS[axis][0]}↔{AXIS_LETTERS[axis][1]}
+                        <input name={`axis_${axis}`} type="range" min={0} max={1} step={0.01} defaultValue={axes?.[axis] ?? 0.5} />
+                      </label>
+                    ))}
                   </ActionForm>
                   <ActionForm action={kill} label="Doden" pendingLabel="Neemt afscheid…" id={dynimo.id} confirmName />
                   <details>

@@ -124,3 +124,4 @@ li h3 {
 .error { color: #b3261e; margin: 0; }
 
 .axis { margin: 0; }
+.slider { display: flex; align-items: center; gap: 0.5rem; width: 100%; }

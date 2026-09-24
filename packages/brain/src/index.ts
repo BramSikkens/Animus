@@ -17,7 +17,7 @@ import type { Db } from "@animus/db";
 import { dreams, drives, dynimos, epitaphs, memories } from "@animus/db/schema";
 import { formatAge } from "./age.js";
 import { DRIVE_DESCRIPTIONS, DRIVE_KINDS, drivesPromptBlock, isActiveDrive, type DriveRow } from "./drives.js";
-import { applyEmotion, baseEmotionOf, currentMood, storedMoodOf, type Mood, type StoredMood } from "./mood.js";
+import { applyEmotion, baseEmotionOf, currentMood, moodOfRow, storedMoodOf, type Mood, type StoredMood } from "./mood.js";
 import { isVisibleMoodChange, soundKindFor, type SoundKind } from "./sound.js";
 import { AXIS_DESCRIPTIONS, axisGuidelines, mbtiType, rowAxes } from "./personality.js";
 import { EMOTIONS, isEmotion, type Emotion } from "./emotion.js";

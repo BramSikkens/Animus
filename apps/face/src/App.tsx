@@ -5,6 +5,8 @@ import {
   StartAudio,
   useConnectionState,
   useDataChannel,
+  useLocalParticipant,
+  useTranscriptions,
   useTrackVolume,
   useVoiceAssistant,
 } from "@livekit/components-react";
@@ -131,6 +133,14 @@ function MouthVolumeListener({ onVolume }: { onVolume: (volume: number) => void 
   return null;
 }
 
+// Laatste transcriptie van de eigen microfoon (agent publiceert die op lk.transcription); voedt de micro-expressies.
+function UserTextListener({ onText }: { onText: (text: string) => void }) {
+  const { localParticipant } = useLocalParticipant();
+  const last = useTranscriptions({ participantIdentities: [localParticipant.identity] }).at(-1)?.text;
+  useEffect(() => { if (last) onText(last); }, [last, onText]);
+  return null;
+}
+
 // Speelt bij een sound-event (SoundMessage op SOUND_TOPIC) een vooraf opgenomen clip af; niet tijdens slapend/reflecterend.
 function SoundListener({ display, onSound }: { display: DisplayState; onSound: () => void }) {
   useDataChannel(SOUND_TOPIC, (msg) => {
@@ -204,6 +214,7 @@ export function App() {
   const [beings, setBeings] = useState<GalleryBeing[] | null>(null);
   const [mouthVolume, setMouthVolume] = useState(0);
   const [doodle, setDoodle] = useState(false);
+  const [userText, setUserText] = useState<string>();
   const lastActivity = useRef(Date.now());
   const thresholdMs = useMemo(doodleThresholdMs, []);
   const debug = useMemo(() => new URLSearchParams(window.location.search).has("debug"), []);
@@ -247,6 +258,7 @@ export function App() {
     setName(null);
     setBeings(null);
     setMouthVolume(0);
+    setUserText(undefined);
   }
 
   // Verbonden en de lijst bekend: Galerij als niemand wakker is, anders het gezicht van de wakkere.
@@ -255,7 +267,7 @@ export function App() {
   return (
     <>
       {view.screen !== "galerij" && <>
-      <Face doodle={doodle} display={displayState} emotion={emotionState.emotion} intensity={emotionState.intensity} mouthVolume={mouthVolume} />
+      <Face doodle={doodle} display={displayState} emotion={emotionState.emotion} intensity={emotionState.intensity} mouthVolume={mouthVolume} values={emotionState.values} lastUserText={userText} />
 
       {name && <p className="dynimo-name">{name}</p>}
       {emotionState.values && (
@@ -295,6 +307,7 @@ export function App() {
           >
             <EmotionListener onEmotion={onEmotion} />
             <DisplayListener onDisplay={onDisplay} onName={setName} />
+            <UserTextListener onText={setUserText} />
             <MouthVolumeListener onVolume={setMouthVolume} />
             <GalleryListener onGallery={setBeings} />
             <SoundListener display={displayState} onSound={touch} />

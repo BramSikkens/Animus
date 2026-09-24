@@ -1,10 +1,13 @@
-import { motion, useAnimationFrame, useMotionValue, type MotionValue } from "motion/react";
+import { useEffect, useRef, useState } from "react";
+import { motion, useAnimationFrame, useMotionValue, useReducedMotion, type MotionValue } from "motion/react";
 import type { DisplayState } from "@animus/brain/display";
 import type { Emotion } from "@animus/brain/emotion";
 import { doodlePath } from "./doodle.js";
+import { gazeOffset } from "./gaze.js";
 import { idleOffsets } from "./idle.js";
 import { frameForDisplay } from "./interpolate.js";
 import type { Keyframe } from "./keyframes.js";
+import { microExpression } from "./micro.js";
 import { mouthOpenForVolume } from "./mouth.js";
 
 // Eén lijn- en vulkleur voor het hele gezicht (ogen, mond, wenkbrauwen); de achtergrond
@@ -15,6 +18,12 @@ const TRANSITION = { duration: 0.4, ease: "easeInOut" } as const;
 const MOUTH_SPEAK_TRANSITION = { duration: 0.08, ease: "linear" } as const;
 
 const DOODLE_SEED = 1;
+
+const GAZE_MAX = 3; // viewBox-eenheden: klein bereik, de pupil blijft binnen het oog
+const GAZE_SMOOTHING = 0.12; // aandeel van de resterende afstand per frame
+const FROWN_BROW_DROP = 2.5;
+// De uiting van de gebruiker stuurt micro-expressies maar kort; daarna zakt het gezicht terug.
+const RECENT_TEXT_MS = 4000;
 
 const EYE_X = { left: 72, right: 128 } as const;
 const EYE_Y = 85;
@@ -119,13 +128,35 @@ export type FaceProps = {
   intensity: number;
   /** Volume 0..1 van de agent-audiotrack; stuurt de mondopening alleen tijdens "spreekt". */
   mouthVolume?: number;
+  /** Volledige emotievector; voedt de frons (boos >= 60). */
+  values?: Record<Emotion, number>;
+  /** Laatste uiting van de Gesprekspartner (transcriptie); voedt vraag-wenkbrauw en glimlach. */
+  lastUserText?: string;
 };
 
 /** Het gezichtje: achtergrond + ogen + mond + wenkbrauwen, getweend tussen emoties en de slaapstand (~300-500ms). */
-export function Face({ doodle = false, display, emotion, intensity, mouthVolume = 0 }: FaceProps) {
+export function Face({ doodle = false, display, emotion, intensity, mouthVolume = 0, values, lastUserText }: FaceProps) {
+  const reduced = useReducedMotion();
+  const [recentText, setRecentText] = useState<string>();
+  useEffect(() => {
+    setRecentText(lastUserText);
+    if (!lastUserText) return;
+    const id = setTimeout(() => setRecentText(undefined), RECENT_TEXT_MS);
+    return () => clearTimeout(id);
+  }, [lastUserText]);
+  const micro = reduced ? { browRaise: 0, frown: 0, smile: 0 } : microExpression({ displayState: display, lastUserText: recentText, values });
   const frame = frameForDisplay(display, emotion, intensity);
   const speaking = display === "spreekt";
-  const mouth = speaking ? { ...frame.mouth, open: Math.max(frame.mouth.open, mouthOpenForVolume(mouthVolume)) } : frame.mouth;
+  const baseMouth = { ...frame.mouth, curve: frame.mouth.curve + micro.smile };
+  const mouth = speaking ? { ...baseMouth, open: Math.max(frame.mouth.open, mouthOpenForVolume(mouthVolume)) } : baseMouth;
+  // Muispositie in een ref; useAnimationFrame is de per-frame-throttle (geen extra rAF).
+  const pointer = useRef<{ x: number; y: number } | null>(null);
+  const gaze = useRef({ dx: 0, dy: 0 });
+  useEffect(() => {
+    const onMove = (e: PointerEvent) => { pointer.current = { x: e.clientX, y: e.clientY }; };
+    window.addEventListener("pointermove", onMove);
+    return () => window.removeEventListener("pointermove", onMove);
+  }, []);
   const blink = useMotionValue(1);
   const pupilX = useMotionValue(0);
   const pupilY = useMotionValue(0);
@@ -136,9 +167,15 @@ export function Face({ doodle = false, display, emotion, intensity, mouthVolume 
   useAnimationFrame((timeMs) => {
     const o = idleOffsets(timeMs / 1000);
     blink.set(Math.max(o.blink, 0.05));
-    pupilX.set(o.pupilX);
-    pupilY.set(o.pupilY);
-    browY.set(-o.browRaise);
+    const target =
+      reduced || display === "slapend"
+        ? { dx: 0, dy: 0 }
+        : gazeOffset({ pointer: pointer.current, viewport: { w: window.innerWidth, h: window.innerHeight }, faceCenter: { x: window.innerWidth / 2, y: window.innerHeight / 2 }, max: GAZE_MAX });
+    gaze.current.dx += (target.dx - gaze.current.dx) * GAZE_SMOOTHING;
+    gaze.current.dy += (target.dy - gaze.current.dy) * GAZE_SMOOTHING;
+    pupilX.set(o.pupilX + gaze.current.dx);
+    pupilY.set(o.pupilY + gaze.current.dy);
+    browY.set(-o.browRaise - micro.browRaise + micro.frown * FROWN_BROW_DROP);
     breathScale.set(o.breathScale);
     breathY.set(o.breathY);
   });

@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { index, integer, pgTable, real, serial, text, timestamp, uniqueIndex, vector } from "drizzle-orm/pg-core";
+import { check, index, integer, pgTable, real, serial, text, timestamp, uniqueIndex, vector } from "drizzle-orm/pg-core";
 
 // Meerdere rijen mogelijk: elke rij is een Dynimo.
 export const dynimos = pgTable(
@@ -12,13 +12,56 @@ export const dynimos = pgTable(
     birthStory: text("birth_story").notNull(),
     seed: text("seed").notNull(),
     bornAt: timestamp("born_at", { withTimezone: true }).notNull(),
-    lastEmotion: text("last_emotion"),
-    lastIntensity: real("last_intensity"),
+    // Basisemotie: het temperament waar de Stemming naartoe uitdooft. NULL = nog te backfillen.
+    // De waarden spiegelen EMOTIONS uit @animus/brain (db kan de brain niet importeren).
+    baseEmotion: text("base_emotion"),
+    // Stemming: de sterkste recente Emotie; de intensiteit dooft uit (zie mood.ts). Alle drie samen NULL of gezet.
+    moodEmotion: text("mood_emotion"),
+    moodIntensity: real("mood_intensity"),
+    moodAt: timestamp("mood_at", { withTimezone: true }),
+    // Reflectie (#27): tot en met welke Herinnering er gereflecteerd is (NULL = nog nooit), en de Ontwaakstemming
+    // waarmee de Dynimo bij het wekken begint (samen NULL of samen gezet).
+    lastReflectedAt: timestamp("last_reflected_at", { withTimezone: true }),
+    wakeMoodEmotion: text("wake_mood_emotion"),
+    wakeMoodIntensity: real("wake_mood_intensity"),
     // NULL = Slapend; gezet = Wakker (en de marker van deze wake-generatie).
     awakeSince: timestamp("awake_since", { withTimezone: true }),
+    // Persoonlijkheid: 0..1 = positie richting de tweede letter (I↔E, S↔N, T↔F, J↔P). NULL = nog te backfillen.
+    axisIe: real("axis_ie"),
+    axisSn: real("axis_sn"),
+    axisTf: real("axis_tf"),
+    axisJp: real("axis_jp"),
   },
   // Hooguit één Wakker: alle wakkere rijen delen dezelfde constante indexwaarde.
-  (table) => [uniqueIndex("dynimos_single_awake_idx").on(sql`(true)`).where(sql`${table.awakeSince} is not null`)],
+  (table) => [
+    check(
+      "dynimos_base_emotion_check",
+      sql`${table.baseEmotion} in ('blij', 'boos', 'verrast', 'kalm', 'verveeld', 'nieuwsgierig', 'bang', 'neutraal')`,
+    ),
+    check(
+      "dynimos_mood_emotion_check",
+      sql`${table.moodEmotion} in ('blij', 'boos', 'verrast', 'kalm', 'verveeld', 'nieuwsgierig', 'bang', 'neutraal')`,
+    ),
+    check("dynimos_mood_intensity_range", sql`${table.moodIntensity} between 0 and 1`),
+    check(
+      "dynimos_mood_all_or_none",
+      sql`(${table.moodEmotion} is null) = (${table.moodIntensity} is null) and (${table.moodEmotion} is null) = (${table.moodAt} is null)`,
+    ),
+    check(
+      "dynimos_wake_mood_emotion_check",
+      sql`${table.wakeMoodEmotion} in ('blij', 'boos', 'verrast', 'kalm', 'verveeld', 'nieuwsgierig', 'bang', 'neutraal')`,
+    ),
+    check("dynimos_wake_mood_intensity_range", sql`${table.wakeMoodIntensity} between 0 and 1`),
+    check(
+      "dynimos_wake_mood_all_or_none",
+      sql`(${table.wakeMoodEmotion} is null) = (${table.wakeMoodIntensity} is null)`,
+    ),
+    check("dynimos_axis_ie_range", sql`${table.axisIe} between 0 and 1`),
+    check("dynimos_axis_sn_range", sql`${table.axisSn} between 0 and 1`),
+    check("dynimos_axis_tf_range", sql`${table.axisTf} between 0 and 1`),
+    check("dynimos_axis_jp_range", sql`${table.axisJp} between 0 and 1`),
+    uniqueIndex("dynimos_single_awake_idx").on(sql`(true)`).where(sql`${table.awakeSince} is not null`),
+  ],
 );
 
 // Dimensie van OpenAI text-embedding-3-small (ADR-0008): een andere embedding-provider
@@ -36,8 +79,41 @@ export const memories = pgTable(
     text: text("text").notNull(),
     embedding: vector("embedding", { dimensions: EMBEDDING_DIMENSIONS }).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    // Hoe vormend de uiting was (Type1, 0..1); zware Indruk weegt zwaar in de Reflectie. Default = neutraal.
+    impression: real("impression").notNull().default(0.5),
   },
-  (table) => [index("memories_embedding_idx").using("hnsw", table.embedding.op("vector_cosine_ops"))],
+  (table) => [
+    index("memories_embedding_idx").using("hnsw", table.embedding.op("vector_cosine_ops")),
+    check("memories_impression_range", sql`${table.impression} between 0 and 1`),
+  ],
+);
+
+// Drijfveren van een Dynimo (CONTEXT.md). Rijen worden niet hard verwijderd: Doelen gaan naar bereikt/opgegeven
+// en sterktes veranderen (#27); "Drijfveren ontbreken" = nul rijen. status enkel voor doelen, strength enkel voor afkeer/ergernis.
+export const drives = pgTable(
+  "drives",
+  {
+    id: serial("id").primaryKey(),
+    dynimoId: integer("dynimo_id")
+      .notNull()
+      .references(() => dynimos.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(),
+    text: text("text").notNull(),
+    status: text("status"),
+    strength: real("strength"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+    // Zachte verwijdering: Drijfveren worden nooit hard verwijderd ("nul rijen" = ontbreekt voor de backfill).
+    droppedAt: timestamp("dropped_at", { withTimezone: true }),
+  },
+  (table) => [
+    index("drives_dynimo_id_idx").on(table.dynimoId),
+    check("drives_kind_check", sql`${table.kind} in ('wens', 'doel', 'toekomstdroom', 'afkeer', 'ergernis')`),
+    check("drives_status_check", sql`${table.status} in ('actief', 'bereikt', 'opgegeven')`),
+    check("drives_status_only_goal", sql`(${table.kind} = 'doel') = (${table.status} is not null)`),
+    check("drives_strength_only_aversion", sql`(${table.kind} in ('afkeer', 'ergernis')) = (${table.strength} is not null)`),
+    check("drives_strength_range", sql`${table.strength} between 0 and 1`),
+  ],
 );
 
 // Grafschrift van een verwijderd wezen (ADR-0003). Bewust géén relatie met identity/memories,

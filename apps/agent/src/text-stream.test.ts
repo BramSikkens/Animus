@@ -23,9 +23,9 @@ describe("textStream", () => {
     expect(chunks).toEqual(["Hallo", " daar"]);
   });
 
-  it("slaat emotion- en tool-*-events over", async () => {
+  it("slaat mood- en tool-*-events over", async () => {
     const events: BrainEvent[] = [
-      { type: "emotion", emotion: "blij", intensity: 0.8 },
+      { type: "mood", emotion: "blij", intensity: 0.8 },
       { type: "text", delta: "Hoi" },
       { type: "tool-call", toolName: "huidige_tijd", input: {} },
       { type: "tool-result", toolName: "huidige_tijd", output: "12:00" },
@@ -44,33 +44,33 @@ describe("textStream", () => {
     expect(chunks).toEqual(["Voor de fout"]);
   });
 
-  it("roept onEmotion aan met de juiste emotie en intensiteit", async () => {
+  it("roept onMood aan met de juiste emotie en intensiteit", async () => {
     const events: BrainEvent[] = [
-      { type: "emotion", emotion: "blij", intensity: 0.8 },
+      { type: "mood", emotion: "blij", intensity: 0.8 },
       { type: "text", delta: "Hoi" },
     ];
     const calls: Array<[string, number]> = [];
-    await collect(textStream(gen(events), { onEmotion: (emotion, intensity) => calls.push([emotion, intensity]) }));
+    await collect(textStream(gen(events), { onMood: (emotion, intensity) => calls.push([emotion, intensity]) }));
     expect(calls).toEqual([["blij", 0.8]]);
   });
 
-  it("roept onEmotion aan vóór de eerste tekst gelezen kan worden", async () => {
+  it("roept onMood aan vóór de eerste tekst gelezen kan worden", async () => {
     const events: BrainEvent[] = [
-      { type: "emotion", emotion: "boos", intensity: 0.5 },
+      { type: "mood", emotion: "boos", intensity: 0.5 },
       { type: "text", delta: "Hoi" },
     ];
     const order: string[] = [];
-    const stream = textStream(gen(events), { onEmotion: () => order.push("emotion") });
+    const stream = textStream(gen(events), { onMood: () => order.push("mood") });
     const reader = stream.getReader();
     const { value } = await reader.read();
     order.push(`text:${value}`);
     await reader.cancel();
-    expect(order).toEqual(["emotion", "text:Hoi"]);
+    expect(order).toEqual(["mood", "text:Hoi"]);
   });
 
-  it("werkt zonder onEmotion zoals voorheen", async () => {
+  it("werkt zonder onMood zoals voorheen", async () => {
     const events: BrainEvent[] = [
-      { type: "emotion", emotion: "kalm", intensity: 0.3 },
+      { type: "mood", emotion: "kalm", intensity: 0.3 },
       { type: "text", delta: "Hoi" },
     ];
     const chunks = await collect(textStream(gen(events)));

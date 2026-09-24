@@ -91,3 +91,21 @@ export const KEYFRAMES = {
   },
   neutraal: NEUTRAL,
 } satisfies Record<Emotion, Keyframe>;
+
+/** Weergavetoestand "slapend": ogen (bijna) dicht, vlakke mond, gedempte donkere achtergrond, geen emotie. */
+const EYE_CLOSED: Eye = { open: 0.08, scale: 1, pupilX: 0, pupilY: 0 };
+
+export const SLEEP: Keyframe = {
+  eyes: { left: EYE_CLOSED, right: EYE_CLOSED },
+  mouth: { width: 30, curve: 0, open: 0 },
+  background: "#22222b",
+};
+
+/** Weergavetoestand "reflecterend": ogen half gesloten met de blik omhoog/opzij, rustige vlakke mond, blauwig gedempt. */
+const EYE_THINKING: Eye = { open: 0.45, scale: 1, pupilX: 3, pupilY: -4 };
+
+export const REFLECT: Keyframe = {
+  eyes: { left: EYE_THINKING, right: EYE_THINKING },
+  mouth: { width: 30, curve: 0, open: 0 },
+  background: "#2b3247",
+};

@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { LiveKitRoom, RoomAudioRenderer, StartAudio, useConnectionState, useDataChannel } from "@livekit/components-react";
 import { ConnectionState } from "livekit-client";
+import { DISPLAY_STATES, DISPLAY_TOPIC, isDisplayState, type DisplayState } from "@animus/brain/display";
 import { EMOTION_TOPIC, EMOTIONS, isEmotion, type EmotionMessage } from "@animus/brain/emotion";
 import { Face } from "./face/Face.js";
 
@@ -8,6 +9,7 @@ type TokenSession = { serverUrl: string; token: string };
 type EmotionState = EmotionMessage;
 
 const NEUTRAL_STATE: EmotionState = { emotion: "neutraal", intensity: 0 };
+const DEFAULT_DISPLAY: DisplayState = "wakker";
 
 const STATUS_LABELS: Record<ConnectionState, string> = {
   [ConnectionState.Disconnected]: "niet verbonden",
@@ -49,10 +51,43 @@ function EmotionListener({ onEmotion }: { onEmotion: (state: EmotionState) => vo
   return null;
 }
 
+// Decodeert weergavetoestand-berichten van de agent (DisplayMessage op DISPLAY_TOPIC), met dezelfde validatie.
+function DisplayListener({ onDisplay }: { onDisplay: (state: DisplayState) => void }) {
+  useDataChannel(DISPLAY_TOPIC, (msg) => {
+    if (!msg.from?.isAgent) return;
+    try {
+      const payload: unknown = JSON.parse(new TextDecoder().decode(msg.payload));
+      if (payload !== null && typeof payload === "object" && "state" in payload && isDisplayState(payload.state)) {
+        onDisplay(payload.state);
+      } else {
+        console.error("Display-event heeft onverwachte vorm:", payload);
+      }
+    } catch (error) {
+      console.error("Display-event kon niet verwerkt worden:", error instanceof Error ? error.message : error);
+    }
+  });
+  return null;
+}
+
 // ?debug: paneel om het gezicht handmatig of met Playwright te sturen, zonder LiveKit.
-function DebugPanel({ state, onChange }: { state: EmotionState; onChange: (state: EmotionState) => void }) {
+function DebugPanel({
+  state,
+  onChange,
+  display,
+  onDisplayChange,
+}: {
+  state: EmotionState;
+  onChange: (state: EmotionState) => void;
+  display: DisplayState;
+  onDisplayChange: (display: DisplayState) => void;
+}) {
   return (
     <div className="debug-panel">
+      {DISPLAY_STATES.map((option) => (
+        <button key={option} type="button" aria-pressed={display === option} onClick={() => onDisplayChange(option)}>
+          {option}
+        </button>
+      ))}
       {EMOTIONS.map((emotion) => (
         <button
           key={emotion}
@@ -82,6 +117,7 @@ export function App() {
   const [session, setSession] = useState<TokenSession | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [emotionState, setEmotionState] = useState<EmotionState>(NEUTRAL_STATE);
+  const [displayState, setDisplayState] = useState<DisplayState>(DEFAULT_DISPLAY);
   const debug = useMemo(() => new URLSearchParams(window.location.search).has("debug"), []);
 
   async function start(): Promise<void> {
@@ -98,11 +134,12 @@ export function App() {
   function stop(): void {
     setSession(null);
     setEmotionState(NEUTRAL_STATE);
+    setDisplayState(DEFAULT_DISPLAY);
   }
 
   return (
     <>
-      <Face emotion={emotionState.emotion} intensity={emotionState.intensity} />
+      <Face display={displayState} emotion={emotionState.emotion} intensity={emotionState.intensity} />
 
       <main className="screen">
         {!session ? (
@@ -122,6 +159,7 @@ export function App() {
             onError={(err) => setError(err.message)}
           >
             <EmotionListener onEmotion={setEmotionState} />
+            <DisplayListener onDisplay={setDisplayState} />
             <ConnectionStatus />
             <RoomAudioRenderer />
             <StartAudio label="Zet geluid aan" />
@@ -133,7 +171,14 @@ export function App() {
         )}
       </main>
 
-      {debug && <DebugPanel state={emotionState} onChange={setEmotionState} />}
+      {debug && (
+        <DebugPanel
+          state={emotionState}
+          onChange={setEmotionState}
+          display={displayState}
+          onDisplayChange={setDisplayState}
+        />
+      )}
     </>
   );
 }

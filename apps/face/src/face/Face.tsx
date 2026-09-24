@@ -1,6 +1,7 @@
 import { motion } from "motion/react";
+import type { DisplayState } from "@animus/brain/display";
 import type { Emotion } from "@animus/brain/emotion";
-import { frameFor } from "./interpolate.js";
+import { frameForDisplay } from "./interpolate.js";
 import type { Keyframe } from "./keyframes.js";
 
 // Eén lijn- en vulkleur voor het hele gezicht (ogen, mond, wenkbrauwen); de achtergrond
@@ -95,11 +96,11 @@ function Brow({ cx, side, brow }: BrowProps) {
   );
 }
 
-export type FaceProps = { emotion: Emotion; intensity: number };
+export type FaceProps = { display: DisplayState; emotion: Emotion; intensity: number };
 
-/** Het gezichtje: achtergrond + ogen + mond + wenkbrauwen, getweend tussen emoties (~300-500ms). */
-export function Face({ emotion, intensity }: FaceProps) {
-  const frame = frameFor(emotion, intensity);
+/** Het gezichtje: achtergrond + ogen + mond + wenkbrauwen, getweend tussen emoties en de slaapstand (~300-500ms). */
+export function Face({ display, emotion, intensity }: FaceProps) {
+  const frame = frameForDisplay(display, emotion, intensity);
   return (
     <div className="face-stage">
       <motion.div
@@ -108,7 +109,9 @@ export function Face({ emotion, intensity }: FaceProps) {
         animate={{ backgroundColor: frame.background }}
         transition={TRANSITION}
       />
-      <svg className="face-svg" viewBox="0 0 200 200" role="img" aria-label={`Animus voelt zich ${emotion}`}>
+      <svg className="face-svg" viewBox="0 0 200 200" role="img" aria-label={
+          display === "slapend" ? "Animus slaapt" : display === "reflecterend" ? "Animus denkt na" : `Animus voelt zich ${emotion}`
+        }>
         <Eye cx={EYE_X.left} eye={frame.eyes.left} background={frame.background} />
         <Eye cx={EYE_X.right} eye={frame.eyes.right} background={frame.background} />
         <Brow cx={EYE_X.left} side="left" brow={frame.brow} />

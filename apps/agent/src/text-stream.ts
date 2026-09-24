@@ -2,15 +2,15 @@ import { ReadableStream } from "node:stream/web";
 import type { BrainEvent, Emotion } from "@animus/brain";
 
 export type TextStreamOptions = {
-  /** Aangeroepen zodra een `emotion`-event voorbijkomt, vóór er tekst in de stream komt. */
-  onEmotion?: (emotion: Emotion, intensity: number) => void;
+  /** Aangeroepen zodra een `mood`-event (de Stemming) voorbijkomt, vóór er tekst in de stream komt. */
+  onMood?: (emotion: Emotion, intensity: number) => void;
 };
 
 /**
  * Zet de `BrainEvent`-stroom van `brain.hear()` om naar enkel de tekst-deltas, zodat de
  * TTS al kan beginnen terwijl Type2 nog aan het antwoorden is.
  *
- * tool-*-events worden hier genegeerd (ticket #7). `emotion`-events roepen `options.onEmotion`
+ * tool-*-events worden hier genegeerd (ticket #7). `mood`-events roepen `options.onMood`
  * aan (ticket #8, publicatie op het LiveKit data channel gebeurt in agent.ts).
  *
  * Gooit de bron een fout (bv. `hear()` faalt halverwege een beurt), dan wordt dat gelogd en
@@ -37,8 +37,8 @@ export function textStream(events: AsyncIterable<BrainEvent>, options?: TextStre
           controller.enqueue(result.value.delta);
           return;
         }
-        if (result.value.type === "emotion") {
-          options?.onEmotion?.(result.value.emotion, result.value.intensity);
+        if (result.value.type === "mood") {
+          options?.onMood?.(result.value.emotion, result.value.intensity);
           continue;
         }
         // tool-* event: overslaan, volgende event proberen.

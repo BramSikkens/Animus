@@ -38,6 +38,12 @@ importers:
       '@livekit/agents-plugin-silero':
         specifier: 1.9.0
         version: 1.9.0(@livekit/agents@1.9.0(@livekit/rtc-node@0.13.35)(@types/node@26.6.2)(typescript@5.9.3)(zod@4.6.5))(@livekit/rtc-node@0.13.35)
+      '@livekit/rtc-node':
+        specifier: 0.13.35
+        version: 0.13.35
+      postgres:
+        specifier: 3.4.9
+        version: 3.4.9
     devDependencies:
       '@types/node':
         specifier: 26.6.2

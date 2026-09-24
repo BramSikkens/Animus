@@ -1,6 +1,9 @@
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, isNull } from "drizzle-orm";
 import { formatAge } from "@animus/brain/age";
-import { dynimos, epitaphs, memories } from "@animus/db/schema";
+import { moodOfRow } from "@animus/brain/mood";
+import { DRIVE_KINDS, DRIVE_LABELS, type DriveKind } from "@animus/brain/drives";
+import { AXES, AXIS_LETTERS, mbtiType, rowAxes } from "@animus/brain/personality";
+import { drives, dynimos, epitaphs, memories } from "@animus/db/schema";
 import { db } from "../lib/db";
 import { ActionForm } from "./action-form";
 import { bringToLife, kill, sleep, wake } from "./actions";
@@ -14,10 +17,14 @@ const RECENT_MEMORIES_LIMIT = 20;
 const UNDEFINED_TABLE = "42P01";
 
 async function loadDashboard() {
-  const [dynimoRows, epitaphRows] = await Promise.all([
+  const [dynimoRows, epitaphRows, driveRows] = await Promise.all([
     db.select().from(dynimos).orderBy(dynimos.id),
     db.select().from(epitaphs).orderBy(desc(epitaphs.deletedAt)),
+    db.select().from(drives).where(isNull(drives.droppedAt)).orderBy(drives.id),
   ]);
+  // Eén query voor alle Drijfveren; groeperen per Dynimo in code (geen N+1).
+  const drivesByDynimo = new Map<number, typeof driveRows>();
+  for (const drive of driveRows) drivesByDynimo.set(drive.dynimoId, [...(drivesByDynimo.get(drive.dynimoId) ?? []), drive]);
   const recentMemories = await Promise.all(
     dynimoRows.map((dynimo) =>
       db
@@ -28,7 +35,7 @@ async function loadDashboard() {
         .limit(RECENT_MEMORIES_LIMIT),
     ),
   );
-  return { dynimoRows, recentMemories, epitaphRows };
+  return { dynimoRows, recentMemories, epitaphRows, drivesByDynimo };
 }
 
 export default async function DashboardPage() {
@@ -48,7 +55,7 @@ export default async function DashboardPage() {
       </main>
     );
   }
-  const { dynimoRows, recentMemories, epitaphRows } = data;
+  const { dynimoRows, recentMemories, epitaphRows, drivesByDynimo } = data;
 
   return (
     <main>
@@ -61,17 +68,86 @@ export default async function DashboardPage() {
           <ul>
             {dynimoRows.map((dynimo, index) => {
               const awake = dynimo.awakeSince !== null;
-              const intensityPercent = dynimo.lastIntensity != null ? Math.round(dynimo.lastIntensity * 100) : null;
+              const axes = rowAxes(dynimo);
+              // Enkel de wakkere Dynimo heeft een levende Stemming.
+              const mood = awake ? moodOfRow(dynimo, new Date()) : null;
               return (
                 <li key={dynimo.id}>
                   <h3>{dynimo.name}</h3>
                   <p>
                     {awake ? "wakker" : "slapend"} · Leeftijd: {formatAge(Date.now() - dynimo.bornAt.getTime())}
                   </p>
-                  {awake ? (
-                    <ActionForm action={sleep} label="Laten slapen" pendingLabel="Bezig…" />
+                  {mood && (
+                    <p>
+                      Stemming: {mood.emotion}
+                      <span className="bar" role="img" aria-label={`intensiteit ${Math.round(mood.intensity * 100)}%`}>
+                        <span className="bar-fill" style={{ width: `${Math.round(mood.intensity * 100)}%` }} />
+                      </span>
+                      {Math.round(mood.intensity * 100)}%
+                    </p>
+                  )}
+                  <p>Basisemotie: {dynimo.baseEmotion ?? "nog niet bepaald"}</p>
+                  {axes ? (
+                    <div className="personality">
+                      <p>
+                        Persoonlijkheid: <strong>{mbtiType(axes)}</strong>
+                      </p>
+                      {AXES.map((axis) => {
+                        const percent = Math.round(axes[axis] * 100);
+                        const [first, second] = AXIS_LETTERS[axis];
+                        return (
+                          <p key={axis} className="axis">
+                            {first}
+                            <span className="bar" role="img" aria-label={`${first}↔${second}: ${percent}% richting ${second}`}>
+                              <span className="bar-fill" style={{ width: `${percent}%` }} />
+                            </span>
+                            {second}
+                          </p>
+                        );
+                      })}
+                    </div>
                   ) : (
-                    <ActionForm action={wake} label="Wakker maken" pendingLabel="Bezig…" id={dynimo.id} />
+                    <p>Persoonlijkheid: nog niet bepaald</p>
+                  )}
+                  <div className="drives">
+                    <p>Drijfveren:</p>
+                    {DRIVE_KINDS.map((kind: DriveKind) => {
+                      const ofKind = (drivesByDynimo.get(dynimo.id) ?? []).filter((drive) => drive.kind === kind);
+                      return (
+                        <div key={kind}>
+                          <h4>{DRIVE_LABELS[kind]}</h4>
+                          {ofKind.length ? (
+                            <ul>
+                              {ofKind.map((drive) => (
+                                <li key={drive.id}>
+                                  {drive.text}
+                                  {drive.status && <em> — {drive.status}</em>}
+                                  {drive.strength !== null && (
+                                    <>
+                                      <span
+                                        className="bar"
+                                        role="img"
+                                        aria-label={`sterkte ${Math.round(drive.strength * 100)}%`}
+                                      >
+                                        <span className="bar-fill" style={{ width: `${Math.round(drive.strength * 100)}%` }} />
+                                      </span>
+                                      {Math.round(drive.strength * 100)}%
+                                    </>
+                                  )}
+                                </li>
+                              ))}
+                            </ul>
+                          ) : (
+                            <p>nog geen</p>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {awake ? (
+                    <ActionForm action={sleep} label="Laten slapen" pendingLabel="Reflecteert…" />
+                  ) : (
+                    <ActionForm action={wake} label="Wakker maken" pendingLabel="Wordt wakker…" id={dynimo.id} />
                   )}
                   <ActionForm action={kill} label="Doden" pendingLabel="Neemt afscheid…" id={dynimo.id} confirmName />
                   <details>
@@ -79,26 +155,18 @@ export default async function DashboardPage() {
                     <dl>
                       <dt>Kern-karakter</dt>
                       <dd>{dynimo.coreCharacter}</dd>
+                      {dynimo.evolvedCharacter && (
+                        <>
+                          <dt>Geëvolueerd karakter</dt>
+                          <dd style={{ whiteSpace: "pre-wrap" }}>{dynimo.evolvedCharacter}</dd>
+                        </>
+                      )}
                       <dt>Geboorteverhaal</dt>
                       <dd style={{ whiteSpace: "pre-wrap" }}>{dynimo.birthStory}</dd>
                       <dt>Seed</dt>
                       <dd>{dynimo.seed}</dd>
                       <dt>Geboortedatum</dt>
                       <dd>{formatDate(dynimo.bornAt)}</dd>
-                      <dt>Laatste emotie</dt>
-                      <dd>
-                        {dynimo.lastEmotion && intensityPercent != null ? (
-                          <>
-                            {dynimo.lastEmotion}
-                            <span className="bar" aria-hidden="true">
-                              <span className="bar-fill" style={{ width: `${intensityPercent}%` }} />
-                            </span>
-                            {intensityPercent}%
-                          </>
-                        ) : (
-                          "nog geen"
-                        )}
-                      </dd>
                     </dl>
                     <h4>Recente herinneringen</h4>
                     {recentMemories[index]!.length ? (

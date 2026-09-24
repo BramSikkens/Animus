@@ -1,5 +1,6 @@
 import type { Emotion } from "@animus/brain/emotion";
-import { KEYFRAMES, NEUTRAL, type Keyframe } from "./keyframes.js";
+import type { DisplayState } from "@animus/brain/display";
+import { KEYFRAMES, NEUTRAL, REFLECT, SLEEP, type Keyframe } from "./keyframes.js";
 
 function clamp01(n: number): number {
   return Math.min(1, Math.max(0, n));
@@ -54,4 +55,11 @@ export function frameFor(emotion: Emotion, intensity: number): Keyframe {
       raise: lerp(BROW_NEUTRAL.raise, targetBrow.raise, t),
     },
   };
+}
+
+/** Kiest het frame voor de weergavetoestand: slapend en reflecterend negeren de emotie, wakker toont `frameFor`. */
+export function frameForDisplay(display: DisplayState, emotion: Emotion, intensity: number): Keyframe {
+  if (display === "slapend") return SLEEP;
+  if (display === "reflecterend") return REFLECT;
+  return frameFor(emotion, intensity);
 }

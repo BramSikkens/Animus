@@ -35,6 +35,8 @@ export async function watchDynimos(options: {
   onMood?: () => void;
   /** De stem van een Dynimo is gewijzigd (dashboard, payload "voice:<id>"). */
   onVoice?: () => void;
+  /** Elke toestandsmelding behalve Stemming (wakker/slapend/genesis/gedood/stem): ververst bv. de Galerij. */
+  onNotify?: () => void;
 }): Promise<{ current: () => DynimoState; close: () => Promise<void> }> {
   const listener = postgres(options.databaseUrl, { max: 1, onnotice: () => {} });
   let last: DynimoState | undefined;
@@ -61,8 +63,11 @@ export async function watchDynimos(options: {
   // bij elke (her)verbinding, zodat meldingen tijdens een onderbreking alsnog opgemerkt worden.
   await listener.listen(
     STATE_CHANNEL,
-    (payload: string) =>
-      payload.startsWith("mood:") ? options.onMood?.() : payload.startsWith("voice:") ? options.onVoice?.() : void check(),
+    (payload: string) => {
+      if (payload.startsWith("mood:")) return options.onMood?.();
+      options.onNotify?.();
+      return payload.startsWith("voice:") ? options.onVoice?.() : void check();
+    },
     check,
   );
   await check();

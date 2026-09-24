@@ -10,6 +10,7 @@
     "./config": "./src/config.ts",
     "./emotion": "./src/emotion.ts",
     "./display": "./src/display.ts",
+    "./gallery": "./src/gallery.ts",
     "./personality": "./src/personality.ts",
     "./drives": "./src/drives.ts",
     "./mood": "./src/mood.ts",

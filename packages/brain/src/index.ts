@@ -62,8 +62,18 @@ export type Brain = {
    * niet als er niets te reflecteren valt. Geeft true bij een toegepaste Reflectie, anders false; gooit nooit.
    */
   reflect(hooks?: { onStart?: () => void }): Promise<boolean>;
-  /** Praat met de Wakker Dynimo (elke beurt uit de database gelezen). Niemand wakker: geen events. */
-  hear(text: string): AsyncIterable<BrainEvent>;
+  /**
+   * Initiatief-check (Type1): wil de wakkere Dynimo nu uit zichzelf iets zeggen? Geeft een instructie voor het
+   * spontane openingswoord (te voeden aan `hear(..., { initiatief: true })`), of null. Niemand wakker of een
+   * lopende Reflectie: altijd null. Gooit nooit; wijzigt nooit de status van een Doel.
+   */
+  considerInitiative(): Promise<string | null>;
+  /**
+   * Praat met de Wakker Dynimo (elke beurt uit de database gelezen). Niemand wakker: geen events.
+   * Met `initiatief` is `text` de instructie uit `considerInitiative()` i.p.v. een uiting van de Gesprekspartner:
+   * geen Type1-classificatie (Stemming blijft), en de herinnering bevat enkel wat de Dynimo zei.
+   */
+  hear(text: string, options?: { initiatief?: boolean }): AsyncIterable<BrainEvent>;
 };
 
 // Serialiseert alle wissels van Wakker/Slapend tussen instanties en processen.
@@ -345,7 +355,18 @@ export function createBrain(deps: {
 
   // Geeft true als er een Reflectie is toegepast. `onStart` draait synchroon vlak vóór de Type2-call, en dus niet
   // als er niets te reflecteren valt.
+  // Aantal lopende Reflecties in deze instantie: tijdens een Reflectie neemt de Dynimo geen initiatief.
+  let reflecting = 0;
   async function reflectDynimo(id: number, onStart?: () => void): Promise<boolean> {
+    reflecting++;
+    try {
+      return await reflectDynimoInner(id, onStart);
+    } finally {
+      reflecting--;
+    }
+  }
+
+  async function reflectDynimoInner(id: number, onStart?: () => void): Promise<boolean> {
     const [row] = await deps.db.select().from(dynimos).where(eq(dynimos.id, id));
     if (!row) return false;
     const fresh = await deps.db
@@ -690,7 +711,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     }
   }
 
-  async function* hear(text: string): AsyncIterable<BrainEvent> {
+  async function* hear(text: string, options: { initiatief?: boolean } = {}): AsyncIterable<BrainEvent> {
     // Elke beurt opnieuw: een ander proces (dashboard) kan intussen wisselen van Wakker Dynimo.
     const [awake] = await deps.db.select().from(dynimos).where(isNotNull(dynimos.awakeSince));
     if (!awake) {
@@ -711,7 +732,10 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
       .join("\n");
     // Type1 is een reflex: faalt hij, dan antwoordt Type2 toch. Intensiteit 0 laat de Stemming ongemoeid: dat is
     // bewust de invulling van "neutrale Emotie" (het mood-event toont dan de bestaande Stemming of Basisemotie).
-    const { emotion, intensity, indruk, intent } = await classify(deps.type1, text, context).catch((error: unknown): Type1Result => {
+    const { emotion, intensity, indruk, intent } = await (options.initiatief
+      ? Promise.resolve<Type1Result>({ emotion: "neutraal", intensity: 0, indruk: 0.2, intent: "simpel" })
+      : classify(deps.type1, text, context)
+    ).catch((error: unknown): Type1Result => {
       console.warn("Type1 faalde, val terug op neutraal/simpel:", error instanceof Error ? error.message : error);
       return { emotion: "neutraal", intensity: 0, indruk: 0, intent: "simpel" };
     });
@@ -788,7 +812,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
         workingMemory.push(userMessage, { role: "assistant", content: full });
       }
       if (outcome !== "failed" && full.trim()) {
-        await remember(`Gesprekspartner: ${text}\n${being.name}: ${full}`, being.id, indruk);
+        await remember(options.initiatief ? `${being.name}: ${full}` : `Gesprekspartner: ${text}\n${being.name}: ${full}`, being.id, indruk);
       }
     }
   }
@@ -834,5 +858,50 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     return epitaph;
   }
 
-  return { bringToLife, wake, sleep, kill, list, backfill, reflect, hear };
+  async function considerInitiative(): Promise<string | null> {
+    if (reflecting > 0) return null;
+    const [awake] = await deps.db.select().from(dynimos).where(isNotNull(dynimos.awakeSince));
+    if (!awake) return null;
+    try {
+      const driveRows = await loadDrives(awake.id);
+      const mood = moodOfRow(awake, now());
+      const hasGoal = driveRows.some((drive) => drive.kind === "doel" && isActiveDrive(drive));
+      const state = [
+        personalityText(awake),
+        drivesPromptBlock(driveRows),
+        `Huidige stemming: ${mood.emotion} (intensiteit ${mood.intensity.toFixed(2)})`,
+      ]
+        .filter(Boolean)
+        .join("\n");
+      const { answers } = await experimental_evaluate({
+        model: deps.type1,
+        state,
+        questions: {
+          spreken: {
+            type: "choice",
+            instructions:
+              "Wil deze Dynimo nu uit zichzelf, zonder dat iemand iets zei, iets spontaans zeggen? Weeg zijn persoonlijkheid, Drijfveren en stemming; kies 'nee' als er niets de moeite waard is.",
+            criteria: { ja: "er is iets dat hij nu wil zeggen", nee: "hij zwijgt liever" },
+          },
+          onderwerp: {
+            type: "choice",
+            instructions: "Waar gaat zijn spontane uiting over?",
+            criteria: {
+              vrij: "iets wat hem bezighoudt of waar hij nieuwsgierig naar is",
+              ...(hasGoal && { doel: "een van zijn actieve Doelen" }),
+            },
+          },
+        },
+      });
+      if (answers.spreken.choice !== "ja") return null;
+      return answers.onderwerp.choice === "doel" && hasGoal
+        ? "Je begint uit jezelf een gesprek, want je wilt praten over een van je actieve Doelen."
+        : "Je begint uit jezelf een gesprek over iets wat je bezighoudt of waar je nieuwsgierig naar bent.";
+    } catch (error) {
+      console.warn("Initiatief-check faalde:", error instanceof Error ? error.message : error);
+      return null;
+    }
+  }
+
+  return { bringToLife, wake, sleep, kill, list, backfill, reflect, considerInitiative, hear };
 }

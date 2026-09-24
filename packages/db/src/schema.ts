@@ -118,6 +118,30 @@ export const drives = pgTable(
   ],
 );
 
+// Dromen (#38): korte, associatieve tekst uit de Reflectie-bij-het-slapen. Emotie + intensiteit zijn de gevoelslading
+// van de Droom; die overschrijft de Ontwaakstemming enkel als hij intenser is. Cascade bij het doden van de Dynimo.
+export const dreams = pgTable(
+  "dreams",
+  {
+    id: serial("id").primaryKey(),
+    dynimoId: integer("dynimo_id")
+      .notNull()
+      .references(() => dynimos.id, { onDelete: "cascade" }),
+    text: text("text").notNull(),
+    emotion: text("emotion").notNull(),
+    intensity: real("intensity").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    index("dreams_dynimo_id_idx").on(table.dynimoId),
+    check(
+      "dreams_emotion_check",
+      sql`${table.emotion} in ('blij', 'boos', 'verrast', 'kalm', 'verveeld', 'nieuwsgierig', 'bang', 'neutraal')`,
+    ),
+    check("dreams_intensity_range", sql`${table.intensity} between 0 and 1`),
+  ],
+);
+
 // Grafschrift van een verwijderd wezen (ADR-0003). Bewust géén relatie met identity/memories,
 // en het brein leest deze tabel nooit — enkel het dashboard. Leeftijd = deleted_at − born_at (ADR-0002).
 export const epitaphs = pgTable("epitaphs", {

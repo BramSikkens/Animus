@@ -14,7 +14,7 @@ import {
 import { and, asc, cosineDistance, desc, eq, gt, isNotNull, isNull, notInArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { Db } from "@animus/db";
-import { drives, dynimos, epitaphs, memories } from "@animus/db/schema";
+import { dreams, drives, dynimos, epitaphs, memories } from "@animus/db/schema";
 import { formatAge } from "./age.js";
 import { DRIVE_DESCRIPTIONS, DRIVE_KINDS, drivesPromptBlock, isActiveDrive, type DriveRow } from "./drives.js";
 import { applyEmotion, baseEmotionOf, currentMood, storedMoodOf, type Mood, type StoredMood } from "./mood.js";
@@ -142,6 +142,8 @@ Doelen starten actief.`;
 const REFLECTION_MEMORY_LIMIT = 100; // ponytail: batch; de rest volgt bij de volgende Reflectie.
 const AXIS_SHIFT_LIMIT = 0.02;
 const MAX_ACTIVE_PER_KIND = 5;
+const DREAM_RECALL_CHANCE = 0.15; // kans per beurt dat de meest recente Droom spontaan wordt aangeboden
+const DREAM_CHANCE = 0.3; // kans per slaap-Reflectie (zeldzaam); random is injecteerbaar zoals bij de Seed
 
 const reflectionSchema = z.object({
   evolvedCharacter: z.string().min(1).max(2000),
@@ -153,6 +155,10 @@ const reflectionSchema = z.object({
     drop: z.array(z.object({ id: z.number().int() })),
   }),
   wakeMood: z.object({ emotion: z.enum(EMOTIONS), intensity: z.number().min(0).max(1) }),
+  // Optionele Droom (#38): nullable i.p.v. optional (strikte structured output). Emotie + intensiteit = gevoelslading.
+  dream: z
+    .object({ text: z.string().min(1).max(600), emotion: z.enum(EMOTIONS), intensity: z.number().min(0).max(1) })
+    .nullable(),
 });
 
 const REFLECTION_INSTRUCTIONS = `Je bent een wezen dat slaapt en terugkijkt op wat er sinds je vorige Reflectie gebeurd is.
@@ -163,6 +169,7 @@ Werk bij:
 - axisShifts: de gewenste verschuiving per persoonlijkheidsas (ie, sn, tf, jp); kleine getallen, positief richting de tweede letter.
 - drives: add (nieuwe Drijfveren: kind, text, bij afkeer/ergernis ook strength), closeGoals (id + bereikt of opgegeven), adjust (id + nieuwe strength, alleen afkeer/ergernis), drop (id, laat een Drijfveer los). Maximaal ${MAX_ACTIVE_PER_KIND} actieve per soort.
 - wakeMood: de stemming (emotie + intensiteit 0 tot 1) waarmee je wakker wordt.
+- dream: een korte, associatieve, surrealistische Droom (een paar zinnen) op basis van je herinneringen, persoonlijkheid en Drijfveren (vooral Toekomstdromen, Wensen en Ergernissen), met de emotie en intensiteit (0 tot 1) van de Droom; of null als je niet droomt.
 Soorten Drijfveren:
 ${DRIVE_DESCRIPTIONS}
 Emoties: ${EMOTIONS.join(", ")}.`;
@@ -221,6 +228,14 @@ function recallPrompt(recalled: string[]): SystemModelMessage {
     content: recalled.length
       ? `Herinneringen uit eerdere gesprekken (meest relevante eerst):\n${recalled.map((memory) => `- ${memory}`).join("\n")}`
       : "Je hebt nog geen herinneringen uit eerdere gesprekken.",
+  };
+}
+
+// Na het cachepunt: alleen aanwezig op de beurten waarop de kans meezit.
+function dreamPrompt(dream: string): SystemModelMessage {
+  return {
+    role: "system",
+    content: `Je hebt onlangs gedroomd: "${dream}"\nBreng dit hooguit ter sprake als het vanzelf past in het gesprek; forceer het niet.`,
   };
 }
 
@@ -362,7 +377,7 @@ export function createBrain(deps: {
 
   // Geeft true als er een Reflectie is toegepast. `onStart` draait synchroon vlak vóór de Type2-call, en dus niet
   // als er niets te reflecteren valt.
-  async function reflectDynimo(id: number, onStart?: () => void): Promise<boolean> {
+  async function reflectDynimo(id: number, onStart?: () => void, sleeping = true): Promise<boolean> {
     const [row] = await deps.db.select().from(dynimos).where(eq(dynimos.id, id));
     if (!row) return false;
     const fresh = await deps.db
@@ -386,6 +401,9 @@ export function createBrain(deps: {
     const driveRows = (await loadDrives(id)).filter(isActiveDrive);
     const axes = rowAxes(row);
 
+    // De brain dobbelt, het model krijgt enkel de uitkomst. Alleen bij slapen: bij stilte blijft de Dynimo wakker.
+    const dreaming = sleeping && random() < DREAM_CHANCE;
+
     onStart?.();
     const { output } = await generateText({
       model: deps.type2.heavy,
@@ -395,6 +413,7 @@ Kern-karakter: ${row.coreCharacter}
 Geëvolueerd karakter: ${row.evolvedCharacter || "(nog niet)"}
 ${personalityText(row) || "Persoonlijkheid: (nog niet bepaald)"}${axes ? ` (assen: ie ${axes.ie.toFixed(2)}, sn ${axes.sn.toFixed(2)}, tf ${axes.tf.toFixed(2)}, jp ${axes.jp.toFixed(2)})` : ""}
 Basisemotie: ${row.baseEmotion ?? "(nog niet bepaald)"}
+${dreaming ? "Je droomt vannacht: vul dream in." : "Je droomt vannacht niet: dream is null."}
 Actieve Drijfveren:
 ${driveRows.map((drive) => `- [id ${drive.id}] ${drive.kind}: ${drive.text}${drive.status ? ` (${drive.status})` : ""}${drive.strength !== null ? ` (sterkte ${drive.strength.toFixed(2)})` : ""}`).join("\n") || "(geen)"}
 Nieuwe herinneringen (oudste eerst):
@@ -411,6 +430,11 @@ ${fresh.map((memory) => `- (indruk ${memory.impression}) ${memory.text}`).join("
       if (!locked || locked.lastReflectedAt?.getTime() !== row.lastReflectedAt?.getTime()) return false;
 
       const at = now();
+      // Een Droom wint van de Ontwaakstemming enkel als hij strikt intenser is (zelfde regel als applyEmotion).
+      const dreamWins = dreaming && output.dream !== null && output.dream.intensity > output.wakeMood.intensity;
+      const wakeMood = dreamWins
+        ? { wakeMoodEmotion: output.dream!.emotion, wakeMoodIntensity: output.dream!.intensity }
+        : { wakeMoodEmotion: output.wakeMood.emotion, wakeMoodIntensity: output.wakeMood.intensity };
       const lockedAxes = rowAxes(locked);
       const shifted = (value: number, shift: number) =>
         Math.min(1, Math.max(0, value + Math.min(AXIS_SHIFT_LIMIT, Math.max(-AXIS_SHIFT_LIMIT, shift))));
@@ -426,12 +450,13 @@ ${fresh.map((memory) => `- (indruk ${memory.impression}) ${memory.text}`).join("
           }),
           // Is de Dynimo intussen alweer wakker, dan zou een Ontwaakstemming onterecht blijven staan: overslaan.
           ...(!locked.awakeSince && {
-            wakeMoodEmotion: output.wakeMood.emotion,
-            wakeMoodIntensity: output.wakeMood.intensity,
+            ...wakeMood,
           }),
           lastReflectedAt: processedUntil,
         })
         .where(eq(dynimos.id, id));
+
+      if (dreaming && output.dream) await tx.insert(dreams).values({ dynimoId: id, ...output.dream, createdAt: at });
 
       // Drijfveren: eerst sluiten/droppen (maakt plek), dan aanpassen, dan toevoegen. Ids moeten bij déze Dynimo
       // horen en actief zijn; anders negeren.
@@ -486,7 +511,7 @@ ${fresh.map((memory) => `- (indruk ${memory.impression}) ${memory.text}`).join("
   async function reflect(hooks: { onStart?: () => void } = {}): Promise<boolean> {
     try {
       const [awake] = await deps.db.select({ id: dynimos.id }).from(dynimos).where(isNotNull(dynimos.awakeSince));
-      return awake ? await reflectDynimo(awake.id, hooks.onStart) : false;
+      return awake ? await reflectDynimo(awake.id, hooks.onStart, false) : false;
     } catch (error) {
       console.warn("Reflectie bij stilte faalde:", error instanceof Error ? error.message : error);
       return false;
@@ -805,6 +830,9 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
 
     // ponytail: sequentieel na de emotie; parallel met Type1 als de latency ooit telt.
     const recalled = await recall(text, being.id);
+    const [dream] = random() < DREAM_RECALL_CHANCE
+      ? await deps.db.select({ text: dreams.text }).from(dreams).where(eq(dreams.dynimoId, being.id)).orderBy(desc(dreams.createdAt), desc(dreams.id)).limit(1)
+      : [];
 
     const stable: SystemModelMessage = {
       role: "system",
@@ -817,7 +845,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     const result = streamText({
       abortSignal: abort.signal,
       model: intent === "complex" ? deps.type2.heavy : deps.type2.light,
-      instructions: [stable, ageMessage(being), ...birthdayMessages(awake), moodMessage(mood), recallPrompt(recalled)],
+      instructions: [stable, ageMessage(being), ...birthdayMessages(awake), moodMessage(mood), recallPrompt(recalled), ...(dream ? [dreamPrompt(dream.text)] : [])],
       messages: [...workingMemory, userMessage],
       tools,
       // Genoeg stappen om een tool te gebruiken en daarna het resultaat te verwoorden.

@@ -344,6 +344,38 @@ describe("createBrain", () => {
     expect(userTexts.some((c) => c.includes("Mislukt"))).toBe(false);
   });
 
+  async function systemAfterHearing(deltas: Record<string, number>): Promise<string> {
+    const light = textModel(["Hoi."]);
+    const brain = createBrain({
+      db,
+      embedder: embedModel(),
+      type1: type1Model({ deltas }),
+      type2: { light, heavy: genesisModel({ name: "Nova", coreCharacter: "x", birthStory: "y" }) },
+      now: () => new Date("2026-01-01T00:00:00.000Z"),
+      random: () => 0,
+    });
+    await brain.bringToLife();
+    for await (const _ of brain.hear("Hoi!")) void _;
+    return contentsByRole(light.doStreamCalls[0]?.prompt, "system").join(" ");
+  }
+
+  it("geeft de Type2-prompt de volledige emotievector mee, hoog naar laag, met de dominante emotie benoemd", async () => {
+    const system = await systemAfterHearing({ blij: 80 });
+    expect(system).toContain("blij: 80");
+    expect(system).toContain("kalm: 30");
+    expect(system).toContain("boos: 0");
+    expect(system.indexOf("blij: 80")).toBeLessThan(system.indexOf("kalm: 30"));
+    expect(system.indexOf("kalm: 30")).toBeLessThan(system.indexOf("boos: 0"));
+    expect(system).toContain("Dominant: blij");
+  });
+
+  it("instrueert de Type2-prompt eerlijk over de stemming te zijn en er toon en antwoord op af te stemmen", async () => {
+    const system = await systemAfterHearing({ boos: 80 });
+    expect(system).toContain("Wees eerlijk over hoe je je voelt");
+    expect(system).toContain("ontken die niet");
+    expect(system).toContain("toon en antwoord");
+  });
+
   it("levert een mood-event met de effectieve Stemming (Type1-Emotie won van de Basisemotie), vóór de eerste tekst", async () => {
     const bornAt = new Date("2026-01-01T00:00:00.000Z");
     const light = textModel(["Hoi."]);
@@ -2127,7 +2159,7 @@ describe("createBrain", () => {
       const systems = contentsByRole(light.doStreamCalls[0]?.prompt, "system");
       expect(systems[0]).not.toContain("Je huidige stemming");
       expect(moodMessage(light, 0)).toContain("boos");
-      expect(moodMessage(light, 0)).toContain("0.80");
+      expect(moodMessage(light, 0)).toContain("boos: 80");
       expect(systems.indexOf(moodMessage(light, 0)!)).toBeGreaterThan(1); // na stabiel en leeftijd
     });
 
@@ -2140,7 +2172,7 @@ describe("createBrain", () => {
       await collectText(brainWith({ type1: model, light, now: () => clock }).hear("Hoi"));
 
       expect(moodMessage(light, 0)).toContain("boos");
-      expect(moodMessage(light, 0)).toContain("0.40");
+      expect(moodMessage(light, 0)).toContain("boos: 40");
     });
 
     it("valt na lange tijd terug op de Basisemotie", async () => {
@@ -2152,7 +2184,7 @@ describe("createBrain", () => {
       await collectText(brainWith({ type1: model, light, now: () => clock }).hear("Hoi"));
 
       expect(moodMessage(light, 0)).toContain("kalm");
-      expect(moodMessage(light, 0)).toContain("0.30");
+      expect(moodMessage(light, 0)).toContain("kalm: 30");
     });
 
     it("bewaart de Stemming over beurten en over een nieuwe brain-instantie", async () => {
@@ -2165,7 +2197,7 @@ describe("createBrain", () => {
       await collectText(brainWith({ type1: second.model, light }).hear("Sorry."));
 
       expect(moodMessage(light, 0)).toContain("boos");
-      expect(moodMessage(light, 0)).toContain("0.80");
+      expect(moodMessage(light, 0)).toContain("boos: 80");
     });
 
     it("laat een mislukte Type1 de Stemming ongewijzigd", async () => {

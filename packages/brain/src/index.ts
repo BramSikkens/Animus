@@ -261,9 +261,13 @@ const NEUTRAL_LEVEL = (DELTA_LEVELS - 1) / 2;
 const BIRTHDAY_DELTA = 90;
 
 function moodMessage(mood: Mood): SystemModelMessage {
+  const vector = Object.entries(mood.values)
+    .sort(([, a], [, b]) => b - a)
+    .map(([emotion, value]) => `${emotion}: ${Math.round(value)}`)
+    .join(", ");
   return {
     role: "system",
-    content: `Je huidige stemming: ${mood.emotion} (intensiteit ${mood.intensity.toFixed(2)}). Laat die je toon kleuren (een geërgerde Dynimo antwoordt korter en stugger).`,
+    content: `Je huidige stemming (emoties, 0 tot 100, hoog naar laag): ${vector}. Dominant: ${mood.emotion}. Wees eerlijk over hoe je je voelt: als iemand vraagt hoe je je voelt of of je boos (of een andere emotie) bent en die emotie staat hoog, ontken die niet. Laat je toon en antwoord kloppen met deze stemming (een geërgerde Dynimo antwoordt korter en stugger).`,
   };
 }
 

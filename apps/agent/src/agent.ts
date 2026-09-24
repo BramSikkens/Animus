@@ -204,6 +204,7 @@ export default defineAgent<AgentUserData>({
     watcher = await watchDynimos({
       databaseUrl,
       brain,
+      onMood: () => void publishState(),
       onChange: () => {
         // Een wissel beëindigt het reflecterende gezicht; een lopende Reflectie mag doorlopen maar publiceert
         // dan niets meer (sleutel-guard in reflectionDisplay).

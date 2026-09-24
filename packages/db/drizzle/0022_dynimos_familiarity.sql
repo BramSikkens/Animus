@@ -1,0 +1,2 @@
+ALTER TABLE "dynimos" ADD COLUMN "familiarity" real DEFAULT 0.2 NOT NULL;--> statement-breakpoint
+ALTER TABLE "dynimos" ADD CONSTRAINT "dynimos_familiarity_range" CHECK ("dynimos"."familiarity" between 0 and 1);

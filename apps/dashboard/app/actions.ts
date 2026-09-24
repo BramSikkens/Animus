@@ -7,7 +7,9 @@ import { parseMoodValues } from "@animus/brain/mood";
 import { parseAxes } from "@animus/brain/personality";
 import { cloneVoice, designVoice, saveDesignedVoice, type DesignPreview } from "@animus/brain/voice-design";
 import { parseVoice, speechProvider, voiceInputError } from "@animus/brain/voice";
+import { unusableVoiceError } from "@animus/brain/voice-catalog";
 import { getBrain } from "../lib/brain";
+import { getCatalog } from "../lib/voice-catalog";
 
 export type ActionState = { error?: string };
 
@@ -108,6 +110,11 @@ export async function setVoice(_prev: ActionState, formData: FormData): Promise<
     if (id === null) return INVALID_ID;
     const parsed = parseVoice(speechProvider(process.env), formData.get("voice"));
     if (!parsed) return "Ongeldige stem.";
+    // Op een gratis account werken bibliotheekstemmen niet; de gecachete catalogus weet dat. Is die niet beschikbaar, dan blokkeert alleen de UI.
+    if (parsed.voice && speechProvider(process.env) === "elevenlabs") {
+      const blocked = await getCatalog().then((list) => unusableVoiceError(list, parsed.voice!), () => null);
+      if (blocked) return `Deze stem ${blocked}.`;
+    }
     const description = String(formData.get("voiceDescription") ?? "").trim().slice(0, 500) || null;
     if (!(await getBrain().setVoiceProfile(id, { voice: parsed.voice, description }))) return DYNIMO_GONE;
   });

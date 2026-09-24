@@ -11,6 +11,7 @@ export function ActionForm({
   pendingLabel,
   id,
   confirmName,
+  disabled,
   children,
 }: {
   action: (prev: ActionState, formData: FormData) => Promise<ActionState>;
@@ -18,6 +19,7 @@ export function ActionForm({
   pendingLabel: string;
   id?: number;
   confirmName?: boolean;
+  disabled?: boolean;
   /** Extra velden van de actie (boven de knop). */
   children?: ReactNode;
 }) {
@@ -29,7 +31,7 @@ export function ActionForm({
         <input name="name" placeholder="Typ de exacte naam" aria-label="Naam ter bevestiging" required />
       )}
       {children}
-      <button type="submit" disabled={pending}>
+      <button type="submit" disabled={pending || disabled}>
         {pending ? pendingLabel : label}
       </button>
       {state.error && (

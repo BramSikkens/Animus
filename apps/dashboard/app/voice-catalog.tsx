@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { filterVoices, type CatalogVoice } from "@animus/brain/voice-catalog";
+import { filterVoices, FREE_TIER_MESSAGE, type CatalogVoice } from "@animus/brain/voice-catalog";
 import { ActionForm } from "./action-form";
 import { setVoice } from "./actions";
 
@@ -73,9 +73,13 @@ export function VoiceCatalog({
             <strong>{voice.name}</strong> {[voice.gender, voice.age, voice.accent, voice.language, voice.useCase].filter(Boolean).join(" · ")}
             {voice.description && <div>{voice.description}</div>}
             {voice.previewUrl && <audio controls preload="none" src={voice.previewUrl} />}
-            <button type="button" onClick={() => setSelected(voice.id)} aria-pressed={selected === voice.id}>
-              {selected === voice.id ? "Gekozen" : "Kies"}
-            </button>
+            {voice.usableOnFree ? (
+              <button type="button" onClick={() => setSelected(voice.id)} aria-pressed={selected === voice.id}>
+                {selected === voice.id ? "Gekozen" : "Kies"}
+              </button>
+            ) : (
+              <em>{FREE_TIER_MESSAGE}</em>
+            )}
           </li>
         ))}
       </ul>

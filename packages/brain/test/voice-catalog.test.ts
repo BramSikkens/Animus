@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cached, fetchCatalog, filterVoices, normalizeVoice, type CatalogVoice } from "../src/voice-catalog.js";
+import { cached, fetchCatalog, fetchTier, filterVoices, normalizeVoice, unusableVoiceError, FREE_TIER_MESSAGE, type CatalogVoice } from "../src/voice-catalog.js";
 
 describe("normalizeVoice", () => {
   it("normaliseert een Voice Library-stem (shared-voices)", () => {
@@ -26,7 +26,17 @@ describe("normalizeVoice", () => {
       useCase: "conversational",
       language: "nl",
       previewUrl: "https://x/p.mp3",
+      category: "",
+      usableOnFree: false,
     });
+  });
+
+  it("markeert premade/eigen stemmen uit /v1/voices als bruikbaar op free; bibliotheekstemmen (library) niet", () => {
+    for (const category of ["premade", "generated", "cloned", "professional"]) {
+      expect(normalizeVoice({ voice_id: "a", name: "A", category })).toMatchObject({ category, usableOnFree: true });
+    }
+    expect(normalizeVoice({ voice_id: "a", name: "A", category: "famous" })).toMatchObject({ usableOnFree: false });
+    expect(normalizeVoice({ voice_id: "a", name: "A", category: "professional" }, true)).toMatchObject({ category: "professional", usableOnFree: false });
   });
 
   it("normaliseert een eigen/premade stem (labels, verified_languages)", () => {
@@ -44,13 +54,13 @@ describe("normalizeVoice", () => {
   it("geeft null zonder id of naam, en lege strings voor ontbrekende velden", () => {
     expect(normalizeVoice({ name: "x" })).toBeNull();
     expect(normalizeVoice({ voice_id: "v3", name: "Zed" })).toEqual({
-      id: "v3", name: "Zed", gender: "", age: "", accent: "", description: "", useCase: "", language: "", previewUrl: "",
+      id: "v3", name: "Zed", gender: "", age: "", accent: "", description: "", useCase: "", language: "", previewUrl: "", category: "", usableOnFree: false,
     });
   });
 });
 
 const v = (over: Partial<CatalogVoice>): CatalogVoice => ({
-  id: "i", name: "n", gender: "", age: "", accent: "", description: "", useCase: "", language: "", previewUrl: "", ...over,
+  id: "i", name: "n", gender: "", age: "", accent: "", description: "", useCase: "", language: "", previewUrl: "", category: "", usableOnFree: true, ...over,
 });
 
 describe("filterVoices", () => {
@@ -103,6 +113,54 @@ describe("fetchCatalog", () => {
     const error = await fetchCatalog(fetchFn, "geheim", "nl").catch((e: Error) => e);
     expect((error as Error).message).toContain("401");
     expect((error as Error).message).not.toContain("geheim");
+  });
+});
+
+describe("fetchTier", () => {
+  it("leest tier uit /v1/user/subscription met key-header", async () => {
+    let seen: { url: string; key: string | null } | undefined;
+    const fetchFn = (async (url: string, init: RequestInit) => {
+      seen = { url, key: new Headers(init.headers).get("xi-api-key") };
+      return json({ tier: "free", status: "active" });
+    }) as unknown as typeof fetch;
+    expect(await fetchTier(fetchFn, "sleutel")).toBe("free");
+    expect(seen).toEqual({ url: "https://api.elevenlabs.io/v1/user/subscription", key: "sleutel" });
+  });
+
+  it("geeft lege string (onbekend) bij een fout of onbruikbaar antwoord", async () => {
+    expect(await fetchTier((async () => json({}, 401)) as unknown as typeof fetch, "k")).toBe("");
+    expect(await fetchTier((async () => { throw new Error("net"); }) as unknown as typeof fetch, "k")).toBe("");
+    expect(await fetchTier((async () => json({ tier: 5 })) as unknown as typeof fetch, "k")).toBe("");
+  });
+});
+
+describe("fetchCatalog op tier", () => {
+  const fetchFn = (async (url: string) =>
+    url.includes("/v1/voices")
+      ? json({ voices: [{ voice_id: "p", name: "P", category: "premade" }] })
+      : json({ voices: [{ voice_id: "s", name: "S", category: "professional" }], has_more: false })) as unknown as typeof fetch;
+
+  it("free: alleen eigen/premade kiesbaar, bibliotheekstem niet", async () => {
+    const voices = await fetchCatalog(fetchFn, "k", "nl", "free");
+    expect(voices.map((x) => [x.id, x.usableOnFree])).toEqual([["p", true], ["s", false]]);
+  });
+
+  it("niet-free of onbekend: alles kiesbaar", async () => {
+    for (const tier of ["starter", ""]) {
+      expect((await fetchCatalog(fetchFn, "k", "nl", tier)).every((x) => x.usableOnFree)).toBe(true);
+    }
+  });
+});
+
+describe("unusableVoiceError", () => {
+  const list = [v({ id: "p" }), v({ id: "s", usableOnFree: false })];
+  it("weigert een niet-kiesbare catalogusstem met de gratis-tier-melding", () => {
+    expect(unusableVoiceError(list, "s")).toBe(FREE_TIER_MESSAGE);
+    expect(FREE_TIER_MESSAGE).toContain("Starter");
+  });
+  it("laat kiesbare of onbekende stemmen door", () => {
+    expect(unusableVoiceError(list, "p")).toBeNull();
+    expect(unusableVoiceError(list, "onbekend")).toBeNull();
   });
 });
 

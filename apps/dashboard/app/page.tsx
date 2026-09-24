@@ -11,7 +11,7 @@ import { db } from "../lib/db";
 import { ActionForm } from "./action-form";
 import { VoiceCatalog } from "./voice-catalog";
 import { VoiceDesign } from "./voice-design";
-import { getCatalog } from "../lib/voice-catalog";
+import { getCatalog, getTier } from "../lib/voice-catalog";
 import { addMemory, bringToLife, forceMood, kill, removeMemory, setArchetype, setAxes, setMood, setVoice, sleep, wake } from "./actions";
 import { formatDate, formatDateTime } from "../lib/format";
 
@@ -83,6 +83,7 @@ export default async function DashboardPage() {
           (error: unknown) => ({ error: error instanceof Error ? error.message : "onbekende fout" }),
         )
       : null;
+  const freeTier = provider === "elevenlabs" && (await getTier()) === "free";
 
   return (
     <main>
@@ -226,7 +227,7 @@ export default async function DashboardPage() {
                     </>
                   )}
                   {provider === "elevenlabs" && (
-                    <VoiceDesign id={dynimo.id} name={dynimo.name} description={dynimo.voiceDescription ?? getArchetype(dynimo.archetype)?.voiceHint ?? ""} />
+                    <VoiceDesign blocked={freeTier} id={dynimo.id} name={dynimo.name} description={dynimo.voiceDescription ?? getArchetype(dynimo.archetype)?.voiceHint ?? ""} />
                   )}
                   <ActionForm action={kill} label="Doden" pendingLabel="Neemt afscheid…" id={dynimo.id} confirmName />
                   <details>

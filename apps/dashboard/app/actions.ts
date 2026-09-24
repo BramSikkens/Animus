@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { parseArchetypeId } from "@animus/brain/archetypes";
 import { isEmotion } from "@animus/brain/emotion";
 import { parseMoodValues } from "@animus/brain/mood";
 import { parseAxes } from "@animus/brain/personality";
@@ -87,6 +88,16 @@ export async function setAxes(_prev: ActionState, formData: FormData): Promise<A
     const axes = parseAxes((name) => formData.get(name));
     if (!axes) return "Ongeldige persoonlijkheidsassen.";
     if (!(await getBrain().setAxes(id, axes))) return DYNIMO_GONE;
+  });
+}
+
+export async function setArchetype(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  return run(async () => {
+    const id = parseId(formData);
+    if (id === null) return INVALID_ID;
+    const archetype = parseArchetypeId(formData.get("archetype"));
+    if (!archetype) return "Ongeldig archetype.";
+    if (!(await getBrain().setArchetype(id, archetype))) return DYNIMO_GONE;
   });
 }
 

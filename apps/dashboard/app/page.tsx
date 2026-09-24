@@ -3,12 +3,13 @@ import { EMOTIONS } from "@animus/brain/emotion";
 import { formatAge } from "@animus/brain/age";
 import { moodOfRow } from "@animus/brain/mood";
 import { DRIVE_KINDS, DRIVE_LABELS, type DriveKind } from "@animus/brain/drives";
+import { ARCHETYPES, getArchetype } from "@animus/brain/archetypes";
 import { AXES, AXIS_LABELS, AXIS_LETTERS, MBTI_AXES, mbtiType, rowAxes } from "@animus/brain/personality";
 import { speechProvider, voicesFor } from "@animus/brain/voice";
 import { dreams, drives, dynimos, epitaphs, memories } from "@animus/db/schema";
 import { db } from "../lib/db";
 import { ActionForm } from "./action-form";
-import { addMemory, bringToLife, forceMood, kill, removeMemory, setAxes, setMood, setVoice, sleep, wake } from "./actions";
+import { addMemory, bringToLife, forceMood, kill, removeMemory, setArchetype, setAxes, setMood, setVoice, sleep, wake } from "./actions";
 import { formatDate, formatDateTime } from "../lib/format";
 
 export const dynamic = "force-dynamic";
@@ -100,6 +101,7 @@ export default async function DashboardPage() {
                       {Math.round(mood.intensity * 100)}%
                     </p>
                   )}
+                  <p>Archetype: {getArchetype(dynimo.archetype)?.name ?? "geen"}</p>
                   <p>Basisemotie: {dynimo.baseEmotion ?? "nog niet bepaald"}</p>
                   {axes ? (
                     <div className="personality">
@@ -176,6 +178,15 @@ export default async function DashboardPage() {
                         <input name={`axis_${axis}`} type="range" min={0} max={1} step={0.01} defaultValue={axes?.[axis] ?? 0.5} />
                       </label>
                     ))}
+                  </ActionForm>
+                  <ActionForm action={setArchetype} label="Archetype toepassen (zet assen en basisemotie)" pendingLabel="Zet…" id={dynimo.id}>
+                    <select name="archetype" aria-label="Archetype" defaultValue={getArchetype(dynimo.archetype)?.id ?? ARCHETYPES[0]!.id}>
+                      {ARCHETYPES.map((archetype) => (
+                        <option key={archetype.id} value={archetype.id}>
+                          {archetype.name}
+                        </option>
+                      ))}
+                    </select>
                   </ActionForm>
                   <ActionForm action={setVoice} label="Stem zetten" pendingLabel="Zet…" id={dynimo.id}>
                     <select name="voice" aria-label="Stem" defaultValue={dynimo.voice && voices.includes(dynimo.voice) ? dynimo.voice : ""}>

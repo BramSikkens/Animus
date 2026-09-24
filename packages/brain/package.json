@@ -4,6 +4,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./archetypes": "./src/archetypes.ts",
     "./age": "./src/age.ts",
     "./config": "./src/config.ts",
     "./emotion": "./src/emotion.ts",

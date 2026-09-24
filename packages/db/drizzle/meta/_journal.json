@@ -120,6 +120,13 @@
       "when": 1790251740262,
       "tag": "0016_dynimos_reactivity_expressiveness",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1790252095256,
+      "tag": "0017_dynimos_archetype",
+      "breakpoints": true
     }
   ]
 }

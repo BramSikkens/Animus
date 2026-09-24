@@ -16,6 +16,7 @@ import { z } from "zod";
 import type { Db } from "@animus/db";
 import { dreams, drives, dynimos, epitaphs, memories } from "@animus/db/schema";
 import { formatAge } from "./age.js";
+import { archetypeOfferText, getArchetype, pickOffer } from "./archetypes.js";
 import { DRIVE_DESCRIPTIONS, DRIVE_KINDS, drivesPromptBlock, isActiveDrive, type DriveRow } from "./drives.js";
 import { applyDeltas, baseEmotionOf, currentMood, moodOfRow, singleEmotionValues, storedMoodOf, type Mood, type MoodDeltas, type MoodValues, type StoredMood } from "./mood.js";
 import { isVisibleMoodChange, soundKindFor, type SoundKind } from "./sound.js";
@@ -76,6 +77,8 @@ export type Brain = {
   setAxes(id: number, axes: Axes): Promise<boolean>;
   /** Dashboard: zet de TTS-stem (null = default van de agent); de agent past die direct toe. False bij een onbekende id. */
   setVoice(id: number, voice: string | null): Promise<boolean>;
+  /** Dashboard-override: kiest een archetype en zet zijn zes assen en Basisemotie als startpunt (geen pinning). False bij een onbekende id of een onbekend archetype. */
+  setArchetype(id: number, archetypeId: string): Promise<boolean>;
   /**
    * Dashboard-override: voegt een Herinnering toe met dezelfde embed-stap als een normale beurt en de neutrale
    * Indruk 0.5. False bij een onbekende id; gooit als het embedden of opslaan faalt.
@@ -141,6 +144,7 @@ const genesisSchema = z.object({
   axes: axesSchema,
   drives: drivesSchema,
   baseEmotion: z.enum(EMOTIONS),
+  archetype: z.string().nullish(),
 });
 
 const BASE_EMOTION_DESCRIPTION = `De Basisemotie is het temperament van het wezen: de emotie waar zijn stemming naartoe uitdooft als er niets gebeurt. Kies er één uit: ${EMOTIONS.join(", ")}.`;
@@ -206,6 +210,12 @@ Doelen starten actief.
 ${BASE_EMOTION_DESCRIPTION} Kies ze passend bij je persoonlijkheid en de Seed.
 Antwoord in het Nederlands.`;
 
+function genesisArchetypeInstructions(offer: string): string {
+  return `Kies daarnaast in het veld "archetype" het id van het archetype dat het beste bij de Seed past, uit deze lijst:
+${offer}
+Past geen enkel archetype duidelijk, geef dan null. Bij een keuze worden je assen en Basisemotie daaruit voorgezet; schrijf je kern-karakter, geboorteverhaal en naam in lijn met dat archetype.`;
+}
+
 function pickSeed(random: () => number): string {
   return SEEDS[Math.floor(random() * SEEDS.length)]!;
 }
@@ -223,9 +233,11 @@ function buildStableSystemPrompt(identityRecord: Dynimo, driveRows: readonly Dri
   const personalityBlock = personalityText(identityRecord);
   const personality = personalityBlock ? `\n${personalityBlock}` : "";
   const driveBlock = drivesPromptBlock(driveRows);
+  const archetype = getArchetype(identityRecord.archetype);
+  const speechStyle = archetype ? `\nJe spreekstijl (${archetype.name}): ${archetype.speechStyle}` : "";
   return `Je bent ${identityRecord.name}.
 Je kern-karakter: ${identityRecord.coreCharacter}${identityRecord.evolvedCharacter ? `\nJe geëvolueerde karakter: ${identityRecord.evolvedCharacter}` : ""}
-Je geboorteverhaal: ${identityRecord.birthStory}${personality}${driveBlock ? `\n${driveBlock}` : ""}
+Je geboorteverhaal: ${identityRecord.birthStory}${speechStyle}${personality}${driveBlock ? `\n${driveBlock}` : ""}
 Antwoord in karakter en in het Nederlands.`;
 }
 
@@ -344,22 +356,29 @@ export function createBrain(deps: {
 
   async function genesis(): Promise<{ dynimo: typeof dynimos.$inferInsert; drives: DrivesOutput }> {
     const seed = pickSeed(random);
+    const offer = pickOffer(random);
     const result = await generateText({
       model: deps.type2.heavy,
-      instructions: GENESIS_INSTRUCTIONS,
+      instructions: `${GENESIS_INSTRUCTIONS}\n${genesisArchetypeInstructions(archetypeOfferText(offer))}`,
       prompt: seed,
       output: Output.object({ schema: genesisSchema }),
     });
+    // Enkel een aangeboden archetype telt; anders houdt Type2 zijn eigen assen en Basisemotie.
+    const archetype = offer.find((candidate) => candidate.id === result.output.archetype) ?? null;
+    const axes = archetype?.axes ?? { ...result.output.axes, reactivity: 0.5, expressiveness: 0.5 };
     return {
       dynimo: {
         name: result.output.name,
         coreCharacter: result.output.coreCharacter,
         birthStory: result.output.birthStory,
-        baseEmotion: result.output.baseEmotion,
-        axisIe: result.output.axes.ie,
-        axisSn: result.output.axes.sn,
-        axisTf: result.output.axes.tf,
-        axisJp: result.output.axes.jp,
+        baseEmotion: archetype?.baseEmotion ?? result.output.baseEmotion,
+        archetype: archetype?.id ?? null,
+        axisIe: axes.ie,
+        axisSn: axes.sn,
+        axisTf: axes.tf,
+        axisJp: axes.jp,
+        axisReactivity: axes.reactivity,
+        axisExpressiveness: axes.expressiveness,
         seed,
         bornAt: now(),
       },
@@ -816,6 +835,27 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     return updated.length > 0;
   }
 
+  async function setArchetype(id: number, archetypeId: string): Promise<boolean> {
+    const archetype = getArchetype(archetypeId);
+    if (!archetype) return false;
+    const { axes } = archetype;
+    const updated = await deps.db
+      .update(dynimos)
+      .set({
+        archetype: archetype.id,
+        baseEmotion: archetype.baseEmotion,
+        axisIe: axes.ie,
+        axisSn: axes.sn,
+        axisTf: axes.tf,
+        axisJp: axes.jp,
+        axisReactivity: axes.reactivity,
+        axisExpressiveness: axes.expressiveness,
+      })
+      .where(eq(dynimos.id, id))
+      .returning({ id: dynimos.id });
+    return updated.length > 0;
+  }
+
   async function setVoice(id: number, voice: string | null): Promise<boolean> {
     return deps.db.transaction(async (tx) => {
       const updated = await tx.update(dynimos).set({ voice }).where(eq(dynimos.id, id)).returning({ id: dynimos.id });
@@ -1042,5 +1082,5 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     }
   }
 
-  return { bringToLife, wake, sleep, kill, list, backfill, reflect, considerInitiative, hear, forceMood, setMood, setAxes, setVoice, addMemory, removeMemory };
+  return { bringToLife, wake, sleep, kill, list, backfill, reflect, considerInitiative, hear, forceMood, setMood, setAxes, setVoice, setArchetype, addMemory, removeMemory };
 }

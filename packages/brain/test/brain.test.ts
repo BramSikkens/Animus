@@ -6,6 +6,7 @@ import { EMBEDDING_DIMENSIONS, dreams, drives, dynimos, epitaphs, memories } fro
 import postgres from "postgres";
 import { EMOTIONS } from "../src/emotion.js";
 import { moodOfRow, singleEmotionValues, type MoodValues } from "../src/mood.js";
+import { ARCHETYPES, getArchetype } from "../src/archetypes.js";
 import { createBrain, STATE_CHANNEL, type BrainEvent } from "../src/index.js";
 import { createTestDb, databaseUrl, TEST_DB_NAME, truncateAll } from "./db.js";
 
@@ -42,6 +43,7 @@ function genesisModel(result: {
   axes?: { ie: number; sn: number; tf: number; jp: number };
   drives?: typeof MID_DRIVES;
   baseEmotion?: string;
+  archetype?: string | null;
 }) {
   return new MockLanguageModelV4({
     doGenerate: async () => ({
@@ -215,6 +217,55 @@ describe("createBrain", () => {
     expect(rows[0]?.seed).toBe(result.seed);
     expect(result.awakeSince).toEqual(bornAt);
     expect(rows[0]?.awakeSince).toEqual(bornAt);
+  });
+
+  describe("genesis met archetypes", () => {
+    const bornAt = new Date("2026-01-01T00:00:00.000Z");
+    const genesisWith = async (archetype: string | null | undefined, random: () => number = () => 0) => {
+      const heavy = genesisModel({ name: "Nova", coreCharacter: "x", birthStory: "y", archetype });
+      const brain = createBrain({ db, embedder: embedModel(), type1: type1Model(), type2: { light: unusedModel(), heavy }, now: () => bornAt, random });
+      return { dynimo: await brain.bringToLife(), heavy };
+    };
+
+    it("biedt Type2 een subset van vier archetypes aan, gevarieerd per genesis", async () => {
+      const offered = async (random: () => number) => {
+        const { heavy } = await genesisWith(null, random);
+        const prompt = JSON.stringify(heavy.doGenerateCalls[0]?.prompt);
+        return ARCHETYPES.filter((a) => prompt.includes(`- ${a.id} (`)).map((a) => a.id);
+      };
+      const first = await offered(() => 0);
+      const second = await offered(() => 0.99);
+      expect(first).toHaveLength(4);
+      expect(second).toHaveLength(4);
+      expect(second).not.toEqual(first);
+    });
+
+    it("zet assen en basisemotie voor uit het gekozen archetype en bewaart het id", async () => {
+      const { dynimo } = await genesisWith("robot");
+      const robot = getArchetype("robot")!;
+      expect(dynimo.archetype).toBe("robot");
+      expect(dynimo.baseEmotion).toBe(robot.baseEmotion);
+      expect([dynimo.axisIe, dynimo.axisSn, dynimo.axisTf, dynimo.axisJp, dynimo.axisReactivity, dynimo.axisExpressiveness]).toEqual([
+        robot.axes.ie, robot.axes.sn, robot.axes.tf, robot.axes.jp, robot.axes.reactivity, robot.axes.expressiveness,
+      ]);
+    });
+
+    it.each([[null], [undefined], ["bestaat-niet"], ["dromer"]])("houdt bij keuze %s de eigen assen van Type2 en geen archetype", async (choice) => {
+      // random 0 → aanbod schattig-wezentje/robot/lieve-oude-dame/leider: "dromer" is geldig maar niet aangeboden
+      const { dynimo } = await genesisWith(choice);
+      expect(dynimo.archetype).toBeNull();
+      expect(dynimo.axisIe).toBe(0.5);
+      expect(dynimo.baseEmotion).toBe("kalm");
+    });
+
+    it("geeft de spreekstijl van het archetype mee aan Type2 bij het praten", async () => {
+      const light = textModel(["Hoi"]);
+      const heavy = genesisModel({ name: "Nova", coreCharacter: "x", birthStory: "y", archetype: "robot" });
+      const brain = createBrain({ db, embedder: embedModel(), type1: type1Model(), type2: { light, heavy }, now: () => bornAt, random: () => 0 });
+      await brain.bringToLife();
+      await collectText(brain.hear("Hallo"));
+      expect(contentsByRole(light.doStreamCalls[0]?.prompt, "system").join(" ")).toContain(getArchetype("robot")!.speechStyle);
+    });
   });
 
   it("praat vanuit een nieuwe brain-instantie met de wakkere Dynimo, zonder genesis", async () => {
@@ -3462,6 +3513,31 @@ describe("createBrain", () => {
       it("geeft false bij een onbekende Dynimo", async () => {
         const vero = await insertDynimo();
         expect(await brainWith().setAxes(vero.id + 999, { ie: 0.1, sn: 0.9, tf: 0.3, jp: 0.7, reactivity: 0.5, expressiveness: 0.5 })).toBe(false);
+      });
+    });
+
+    describe("setArchetype", () => {
+      it("bewaart het archetype en zet assen en basisemotie als startpunt", async () => {
+        const vero = await insertDynimo();
+        const professor = getArchetype("professor")!;
+
+        expect(await brainWith().setArchetype(vero.id, "professor")).toBe(true);
+
+        expect(await rowOf(vero.id)).toMatchObject({
+          archetype: "professor",
+          baseEmotion: professor.baseEmotion,
+          axisIe: professor.axes.ie,
+          axisReactivity: professor.axes.reactivity,
+          axisExpressiveness: professor.axes.expressiveness,
+        });
+      });
+
+      it("geeft false bij een onbekende Dynimo of een onbekend archetype en wijzigt niets", async () => {
+        const vero = await insertDynimo();
+
+        expect(await brainWith().setArchetype(vero.id + 999, "professor")).toBe(false);
+        expect(await brainWith().setArchetype(vero.id, "bestaat-niet")).toBe(false);
+        expect((await rowOf(vero.id)).archetype).toBeNull();
       });
     });
 

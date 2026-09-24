@@ -43,6 +43,13 @@ describe("elevenlabs", () => {
     expect(resolveVoice("elevenlabs", null)).toBe("EXAVITQu4vr4xnSDxMaL");
   });
 
+  it("accepteert alleen echte ElevenLabs-ids (20 alfanumerieke tekens); een Deepgram-stem valt terug op de default", () => {
+    expect(resolveVoice("elevenlabs", "aura-2-leda-nl")).toBe("EXAVITQu4vr4xnSDxMaL");
+    expect(parseVoice("elevenlabs", "aura-2-leda-nl")).toBeNull();
+    expect(parseVoice("elevenlabs", "EXAVITQu4vr4xnSDxMaL")).toEqual({ voice: "EXAVITQu4vr4xnSDxMaL" });
+    expect(resolveVoice("elevenlabs", "EXAVITQu4vr4xnSDxMaL")).toBe("EXAVITQu4vr4xnSDxMaL");
+  });
+
   it("houdt een eerder opgeslagen stem-id geldig, ook als die niet meer in de startlijst staat", () => {
     expect(resolveVoice("elevenlabs", "21m00Tcm4TlvDq8ikWAM")).toBe("21m00Tcm4TlvDq8ikWAM");
   });
@@ -54,11 +61,11 @@ describe("elevenlabs", () => {
 });
 
 describe("elevenlabs catalogus-stemmen", () => {
-  it("accepteert elke niet-lege voice-id (catalogus) bij parseVoice en resolveVoice", () => {
-    expect(parseVoice("elevenlabs", "catalogus-id-123")).toEqual({ voice: "catalogus-id-123" });
+  it("accepteert elke echte voice-id (20 alfanumerieke tekens, catalogus) bij parseVoice en resolveVoice", () => {
+    expect(parseVoice("elevenlabs", "abcdefghij0123456789")).toEqual({ voice: "abcdefghij0123456789" });
     expect(parseVoice("elevenlabs", "  ")).toBeNull();
     expect(parseVoice("elevenlabs", 5)).toBeNull();
-    expect(resolveVoice("elevenlabs", "catalogus-id-123", "abc123")).toBe("catalogus-id-123");
+    expect(resolveVoice("elevenlabs", "abcdefghij0123456789", "abc123")).toBe("abcdefghij0123456789");
   });
 });
 
@@ -76,12 +83,12 @@ describe("speechProvider", () => {
 });
 
 describe("elevenlabs voice-id validatie", () => {
-  it("weigert ids met vreemde tekens of langer dan 64", () => {
+  it("weigert ids met vreemde tekens of een andere lengte dan 20", () => {
     expect(parseVoice("elevenlabs", "abc/../x")).toBeNull();
-    expect(parseVoice("elevenlabs", "a b")).toBeNull();
-    expect(parseVoice("elevenlabs", "a".repeat(65))).toBeNull();
-    expect(parseVoice("elevenlabs", "a".repeat(64))).toEqual({ voice: "a".repeat(64) });
-    expect(parseVoice("elevenlabs", "Ab_c-9")).toEqual({ voice: "Ab_c-9" });
+    expect(parseVoice("elevenlabs", "a".repeat(19))).toBeNull();
+    expect(parseVoice("elevenlabs", "a".repeat(21))).toBeNull();
+    expect(parseVoice("elevenlabs", "aaaaaaaaaa_aaaaaaaaa")).toBeNull();
+    expect(parseVoice("elevenlabs", "a".repeat(20))).toEqual({ voice: "a".repeat(20) });
   });
 });
 

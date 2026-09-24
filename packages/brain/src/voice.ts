@@ -32,8 +32,8 @@ export function voicesFor(provider: SpeechProvider): readonly string[] {
   return VOICES[provider];
 }
 
-// ElevenLabs-voice-ids: alleen [A-Za-z0-9_-], max 64 tekens (komt in een URL/API-call terecht).
-const ELEVEN_ID = /^[A-Za-z0-9_-]{1,64}$/;
+// ElevenLabs-voice-ids zijn exact 20 alfanumerieke tekens (dus geen Deepgram-naam als 'aura-2-leda-nl').
+const ELEVEN_ID = /^[A-Za-z0-9]{20}$/;
 
 // ElevenLabs-stemmen komen uit de (open) catalogus: elke geldig gevormde id is toegestaan. Andere providers: de vaste lijst.
 function isKnownVoice(provider: SpeechProvider, voice: string): boolean {

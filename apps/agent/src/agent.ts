@@ -2,6 +2,7 @@ import { ReadableStream } from "node:stream/web";
 import { fileURLToPath } from "node:url";
 import { createBrain, type Brain } from "@animus/brain";
 import { DISPLAY_TOPIC, type DisplayMessage, type DisplayState } from "@animus/brain/display";
+import { SOUND_TOPIC, type SoundMessage } from "@animus/brain/sound";
 import { EMOTION_TOPIC, type EmotionMessage } from "@animus/brain/emotion";
 import { rowAxes } from "@animus/brain/personality";
 import { EMBEDDING_MODEL, loadType2Config, TYPE1_MODEL } from "@animus/brain/config";
@@ -119,6 +120,16 @@ class AnimusAgent extends voice.Agent {
           .publishData(new TextEncoder().encode(JSON.stringify(message)), { reliable: true, topic: EMOTION_TOPIC })
           .catch((error: unknown) => {
             console.error("Emotie publiceren faalde:", error instanceof Error ? error.message : error);
+          });
+      },
+      onSound: (kind) => {
+        const participant = this.#room.localParticipant;
+        if (!participant) return;
+        const message: SoundMessage = { kind };
+        participant
+          .publishData(new TextEncoder().encode(JSON.stringify(message)), { reliable: true, topic: SOUND_TOPIC })
+          .catch((error: unknown) => {
+            console.error("Geluid publiceren faalde:", error instanceof Error ? error.message : error);
           });
       },
     });

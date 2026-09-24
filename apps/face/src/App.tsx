@@ -12,6 +12,8 @@ import { ConnectionState } from "livekit-client";
 import { DISPLAY_STATES, DISPLAY_TOPIC, isDisplayState, type DisplayState } from "@animus/brain/display";
 import { EMOTION_TOPIC, EMOTIONS, isEmotion, type EmotionMessage } from "@animus/brain/emotion";
 import { doodleActive } from "./face/doodle.js";
+import { isSoundKind, SOUND_TOPIC } from "@animus/brain/sound";
+import { clipUrl } from "./sound.js";
 import { Face } from "./face/Face.js";
 
 type TokenSession = { serverUrl: string; token: string };
@@ -92,6 +94,26 @@ function MouthVolumeListener({ onVolume }: { onVolume: (volume: number) => void 
   // Op 2 decimalen afgerond: beperkt het aantal re-renders van het gezicht.
   const rounded = Math.round(volume * 100) / 100;
   useEffect(() => onVolume(rounded), [rounded, onVolume]);
+  return null;
+}
+
+// Speelt bij een sound-event (SoundMessage op SOUND_TOPIC) een vooraf opgenomen clip af; niet tijdens slapend/reflecterend.
+function SoundListener({ display, onSound }: { display: DisplayState; onSound: () => void }) {
+  useDataChannel(SOUND_TOPIC, (msg) => {
+    if (msg.from?.isAgent) onSound();
+    if (!msg.from?.isAgent || display === "slapend" || display === "reflecterend") return;
+    try {
+      const payload: unknown = JSON.parse(new TextDecoder().decode(msg.payload));
+      if (payload !== null && typeof payload === "object" && "kind" in payload && isSoundKind(payload.kind)) {
+        // Autoplay is ontgrendeld door StartAudio; een geweigerde play() is geen fout voor de sessie.
+        void new Audio(clipUrl(payload.kind)).play().catch(() => {});
+      } else {
+        console.error("Sound-event heeft onverwachte vorm:", payload);
+      }
+    } catch (error) {
+      console.error("Sound-event kon niet verwerkt worden:", error instanceof Error ? error.message : error);
+    }
+  });
   return null;
 }
 
@@ -213,6 +235,7 @@ export function App() {
             <EmotionListener onEmotion={onEmotion} />
             <DisplayListener onDisplay={onDisplay} />
             <MouthVolumeListener onVolume={setMouthVolume} />
+            <SoundListener display={displayState} onSound={touch} />
             <ConnectionStatus />
             <RoomAudioRenderer />
             <StartAudio label="Zet geluid aan" />

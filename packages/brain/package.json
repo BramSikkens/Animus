@@ -10,7 +10,8 @@
     "./display": "./src/display.ts",
     "./personality": "./src/personality.ts",
     "./drives": "./src/drives.ts",
-    "./mood": "./src/mood.ts"
+    "./mood": "./src/mood.ts",
+    "./sound": "./src/sound.ts"
   },
   "scripts": {
     "test": "vitest run",

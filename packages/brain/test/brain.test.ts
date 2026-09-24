@@ -2051,6 +2051,51 @@ describe("createBrain", () => {
       expect(row?.moodAt).toEqual(clock);
     });
 
+    it("levert een sound-event direct na het mood-event als de Stemming zichtbaar verandert", async () => {
+      await insertDynimo();
+      const { model } = type1Sequence([{ emotion: "boos", intensity: 0.8 }]);
+      const brain = brainWith({ type1: model, light: textModel(["Hoi."]) });
+
+      const events: BrainEvent[] = [];
+      for await (const event of brain.hear("Wat een dag")) events.push(event);
+
+      expect(events[0]).toEqual({ type: "mood", emotion: "boos", intensity: 0.8 });
+      expect(events[1]).toEqual({ type: "sound", kind: "brommen" });
+    });
+
+    it("levert geen sound-event als de Emotie de Stemming niet noemenswaardig verschuift", async () => {
+      await insertDynimo();
+      const { model } = type1Sequence([
+        { emotion: "boos", intensity: 0.8 },
+        { emotion: "blij", intensity: 0.5 }, // zwakker dan boos: Stemming blijft
+        { emotion: "kalm", intensity: 0 }, // neutrale Emotie: Stemming blijft
+      ]);
+      const light = new MockLanguageModelV4({ doStream: [textStream("Een."), textStream("Twee."), textStream("Drie.")] });
+      const brain = brainWith({ type1: model, light });
+
+      const perTurn: BrainEvent[][] = [];
+      for (const utterance of ["Een", "Twee", "Drie"]) {
+        const events: BrainEvent[] = [];
+        for await (const event of brain.hear(utterance)) events.push(event);
+        perTurn.push(events);
+      }
+
+      expect(perTurn[0]!.some((e) => e.type === "sound")).toBe(true);
+      expect(perTurn[1]!.some((e) => e.type === "sound")).toBe(false);
+      expect(perTurn[2]!.some((e) => e.type === "sound")).toBe(false);
+    });
+
+    it("levert geen sound-event bij een kleine Emotie die de Basisemotie amper verschuift", async () => {
+      await insertDynimo();
+      const { model } = type1Sequence([{ emotion: "blij", intensity: 0.35 }]); // basisniveau is 0.3
+      const brain = brainWith({ type1: model, light: textModel(["Hoi."]) });
+
+      const events: BrainEvent[] = [];
+      for await (const event of brain.hear("Hoi")) events.push(event);
+
+      expect(events.some((e) => e.type === "sound")).toBe(false);
+    });
+
     it("laat een Emotie die zwakker is dan de uitgedoofde Stemming die niet veranderen, en ververst mood_at niet", async () => {
       let clock = bornAt;
       await insertDynimo();

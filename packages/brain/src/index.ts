@@ -138,14 +138,14 @@ function driveRowsFor(dynimoId: number, output: DrivesOutput, at: Date): (typeof
   );
 }
 
-const genesisSchema = z.object({
+export const genesisSchema = z.object({
   name: z.string().min(1),
   coreCharacter: z.string().min(1),
   birthStory: z.string().min(1),
   axes: axesSchema,
   drives: drivesSchema,
   baseEmotion: z.enum(EMOTIONS),
-  archetype: z.string().nullish(),
+  archetype: z.string().nullable(),
 });
 
 const BASE_EMOTION_DESCRIPTION = `De Basisemotie is het temperament van het wezen: de emotie waar zijn stemming naartoe uitdooft als er niets gebeurt. Kies er één uit: ${EMOTIONS.join(", ")}.`;

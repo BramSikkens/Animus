@@ -88,6 +88,27 @@ describe("applyDeltas", () => {
   });
 });
 
+describe("reactiviteit", () => {
+  it("schaalt de Type1-delta's: 0 nauwelijks, 0.5 ongewijzigd, 1 sterk", () => {
+    const boos = (reactivity: number) => applyDeltas(null, "kalm", { boos: 40 }, T0, reactivity).mood.values.boos;
+    expect(boos(0.5)).toBeCloseTo(40);
+    expect(boos(0)).toBeCloseTo(10);
+    expect(boos(1)).toBeCloseTo(70);
+  });
+
+  it("dooft langzamer uit bij hoge reactiviteit en sneller bij lage", () => {
+    const boos = (reactivity: number) => currentMood(stored({ boos: 80 }), "kalm", after(MOOD_HALF_LIFE_MS), reactivity).values.boos;
+    expect(boos(0.5)).toBeCloseTo(40);
+    expect(boos(1)).toBeGreaterThan(50);
+    expect(boos(0)).toBeLessThan(20);
+  });
+
+  it("moodOfRow gebruikt axisReactivity van de rij", () => {
+    const row = { baseEmotion: "kalm", moodValues: { boos: 80 }, moodAt: T0 };
+    expect(moodOfRow({ ...row, axisReactivity: 1 }, after(MOOD_HALF_LIFE_MS)).values.boos).toBeGreaterThan(50);
+  });
+});
+
 describe("moodOfRow", () => {
   const empty = { baseEmotion: null, moodValues: null, moodAt: null };
 

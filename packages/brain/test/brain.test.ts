@@ -1366,6 +1366,7 @@ describe("createBrain", () => {
     const bornAt = new Date("2026-01-01T12:00:00.000Z");
     const INTROVERT = { ie: 0.1, sn: 0.5, tf: 0.5, jp: 0.5 };
     const EXTRAVERT = { ie: 0.9, sn: 0.5, tf: 0.5, jp: 0.5 };
+    const MIDDLE_PERSONALITY = { ie: 0.5, sn: 0.5, tf: 0.5, jp: 0.5 };
 
     function brainWith(type2: { light: MockLanguageModelV4; heavy: MockLanguageModelV4 }) {
       return createBrain({
@@ -1378,7 +1379,7 @@ describe("createBrain", () => {
       });
     }
 
-    async function insertDynimo(axes?: { ie: number; sn: number; tf: number; jp: number }) {
+    async function insertDynimo(axes?: { ie: number; sn: number; tf: number; jp: number; axisReactivity?: number; axisExpressiveness?: number }) {
       const [row] = await db
         .insert(dynimos)
         .values({
@@ -1392,6 +1393,8 @@ describe("createBrain", () => {
           axisSn: axes?.sn,
           axisTf: axes?.tf,
           axisJp: axes?.jp,
+          axisReactivity: axes?.axisReactivity,
+          axisExpressiveness: axes?.axisExpressiveness,
         })
         .returning();
       return row!;
@@ -1436,6 +1439,25 @@ describe("createBrain", () => {
       expect(system).toContain("Persoonlijkheid: INFP");
       expect(system).toContain("één korte zin");
       expect(system).not.toContain("uitweiden");
+    });
+
+    it("laat Type2 de gedragsregels strikt volgen, inclusief reactiviteit en expressiviteit", async () => {
+      await insertDynimo({ ...EXTRAVERT, axisReactivity: 0.05, axisExpressiveness: 0.95 });
+      const light = textModel(["Hoi."]);
+      await collectText(brainWith({ light, heavy: unusedModel() }).hear("Hallo!"));
+
+      const system = contentsByRole(light.doStreamCalls[0]?.prompt, "system").join(" ");
+      expect(system).toContain("Volg deze gedragsregels strikt");
+      expect(system).toContain("nauwelijks");
+      expect(system).toContain("hardop");
+    });
+
+    it("geeft bij middelste waarden geen gedragsregels", async () => {
+      await insertDynimo(MIDDLE_PERSONALITY);
+      const light = textModel(["Hoi."]);
+      await collectText(brainWith({ light, heavy: unusedModel() }).hear("Hallo!"));
+
+      expect(contentsByRole(light.doStreamCalls[0]?.prompt, "system").join(" ")).not.toContain("gedragsregels");
     });
 
     it("geeft een extraverte Dynimo de uitweid-richtlijn en niet de introverte", async () => {
@@ -2071,6 +2093,18 @@ describe("createBrain", () => {
       expect((await db.select().from(dynimos))[0]?.moodValues).toMatchObject({ blij: 100, boos: 80 });
     });
 
+    it.each([
+      [0, 10],
+      [1, 70],
+    ])("schaalt de Type1-delta's met de reactiviteit van de Dynimo (%s geeft boos %s)", async (axisReactivity, expected) => {
+      await insertDynimo({ axisReactivity });
+      const { model } = type1Sequence([{ deltas: { boos: 40 } }]);
+
+      await collectText(brainWith({ type1: model, light: textModel(["Hoi."]) }).hear("Grr"));
+
+      expect((await db.select().from(dynimos))[0]?.moodValues).toMatchObject({ boos: expect.closeTo(expected, 3) });
+    });
+
     it("laat boos van 96 bij herhaalde geruststelling zakken tot een andere emotie wint", async () => {
       await insertDynimo({ moodValues: singleEmotionValues("boos", 0.96), moodAt: bornAt });
       const { model } = type1Sequence([{ deltas: { boos: -50, kalm: 75 } }, { deltas: { boos: -50, kalm: 25 } }]);
@@ -2440,7 +2474,7 @@ describe("createBrain", () => {
     const noOps = { add: [], closeGoals: [], drop: [] };
     const reflection = (over: Record<string, unknown> = {}, driveOps: Record<string, unknown> = {}) => ({
       evolvedCharacter: "Wat rustiger geworden.",
-      axisShifts: { ie: 0, sn: 0, tf: 0, jp: 0 },
+      axisShifts: { ie: 0, sn: 0, tf: 0, jp: 0, reactivity: 0, expressiveness: 0 },
       drives: { ...noOps, ...driveOps },
       wakeMood: { emotion: "kalm", intensity: 0.4 },
       dream: null, // strikte structured output: key verplicht, null = geen Droom
@@ -2581,18 +2615,29 @@ describe("createBrain", () => {
       const vero = await insertDynimo();
       await addMemory(vero.id, "iets", 1);
 
-      await brainWith(heavyReturning(reflection({ axisShifts: { ie: shift, sn: 0, tf: 0, jp: 0 } }))).sleep();
+      await brainWith(heavyReturning(reflection({ axisShifts: { ie: shift, sn: 0, tf: 0, jp: 0, reactivity: 0, expressiveness: 0 } }))).sleep();
 
       const row = await rowOf(vero.id);
       expect(row.axisIe).toBeCloseTo(expected, 5);
       expect(row.axisSn).toBeCloseTo(0.5, 5);
     });
 
+    it("schuift reactiviteit en expressiviteit binnen dezelfde grens van ±0.02", async () => {
+      const vero = await insertDynimo();
+      await addMemory(vero.id, "iets", 1);
+
+      await brainWith(heavyReturning(reflection({ axisShifts: { ie: 0, sn: 0, tf: 0, jp: 0, reactivity: 0.3, expressiveness: -0.3 } }))).sleep();
+
+      const row = await rowOf(vero.id);
+      expect(row.axisReactivity).toBeCloseTo(0.52, 5);
+      expect(row.axisExpressiveness).toBeCloseTo(0.48, 5);
+    });
+
     it("houdt assen binnen 0..1 aan de randen", async () => {
       const vero = await insertDynimo({ axisIe: 0.99, axisSn: 0.01 });
       await addMemory(vero.id, "iets", 1);
 
-      await brainWith(heavyReturning(reflection({ axisShifts: { ie: 0.3, sn: -0.3, tf: 0, jp: 0 } }))).sleep();
+      await brainWith(heavyReturning(reflection({ axisShifts: { ie: 0.3, sn: -0.3, tf: 0, jp: 0, reactivity: 0, expressiveness: 0 } }))).sleep();
 
       const row = await rowOf(vero.id);
       expect(row.axisIe).toBeCloseTo(1, 5);
@@ -2603,7 +2648,7 @@ describe("createBrain", () => {
       const vero = await insertDynimo({ axisIe: null, axisSn: null, axisTf: null, axisJp: null });
       await addMemory(vero.id, "iets", 1);
 
-      await brainWith(heavyReturning(reflection({ axisShifts: { ie: 0.3, sn: 0.3, tf: 0.3, jp: 0.3 } }))).sleep();
+      await brainWith(heavyReturning(reflection({ axisShifts: { ie: 0.3, sn: 0.3, tf: 0.3, jp: 0.3, reactivity: 0, expressiveness: 0 } }))).sleep();
 
       const row = await rowOf(vero.id);
       expect([row.axisIe, row.axisSn, row.axisTf, row.axisJp]).toEqual([null, null, null, null]);
@@ -2809,7 +2854,7 @@ describe("createBrain", () => {
     });
 
     it.each([
-      ["een asverschuiving die geen getal is", { axisShifts: { ie: "veel", sn: 0, tf: 0, jp: 0 } }],
+      ["een asverschuiving die geen getal is", { axisShifts: { ie: "veel", sn: 0, tf: 0, jp: 0, reactivity: 0, expressiveness: 0 } }],
       ["een lege evolvedCharacter", { evolvedCharacter: "" }],
       ["een ongeldige Ontwaakstemming", { wakeMood: { emotion: "woedend", intensity: 0.5 } }],
     ])("schrijft niets bij ongeldige output (%s)", async (_label, over) => {
@@ -2830,7 +2875,7 @@ describe("createBrain", () => {
       const brain = brainWith(
         heavyReturning(
           reflection(
-            { evolvedCharacter: "Werd een tikkeltje stiller.", axisShifts: { ie: -0.3, sn: 0, tf: 0, jp: 0 } },
+            { evolvedCharacter: "Werd een tikkeltje stiller.", axisShifts: { ie: -0.3, sn: 0, tf: 0, jp: 0, reactivity: 0, expressiveness: 0 } },
             { add: [{ kind: "toekomstdroom", text: "Een vuurtoren bewaken" }] },
           ),
         ),
@@ -2886,7 +2931,7 @@ describe("createBrain", () => {
     it("past een gelijktijdige Reflectie van twee instanties op dezelfde Dynimo maar één keer toe", async () => {
       const vero = await insertDynimo();
       await addMemory(vero.id, "iets", 1);
-      const shift = reflection({ axisShifts: { ie: 0.3, sn: 0, tf: 0, jp: 0 } });
+      const shift = reflection({ axisShifts: { ie: 0.3, sn: 0, tf: 0, jp: 0, reactivity: 0, expressiveness: 0 } });
       const first = brainWith(heavyReturning(shift, 150));
       const second = brainWith(heavyReturning(shift, 150));
 
@@ -3137,7 +3182,7 @@ describe("createBrain", () => {
         const heavy = new MockLanguageModelV4({
           doGenerate: async () => {
             order.push("call");
-            return generateResult(JSON.stringify(reflection({ axisShifts: { ie: 0.3, sn: 0, tf: 0, jp: 0 } })));
+            return generateResult(JSON.stringify(reflection({ axisShifts: { ie: 0.3, sn: 0, tf: 0, jp: 0, reactivity: 0, expressiveness: 0 } })));
           },
         });
 
@@ -3330,7 +3375,7 @@ describe("createBrain", () => {
             generateResult(
               JSON.stringify({
                 evolvedCharacter: "x",
-                axisShifts: { ie: 0, sn: 0, tf: 0, jp: 0 },
+                axisShifts: { ie: 0, sn: 0, tf: 0, jp: 0, reactivity: 0, expressiveness: 0 },
                 drives: { add: [], closeGoals: [], drop: [] },
                 wakeMood: { emotion: "kalm", intensity: 0.4 },
               }),
@@ -3409,14 +3454,14 @@ describe("createBrain", () => {
       it("overschrijft de opgeslagen assen", async () => {
         const vero = await insertDynimo();
 
-        expect(await brainWith().setAxes(vero.id, { ie: 0.1, sn: 0.9, tf: 0.3, jp: 0.7 })).toBe(true);
+        expect(await brainWith().setAxes(vero.id, { ie: 0.1, sn: 0.9, tf: 0.3, jp: 0.7, reactivity: 0.2, expressiveness: 0.8 })).toBe(true);
 
-        expect(await rowOf(vero.id)).toMatchObject({ axisIe: 0.1, axisSn: 0.9, axisTf: 0.3, axisJp: 0.7 });
+        expect(await rowOf(vero.id)).toMatchObject({ axisIe: 0.1, axisSn: 0.9, axisTf: 0.3, axisJp: 0.7, axisReactivity: 0.2, axisExpressiveness: 0.8 });
       });
 
       it("geeft false bij een onbekende Dynimo", async () => {
         const vero = await insertDynimo();
-        expect(await brainWith().setAxes(vero.id + 999, { ie: 0.1, sn: 0.9, tf: 0.3, jp: 0.7 })).toBe(false);
+        expect(await brainWith().setAxes(vero.id + 999, { ie: 0.1, sn: 0.9, tf: 0.3, jp: 0.7, reactivity: 0.5, expressiveness: 0.5 })).toBe(false);
       });
     });
 

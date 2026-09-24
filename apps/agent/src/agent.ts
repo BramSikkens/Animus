@@ -241,7 +241,7 @@ export default defineAgent<AgentUserData>({
     if (initiativeBaseMs.warning) console.warn(initiativeBaseMs.warning);
     let initiativeAxes: ReturnType<typeof rowAxes> = null;
     const refreshInitiativeAxes = async (): Promise<void> => {
-      initiativeAxes = rowAxes((await brain.list()).find((dynimo) => dynimo.awakeSince) ?? { axisIe: null, axisSn: null, axisTf: null, axisJp: null });
+      initiativeAxes = rowAxes((await brain.list()).find((dynimo) => dynimo.awakeSince) ?? { axisIe: null, axisSn: null, axisTf: null, axisJp: null, axisReactivity: 0.5, axisExpressiveness: 0.5 });
     };
     const animusAgent = new AnimusAgent(brain, ctx.room, () => {
       silence.reset();

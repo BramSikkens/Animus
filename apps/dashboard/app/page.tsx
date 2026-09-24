@@ -3,7 +3,7 @@ import { EMOTIONS } from "@animus/brain/emotion";
 import { formatAge } from "@animus/brain/age";
 import { moodOfRow } from "@animus/brain/mood";
 import { DRIVE_KINDS, DRIVE_LABELS, type DriveKind } from "@animus/brain/drives";
-import { AXES, AXIS_LETTERS, mbtiType, rowAxes } from "@animus/brain/personality";
+import { AXES, AXIS_LABELS, AXIS_LETTERS, MBTI_AXES, mbtiType, rowAxes } from "@animus/brain/personality";
 import { speechProvider, voicesFor } from "@animus/brain/voice";
 import { dreams, drives, dynimos, epitaphs, memories } from "@animus/db/schema";
 import { db } from "../lib/db";
@@ -106,7 +106,7 @@ export default async function DashboardPage() {
                       <p>
                         Persoonlijkheid: <strong>{mbtiType(axes)}</strong>
                       </p>
-                      {AXES.map((axis) => {
+                      {MBTI_AXES.map((axis) => {
                         const percent = Math.round(axes[axis] * 100);
                         const [first, second] = AXIS_LETTERS[axis];
                         return (
@@ -172,7 +172,7 @@ export default async function DashboardPage() {
                   <ActionForm action={setAxes} label="Persoonlijkheid zetten" pendingLabel="Zet…" id={dynimo.id}>
                     {AXES.map((axis) => (
                       <label key={axis} className="slider">
-                        {AXIS_LETTERS[axis][0]}↔{AXIS_LETTERS[axis][1]}
+                        {AXIS_LABELS[axis]}
                         <input name={`axis_${axis}`} type="range" min={0} max={1} step={0.01} defaultValue={axes?.[axis] ?? 0.5} />
                       </label>
                     ))}

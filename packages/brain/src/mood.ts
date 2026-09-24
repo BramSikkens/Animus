@@ -6,6 +6,12 @@ export const MOOD_HALF_LIFE_MS = 3 * 60_000;
 /** Ruststand (0–100) van de Basisemotie; alle andere emoties rusten op 0. */
 export const BASE_LEVEL = 30;
 
+/**
+ * Reactiviteit (0–1, 0.5 = neutraal) → factor 0.25..1.75 (0.5 geeft 1). Schaalt zowel de Type1-delta's als de
+ * halveringstijd: een reactieve Dynimo beweegt sterker én dooft langzamer uit, een nuchtere het omgekeerde.
+ */
+export const reactivityFactor = (reactivity: number) => 0.25 + 1.5 * reactivity;
+
 /** Elke emotie uit EMOTIONS heeft altijd een waarde 0–100. */
 export type MoodValues = Record<Emotion, number>;
 export type StoredMood = { values: MoodValues; at: Date } | null;
@@ -33,12 +39,12 @@ function moodOf(values: MoodValues, base: Emotion): Mood {
 }
 
 /** De effectieve Stemming: de opgeslagen waarden, per emotie exponentieel uitgedoofd naar de ruststand. */
-export function currentMood(stored: StoredMood, baseEmotion: Emotion | null, now: Date): Mood {
+export function currentMood(stored: StoredMood, baseEmotion: Emotion | null, now: Date, reactivity = 0.5): Mood {
   const base = baseEmotion ?? "neutraal";
   const rest = restValues(base);
   if (!stored) return moodOf(rest, base);
   // Max(0, …): een klok die terugloopt (at in de toekomst) mag de waarden niet boven de opgeslagen waarde tillen.
-  const decay = 0.5 ** (Math.max(0, now.getTime() - stored.at.getTime()) / MOOD_HALF_LIFE_MS);
+  const decay = 0.5 ** (Math.max(0, now.getTime() - stored.at.getTime()) / (MOOD_HALF_LIFE_MS * reactivityFactor(reactivity)));
   const values = Object.fromEntries(
     EMOTIONS.map((emotion) => [emotion, rest[emotion] + (stored.values[emotion] - rest[emotion]) * decay]),
   ) as MoodValues;
@@ -56,11 +62,13 @@ export function applyDeltas(
   baseEmotion: Emotion | null,
   deltas: MoodDeltas,
   now: Date,
+  reactivity = 0.5,
 ): { mood: Mood; next: StoredMood } {
-  const current = currentMood(stored, baseEmotion, now);
+  const current = currentMood(stored, baseEmotion, now, reactivity);
+  const scale = reactivityFactor(reactivity);
   if (EMOTIONS.every((emotion) => !deltas[emotion])) return { mood: current, next: stored };
   const values = Object.fromEntries(
-    EMOTIONS.map((emotion) => [emotion, clamp(current.values[emotion] + (deltas[emotion] ?? 0))]),
+    EMOTIONS.map((emotion) => [emotion, clamp(current.values[emotion] + (deltas[emotion] ?? 0) * scale)]),
   ) as MoodValues;
   return { mood: moodOf(values, baseEmotion ?? "neutraal"), next: { values, at: now } };
 }
@@ -70,6 +78,7 @@ export type MoodColumns = {
   baseEmotion: string | null;
   moodValues: unknown;
   moodAt: Date | null;
+  axisReactivity?: number;
 };
 
 export function baseEmotionOf(row: Pick<MoodColumns, "baseEmotion">): Emotion | null {
@@ -89,7 +98,7 @@ export function storedMoodOf(row: Pick<MoodColumns, "moodValues" | "moodAt">): S
 
 /** De effectieve Stemming van een rij op tijdstip `now`. */
 export function moodOfRow(row: MoodColumns, now: Date): Mood {
-  return currentMood(storedMoodOf(row), baseEmotionOf(row), now);
+  return currentMood(storedMoodOf(row), baseEmotionOf(row), now, row.axisReactivity);
 }
 
 /** Eén emotie op `intensity` (0–1), de rest op 0: voor Ontwaakstemming en handmatige override. */

@@ -3125,6 +3125,16 @@ describe("createBrain", () => {
         expect(rows[0]!.createdAt).toEqual(bornAt);
       });
 
+      it("accepteert de nieuwe emoties (droevig, vredig, druk) in de check-constraints van dynimos en dreams", async () => {
+        const [row] = await db
+          .insert(dynimos)
+          .values({ name: "Vero", coreCharacter: "x", birthStory: "y", seed: "z", bornAt, baseEmotion: "vredig", wakeMoodEmotion: "druk", wakeMoodIntensity: 0.5 })
+          .returning();
+        await db.insert(dreams).values({ dynimoId: row!.id, text: "Regen.", emotion: "droevig", intensity: 0.4, createdAt: bornAt });
+        expect((await dreamsOf(row!.id))[0]?.emotion).toBe("droevig");
+        expect(row).toMatchObject({ baseEmotion: "vredig", wakeMoodEmotion: "druk" });
+      });
+
       it("bewaart geen Droom als het model er geen levert", async () => {
         const vero = await insertDynimo();
         await addMemory(vero.id, "iets", 1);

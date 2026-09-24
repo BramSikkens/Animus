@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { createBrain, type Brain } from "@animus/brain";
 import { DISPLAY_TOPIC, type DisplayMessage, type DisplayState } from "@animus/brain/display";
 import { SOUND_TOPIC, type SoundMessage } from "@animus/brain/sound";
-import { EMOTION_TOPIC, type EmotionMessage } from "@animus/brain/emotion";
+import { EMOTION_TOPIC } from "@animus/brain/emotion";
 import { rowAxes } from "@animus/brain/personality";
 import { resolveVoice, speechProvider } from "@animus/brain/voice";
 import { EMBEDDING_MODEL, loadType2Config, TYPE1_MODEL } from "@animus/brain/config";
@@ -27,6 +27,7 @@ import * as openai from "@livekit/agents-plugin-openai";
 import * as silero from "@livekit/agents-plugin-silero";
 import { RoomEvent } from "@livekit/rtc-node";
 import { readState, watchDynimos } from "./dynimo-watch.js";
+import { createStateRepublisher, emotionMessageFor } from "./state-republish.js";
 import { createInitiativeTimer, initiativeIntervalMs, parseInitiativeMinutes } from "./initiative-timer.js";
 import { createReflectionDisplay } from "./reflection-display.js";
 import { createSilenceTimer, parseSilenceMinutes } from "./silence-timer.js";
@@ -177,7 +178,7 @@ export default defineAgent<AgentUserData>({
       },
     });
 
-    const publish = (topic: string, message: DisplayMessage | EmotionMessage): void => {
+    const publish = (topic: string, message: DisplayMessage | ReturnType<typeof emotionMessageFor>): void => {
       const participant = ctx.room.localParticipant;
       if (!participant) return;
       participant
@@ -212,7 +213,7 @@ export default defineAgent<AgentUserData>({
       try {
         const state = await readState(brain);
         publish(DISPLAY_TOPIC, { state: effectiveDisplay(state), name: state.name });
-        if (state.mood) publish(EMOTION_TOPIC, state.mood);
+        publish(EMOTION_TOPIC, emotionMessageFor(state.mood));
       } catch (error) {
         console.error("Toestand publiceren faalde:", error instanceof Error ? error.message : error);
       }
@@ -291,6 +292,14 @@ export default defineAgent<AgentUserData>({
     ctx.addShutdownCallback(() => watcher.close());
     applyVoice(watcher.current().voice);
     void publishState();
+    // De Stemming dooft uit met de tijd: periodiek opnieuw publiceren laat de balken meelopen (enkel bij wakker + face).
+    const republisher = createStateRepublisher({
+      intervalMs: 5000,
+      isActive: () => watcher.current().key !== "none" && ctx.room.remoteParticipants.size > 0,
+      publish: () => void publishState(),
+    });
+    republisher.start();
+    ctx.addShutdownCallback(async () => republisher.dispose());
     silence.arm();
     void refreshInitiativeAxes().catch(() => {});
     initiative.start();

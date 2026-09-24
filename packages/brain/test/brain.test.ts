@@ -109,9 +109,9 @@ function embedModel() {
   });
 }
 
-// Type1-contract: per emotie een 'delta_<emotie>'-score (9 niveaus, 0..8; 4 = geen verandering, 25 punten per niveau).
+// Type1-contract: per emotie een 'delta_<emotie>'-score (21 niveaus, 0..20; 10 = geen verandering, 10 punten per niveau).
 const deltaAnswers = (deltas: Partial<Record<string, number>>) =>
-  Object.fromEntries(EMOTIONS.map((emotion) => [`delta_${emotion}`, { type: "score", score: (deltas[emotion] ?? 0) / 25 + 4 }]));
+  Object.fromEntries(EMOTIONS.map((emotion) => [`delta_${emotion}`, { type: "score", score: (deltas[emotion] ?? 0) / 10 + 10 }]));
 
 // Default: geen delta's/simpel. Registreert calls zelf (de mock houdt ze niet bij), t.b.v. test 5.
 function type1Model(
@@ -1938,11 +1938,11 @@ describe("createBrain", () => {
 
     // Type1 met een reeks antwoorden (één per beurt); registreert wat hij ontving.
     function type1Sequence(answers: { deltas: Partial<Record<string, number>>; indruk?: number }[]) {
-      const calls: { state: string }[] = [];
+      const calls: { state: string; questions: Record<string, { criteria: string[] }> }[] = [];
       const model = new Experimental_EvaluationMockModelV4({
         doEvaluate: async (options) => {
           const answer = answers[calls.length] ?? answers.at(-1)!;
-          calls.push({ state: String((options as { state: unknown }).state) });
+          calls.push({ state: String((options as { state: unknown }).state), questions: (options as unknown as { questions: Record<string, { criteria: string[] }> }).questions });
           return {
             answers: {
               ...deltaAnswers(answer.deltas),
@@ -2034,6 +2034,21 @@ describe("createBrain", () => {
       expect(state).toContain("Sterren tellen");
       expect(state).not.toContain("Afgerond doel");
       expect(state).toContain("boos");
+    });
+
+    it("biedt Type1 een fijne delta-schaal: 21 niveaus van -100 tot +100 in stappen van 10, midden = geen verandering", async () => {
+      await insertDynimo();
+      const { model, calls } = type1Sequence([{ deltas: {} }]);
+
+      await collectText(brainWith({ type1: model, light: textModel(["Hoi."]) }).hear("Hoi"));
+
+      const criteria = calls[0]!.questions.delta_blij!.criteria;
+      expect(criteria).toHaveLength(21);
+      expect(criteria[0]).toBe("-100");
+      expect(criteria[8]).toBe("-20");
+      expect(criteria[10]).toBe("geen verandering");
+      expect(criteria[11]).toBe("+10");
+      expect(criteria[20]).toBe("+100");
     });
 
     it("telt de delta's per uiting op bij de Stemming en clampt op 100: een andere emotie kan zo winnen", async () => {

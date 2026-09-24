@@ -257,8 +257,8 @@ type Type1Result = { deltas: MoodDeltas; indruk: number; intent: "simpel" | "com
 
 // Type1 scoort per emotie een verandering op een schaal van DELTA_LEVELS niveaus: het middelste niveau is "geen
 // verandering", elk niveau is DELTA_STEP punten (op de 0–100-schaal van de Stemming) omhoog of omlaag.
-const DELTA_LEVELS = 9;
-const DELTA_STEP = 25;
+const DELTA_LEVELS = 21;
+const DELTA_STEP = 10;
 const NEUTRAL_LEVEL = (DELTA_LEVELS - 1) / 2;
 const BIRTHDAY_DELTA = 90;
 

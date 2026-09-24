@@ -5,6 +5,7 @@ import { parseArchetypeId } from "@animus/brain/archetypes";
 import { isEmotion } from "@animus/brain/emotion";
 import { parseMoodValues } from "@animus/brain/mood";
 import { parseAxes } from "@animus/brain/personality";
+import { cloneVoice, designVoice, saveDesignedVoice, type DesignPreview } from "@animus/brain/voice-design";
 import { parseVoice, speechProvider } from "@animus/brain/voice";
 import { getBrain } from "../lib/brain";
 
@@ -128,5 +129,43 @@ export async function removeMemory(_prev: ActionState, formData: FormData): Prom
     const memoryId = Number(formData.get("memoryId"));
     if (id === null || !Number.isInteger(memoryId)) return "Ongeldige Herinnering.";
     if (!(await getBrain().removeMemory(id, memoryId))) return "Deze Herinnering bestaat niet (meer).";
+  });
+}
+
+// Stemontwerp (ElevenLabs). De API-key blijft server-side in process.env.
+const elevenKey = () => process.env.ELEVENLABS_API_KEY ?? "";
+
+export type DesignState = ActionState & { previews?: DesignPreview[] };
+
+export async function designVoiceAction(_prev: DesignState, formData: FormData): Promise<DesignState> {
+  try {
+    const previews = await designVoice(fetch, elevenKey(), String(formData.get("description") ?? ""), String(formData.get("previewText") ?? ""));
+    return previews.length ? { previews } : { error: "ElevenLabs gaf geen previews terug." };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+export async function applyDesignedVoice(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  return run(async () => {
+    const id = parseId(formData);
+    if (id === null) return INVALID_ID;
+    const description = String(formData.get("description") ?? "").trim().slice(0, 500);
+    const voice = await saveDesignedVoice(fetch, elevenKey(), {
+      name: String(formData.get("name") ?? ""),
+      description,
+      generatedVoiceId: String(formData.get("generatedVoiceId") ?? ""),
+    });
+    if (!(await getBrain().setVoiceProfile(id, { voice, description: description || null }))) return DYNIMO_GONE;
+  });
+}
+
+export async function cloneVoiceAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  return run(async () => {
+    const id = parseId(formData);
+    if (id === null) return INVALID_ID;
+    const files = formData.getAll("files").filter((f): f is File => f instanceof File && f.size > 0);
+    const voice = await cloneVoice(fetch, elevenKey(), { name: String(formData.get("name") ?? ""), files, consent: formData.get("consent") === "on" });
+    if (!(await getBrain().setVoiceProfile(id, { voice, description: null }))) return DYNIMO_GONE;
   });
 }

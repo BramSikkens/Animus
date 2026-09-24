@@ -16,6 +16,7 @@
     "./sound": "./src/sound.ts",
     "./voice": "./src/voice.ts",
     "./voice-catalog": "./src/voice-catalog.ts",
+    "./voice-design": "./src/voice-design.ts",
     "./voice-emotion": "./src/voice-emotion.ts"
   },
   "scripts": {

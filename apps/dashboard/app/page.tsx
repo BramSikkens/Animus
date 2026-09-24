@@ -10,6 +10,7 @@ import { dreams, drives, dynimos, epitaphs, memories } from "@animus/db/schema";
 import { db } from "../lib/db";
 import { ActionForm } from "./action-form";
 import { VoiceCatalog } from "./voice-catalog";
+import { VoiceDesign } from "./voice-design";
 import { getCatalog } from "../lib/voice-catalog";
 import { addMemory, bringToLife, forceMood, kill, removeMemory, setArchetype, setAxes, setMood, setVoice, sleep, wake } from "./actions";
 import { formatDate, formatDateTime } from "../lib/format";
@@ -223,6 +224,9 @@ export default async function DashboardPage() {
                     <input name="voiceDescription" aria-label="Stembeschrijving" placeholder="Stembeschrijving (bv. warm, laag, rustig)" maxLength={500} defaultValue={dynimo.voiceDescription ?? ""} />
                   </ActionForm>
                     </>
+                  )}
+                  {provider === "elevenlabs" && (
+                    <VoiceDesign id={dynimo.id} name={dynimo.name} description={dynimo.voiceDescription ?? getArchetype(dynimo.archetype)?.voiceHint ?? ""} />
                   )}
                   <ActionForm action={kill} label="Doden" pendingLabel="Neemt afscheid…" id={dynimo.id} confirmName />
                   <details>

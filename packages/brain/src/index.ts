@@ -23,7 +23,7 @@ import { decideOpinion, matchDrives, opinionPrompt, OPINION_BOOS_DELTA } from ".
 import { pickSpeechSound } from "./speech-sounds.js";
 import { createPacer, pacingFor } from "./speech-pacing.js";
 import { pickDreamToTell, DREAM_MAX_AGE_MS } from "./dream-tell.js";
-import { pickSpontaneousMemory, SPONTANEOUS_INITIATIVE_CHANCE, SPONTANEOUS_MIN_AGE_MS, SPONTANEOUS_MIN_IMPRESSION, SPONTANEOUS_TURN_CHANCE, type SpontaneousCandidate } from "./recall-spontaneous.js";
+import { pickSpontaneousMemory, spontaneousChance, SPONTANEOUS_INITIATIVE_CHANCE, SPONTANEOUS_MIN_AGE_MS, SPONTANEOUS_MIN_IMPRESSION, SPONTANEOUS_TURN_CHANCE, type SpontaneousCandidate } from "./recall-spontaneous.js";
 import { applyDeltas, baseEmotionOf, currentMood, moodOfRow, singleEmotionValues, storedMoodOf, type Mood, type MoodDeltas, type MoodValues, type StoredMood } from "./mood.js";
 import { isVisibleMoodChange, soundKindFor, type SoundKind } from "./sound.js";
 import { FAMILIARITY_POSITIVE_DELTA, familiarityStyle, updateFamiliarity } from "./familiarity.js";
@@ -828,7 +828,9 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
   }
 
   // Kiest (pure kiezer) een Spontane herinnering uit de oude, vormende Herinneringen; faalt stil naar null.
+  // De kansworp gaat vóór de query: bij een gewone beurt (~3%) zit er zo meestal geen database-ronde op het kritieke pad.
   async function pickSpontaneous(dynimoId: number, axes: Axes, baseChance: number): Promise<SpontaneousCandidate | null> {
+    if (random() >= spontaneousChance(axes, baseChance)) return null;
     try {
       const candidates = await deps.db
         .select({ id: memories.id, createdAt: memories.createdAt, impression: memories.impression, lastRecalledAt: memories.lastRecalledAt, text: memories.text })
@@ -836,7 +838,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
         .where(and(eq(memories.dynimoId, dynimoId), gte(memories.impression, SPONTANEOUS_MIN_IMPRESSION), lte(memories.createdAt, new Date(now().getTime() - SPONTANEOUS_MIN_AGE_MS))))
         .orderBy(desc(memories.impression), desc(memories.createdAt))
         .limit(SPONTANEOUS_CANDIDATE_LIMIT);
-      return pickSpontaneousMemory({ memories: candidates, now: now(), axes, rng: random, baseChance });
+      return pickSpontaneousMemory({ memories: candidates, now: now(), axes, rng: random, baseChance, chanceRolled: true });
     } catch (error) {
       console.warn("Spontane herinnering kiezen faalde:", error instanceof Error ? error.message : error);
       return null;

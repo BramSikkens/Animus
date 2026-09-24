@@ -26,12 +26,12 @@ export function spontaneousChance(axes: Axes, base = SPONTANEOUS_INITIATIVE_CHAN
 }
 
 /** De aan te halen Herinnering, of null. Eerste rng-worp = de kans, tweede = de gewogen keuze (Indruk x ouderdom). */
-export function pickSpontaneousMemory({ memories, now, axes, rng, minAgeMs = SPONTANEOUS_MIN_AGE_MS, cooldownMs = SPONTANEOUS_COOLDOWN_MS, baseChance }: { memories: SpontaneousCandidate[]; now: Date; axes: Axes; rng: () => number; minAgeMs?: number; cooldownMs?: number; baseChance?: number }): SpontaneousCandidate | null {
+export function pickSpontaneousMemory({ memories, now, axes, rng, minAgeMs = SPONTANEOUS_MIN_AGE_MS, cooldownMs = SPONTANEOUS_COOLDOWN_MS, baseChance, chanceRolled = false }: { memories: SpontaneousCandidate[]; now: Date; axes: Axes; rng: () => number; minAgeMs?: number; cooldownMs?: number; baseChance?: number; /** De kansworp is al gedaan (zie spontaneousChance); sla hem hier over. */ chanceRolled?: boolean }): SpontaneousCandidate | null {
   const nowMs = now.getTime();
   const weighted = memories
     .filter((m) => nowMs - m.createdAt.getTime() >= minAgeMs && m.impression >= SPONTANEOUS_MIN_IMPRESSION && (!m.lastRecalledAt || nowMs - m.lastRecalledAt.getTime() >= cooldownMs))
     .map((m) => ({ m, weight: m.impression * (0.5 + 0.5 * Math.min(1, (nowMs - m.createdAt.getTime()) / FULL_AGE_MS)) }));
-  if (weighted.length === 0 || rng() >= spontaneousChance(axes, baseChance)) return null;
+  if (weighted.length === 0 || (!chanceRolled && rng() >= spontaneousChance(axes, baseChance))) return null;
   let target = rng() * weighted.reduce((sum, w) => sum + w.weight, 0);
   for (const { m, weight } of weighted) {
     target -= weight;

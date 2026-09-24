@@ -152,3 +152,23 @@ describe("Spontane herinnering in een normale beurt", () => {
     expect(row!.lastRecalledAt).toBeNull();
   });
 });
+
+describe("Spontane herinnering: geen query op het kritieke pad zonder kans", () => {
+  // Telt hoeveel keer de brain de kandidaten van de Spontane herinnering selecteert, met een Proxy om de db.
+  async function selectCount(random: () => number) {
+    const dynimo = await insertDynimo();
+    await insertMemory(dynimo.id);
+    let count = 0;
+    const counting = new Proxy(db, { get: (target, prop, receiver) => (prop === "select" ? (...args: unknown[]) => (count += "lastRecalledAt" in ((args[0] as object) ?? {}) ? 1 : 0, (target.select as (...a: unknown[]) => unknown)(...args)) : Reflect.get(target, prop, receiver)) });
+    const model = type2().model;
+    const brain = createBrain({ db: counting, embedder: embedder(), type1: type1(), type2: { light: model, heavy: model }, now: () => now, random });
+    await drain(brain.hear("Hallo"));
+    return count;
+  }
+
+  it("haalt de kandidaten pas op nadat de kansworp is geslaagd", async () => {
+    expect(await selectCount(() => 0.99)).toBe(0);
+    await truncateAll(db);
+    expect(await selectCount(() => 0)).toBe(1);
+  });
+});

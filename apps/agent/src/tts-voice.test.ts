@@ -30,6 +30,15 @@ describe("applyTtsEmotion", () => {
     expect(tts.updateOptions).toHaveBeenCalledWith({ voiceSettings: settings });
   });
 
+  it("roept updateOptions niet opnieuw aan bij (afgerond) gelijke settings", () => {
+    const tts = { updateOptions: vi.fn() };
+    applyTtsEmotion("elevenlabs", tts, settings);
+    applyTtsEmotion("elevenlabs", tts, { ...settings, stability: 0.41, style: 0.29 });
+    expect(tts.updateOptions).toHaveBeenCalledTimes(1);
+    applyTtsEmotion("elevenlabs", tts, { ...settings, stability: 0.6 });
+    expect(tts.updateOptions).toHaveBeenCalledTimes(2);
+  });
+
   it("doet bij Deepgram en OpenAI niets", () => {
     const tts = { updateOptions: vi.fn() };
     applyTtsEmotion("deepgram", tts, settings);

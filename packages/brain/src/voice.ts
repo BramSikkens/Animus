@@ -30,9 +30,12 @@ export function voicesFor(provider: SpeechProvider): readonly string[] {
   return VOICES[provider];
 }
 
-// ElevenLabs-stemmen komen uit de (open) catalogus: elke niet-lege id is geldig. Andere providers: de vaste lijst.
+// ElevenLabs-voice-ids: alleen [A-Za-z0-9_-], max 64 tekens (komt in een URL/API-call terecht).
+const ELEVEN_ID = /^[A-Za-z0-9_-]{1,64}$/;
+
+// ElevenLabs-stemmen komen uit de (open) catalogus: elke geldig gevormde id is toegestaan. Andere providers: de vaste lijst.
 function isKnownVoice(provider: SpeechProvider, voice: string): boolean {
-  return provider === "elevenlabs" ? voice.trim() !== "" : voicesFor(provider).includes(voice);
+  return provider === "elevenlabs" ? ELEVEN_ID.test(voice) : voicesFor(provider).includes(voice);
 }
 
 /** De stem om te spreken: de opgeslagen stem, of de default van de provider bij null/onbekend. */
@@ -52,4 +55,12 @@ export function parseVoice(provider: SpeechProvider, raw: unknown): { voice: str
 export function speechProvider(env: Record<string, string | undefined>): SpeechProvider {
   if (env.ELEVENLABS_API_KEY) return "elevenlabs";
   return env.DEEPGRAM_API_KEY ? "deepgram" : "openai";
+}
+
+/** Server-side lengtegrenzen voor stemontwerp/-cloning; geeft een foutmelding of null. */
+export function voiceInputError(input: { name?: string; description?: string; generatedVoiceId?: string }): string | null {
+  if (input.name !== undefined && input.name.length > 100) return "De naam is te lang (max 100 tekens).";
+  if (input.description !== undefined && input.description.length > 500) return "De beschrijving is te lang (max 500 tekens).";
+  if (input.generatedVoiceId !== undefined && (input.generatedVoiceId === "" || input.generatedVoiceId.length > 128)) return "Ongeldige stem-id.";
+  return null;
 }

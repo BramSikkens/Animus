@@ -74,13 +74,18 @@ export async function fetchCatalog(fetchFn: typeof fetch, apiKey: string, langua
   return [...byId.values()];
 }
 
-/** In-memory cache met ttl; mislukte loads worden niet onthouden. */
-export function cached<T>(load: () => Promise<T>, ttlMs: number, now: () => number = Date.now): () => Promise<T> {
-  let entry: { value: T; at: number } | undefined;
-  return async () => {
-    if (entry && now() - entry.at < ttlMs) return entry.value;
-    const value = await load();
-    entry = { value, at: now() };
-    return value;
+/** In-memory cache met ttl; deelt lopende loads en onthoudt een mislukte load kort (failTtlMs). */
+export function cached<T>(load: () => Promise<T>, ttlMs: number, now: () => number = Date.now, failTtlMs = 30_000): () => Promise<T> {
+  // Het promise zelf wordt bewaard: gelijktijdige renders delen de lopende load, en een fout blijft failTtlMs staan.
+  let entry: { promise: Promise<T>; expires: number } | undefined;
+  return () => {
+    if (entry && now() < entry.expires) return entry.promise;
+    const current = { promise: load(), expires: Infinity };
+    entry = current;
+    current.promise.then(
+      () => (current.expires = now() + ttlMs),
+      () => (current.expires = now() + failTtlMs),
+    );
+    return current.promise;
   };
 }

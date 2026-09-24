@@ -7,10 +7,12 @@ export const MOOD_HALF_LIFE_MS = 3 * 60_000;
 export const BASE_LEVEL = 30;
 
 /**
- * Reactiviteit (0–1, 0.5 = neutraal) → factor 0.25..1.75 (0.5 geeft 1). Schaalt zowel de Type1-delta's als de
+ * Reactiviteit (0–1, 0.5 = neutraal) → factor 0.05..1.95 (0.5 geeft 1; 0 = nauwelijks bewegen). Schaalt zowel de Type1-delta's als de
  * halveringstijd: een reactieve Dynimo beweegt sterker én dooft langzamer uit, een nuchtere het omgekeerde.
  */
-export const reactivityFactor = (reactivity: number) => 0.25 + 1.5 * reactivity;
+export const reactivityFactor = (reactivity: number) => 0.05 + 1.9 * reactivity;
+/** De halveringstijd wordt begrensd: bij r≈0 dooft de Stemming niet absurd snel uit. */
+const halfLifeFactor = (reactivity: number) => Math.min(2.5, Math.max(0.25, reactivityFactor(reactivity)));
 
 /** Elke emotie uit EMOTIONS heeft altijd een waarde 0–100. */
 export type MoodValues = Record<Emotion, number>;
@@ -44,7 +46,7 @@ export function currentMood(stored: StoredMood, baseEmotion: Emotion | null, now
   const rest = restValues(base);
   if (!stored) return moodOf(rest, base);
   // Max(0, …): een klok die terugloopt (at in de toekomst) mag de waarden niet boven de opgeslagen waarde tillen.
-  const decay = 0.5 ** (Math.max(0, now.getTime() - stored.at.getTime()) / (MOOD_HALF_LIFE_MS * reactivityFactor(reactivity)));
+  const decay = 0.5 ** (Math.max(0, now.getTime() - stored.at.getTime()) / (MOOD_HALF_LIFE_MS * halfLifeFactor(reactivity)));
   const values = Object.fromEntries(
     EMOTIONS.map((emotion) => [emotion, rest[emotion] + (stored.values[emotion] - rest[emotion]) * decay]),
   ) as MoodValues;

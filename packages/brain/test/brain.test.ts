@@ -2145,8 +2145,8 @@ describe("createBrain", () => {
     });
 
     it.each([
-      [0, 10],
-      [1, 70],
+      [0, 2],
+      [1, 78],
     ])("schaalt de Type1-delta's met de reactiviteit van de Dynimo (%s geeft boos %s)", async (axisReactivity, expected) => {
       await insertDynimo({ axisReactivity });
       const { model } = type1Sequence([{ deltas: { boos: 40 } }]);

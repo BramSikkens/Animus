@@ -9,7 +9,18 @@ export function applyTtsVoice(provider: SpeechProvider, tts: { updateOptions(opt
   else update.call(tts, { voice });
 }
 
-/** Emotie per uiting (#63): enkel ElevenLabs kent voiceSettings; bij Deepgram/OpenAI niets doen. */
+const lastApplied = new WeakMap<object, string>();
+const round05 = (n: number) => Math.round(n * 20) / 20;
+
+/**
+ * Emotie per uiting (#63): enkel ElevenLabs kent voiceSettings; bij Deepgram/OpenAI niets doen. De plugin herstart
+ * de websocket bij elke updateOptions, dus afronden (0.05) en enkel bij een echt andere waarde bijwerken.
+ */
 export function applyTtsEmotion(provider: SpeechProvider, tts: { updateOptions(opts: never): void }, settings: VoiceSettings): void {
-  if (provider === "elevenlabs") (tts.updateOptions as (opts: object) => void).call(tts, { voiceSettings: settings });
+  if (provider !== "elevenlabs") return;
+  const rounded = { ...settings, stability: round05(settings.stability), style: round05(settings.style), speed: round05(settings.speed) };
+  const key = JSON.stringify(rounded);
+  if (lastApplied.get(tts) === key) return;
+  lastApplied.set(tts, key);
+  (tts.updateOptions as (opts: object) => void).call(tts, { voiceSettings: rounded });
 }

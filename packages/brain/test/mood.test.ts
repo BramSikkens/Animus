@@ -92,8 +92,8 @@ describe("reactiviteit", () => {
   it("schaalt de Type1-delta's: 0 nauwelijks, 0.5 ongewijzigd, 1 sterk", () => {
     const boos = (reactivity: number) => applyDeltas(null, "kalm", { boos: 40 }, T0, reactivity).mood.values.boos;
     expect(boos(0.5)).toBeCloseTo(40);
-    expect(boos(0)).toBeCloseTo(10);
-    expect(boos(1)).toBeCloseTo(70);
+    expect(boos(0)).toBeCloseTo(2);
+    expect(boos(1)).toBeCloseTo(78);
   });
 
   it("dooft langzamer uit bij hoge reactiviteit en sneller bij lage", () => {
@@ -101,6 +101,11 @@ describe("reactiviteit", () => {
     expect(boos(0.5)).toBeCloseTo(40);
     expect(boos(1)).toBeGreaterThan(50);
     expect(boos(0)).toBeLessThan(20);
+  });
+
+  it("begrenst de halveringstijd bij r=0 op een kwart (niet absurd snel uitdoven)", () => {
+    const boos = currentMood(stored({ boos: 80 }), "kalm", after(MOOD_HALF_LIFE_MS * 0.25), 0).values.boos;
+    expect(boos).toBeCloseTo(40);
   });
 
   it("moodOfRow gebruikt axisReactivity van de rij", () => {

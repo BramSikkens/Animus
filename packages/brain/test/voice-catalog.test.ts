@@ -118,13 +118,24 @@ describe("cached", () => {
     expect(await get()).toBe(2);
   });
 
-  it("cachet fouten niet", async () => {
+  it("cachet een fout kort (30 s) en laadt daarna opnieuw", async () => {
+    let now = 0;
     let calls = 0;
     const get = cached(async () => {
       if (++calls === 1) throw new Error("stuk");
       return "ok";
-    }, 1000, () => 0);
+    }, 1000, () => now);
     await expect(get()).rejects.toThrow("stuk");
+    now = 29_999;
+    await expect(get()).rejects.toThrow("stuk");
+    expect(calls).toBe(1);
+    now = 30_000;
     expect(await get()).toBe("ok");
+  });
+
+  it("deelt een lopende load tussen gelijktijdige aanroepen", async () => {
+    let loads = 0;
+    const get = cached(async () => ++loads, 1000, () => 0);
+    expect(await Promise.all([get(), get(), get()])).toEqual([1, 1, 1]);
   });
 });

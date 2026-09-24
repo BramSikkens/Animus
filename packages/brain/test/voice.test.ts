@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseVoice, speechProvider, resolveVoice, voicesFor } from "../src/voice.js";
+import { parseVoice, speechProvider, voiceInputError, resolveVoice, voicesFor } from "../src/voice.js";
 
 describe("voicesFor", () => {
   it("geeft de stemmen van de gekozen provider, met de huidige default erin", () => {
@@ -67,5 +67,25 @@ describe("speechProvider", () => {
     expect(speechProvider({ DEEPGRAM_API_KEY: "x" })).toBe("deepgram");
     expect(speechProvider({})).toBe("openai");
     expect(speechProvider({ DEEPGRAM_API_KEY: "" })).toBe("openai");
+  });
+});
+
+describe("elevenlabs voice-id validatie", () => {
+  it("weigert ids met vreemde tekens of langer dan 64", () => {
+    expect(parseVoice("elevenlabs", "abc/../x")).toBeNull();
+    expect(parseVoice("elevenlabs", "a b")).toBeNull();
+    expect(parseVoice("elevenlabs", "a".repeat(65))).toBeNull();
+    expect(parseVoice("elevenlabs", "a".repeat(64))).toEqual({ voice: "a".repeat(64) });
+    expect(parseVoice("elevenlabs", "Ab_c-9")).toEqual({ voice: "Ab_c-9" });
+  });
+});
+
+describe("voiceInputError", () => {
+  it("accepteert geldige invoer en weigert te lange of ongeldige velden", () => {
+    expect(voiceInputError({ name: "Mijn stem", description: "warm", generatedVoiceId: "abc123" })).toBeNull();
+    expect(voiceInputError({ name: "x".repeat(101) })).toMatch(/naam/i);
+    expect(voiceInputError({ description: "x".repeat(501) })).toMatch(/beschrijving/i);
+    expect(voiceInputError({ generatedVoiceId: "" })).toMatch(/stem/i);
+    expect(voiceInputError({ generatedVoiceId: "x".repeat(129) })).toMatch(/stem/i);
   });
 });

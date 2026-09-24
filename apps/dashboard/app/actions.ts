@@ -6,7 +6,7 @@ import { isEmotion } from "@animus/brain/emotion";
 import { parseMoodValues } from "@animus/brain/mood";
 import { parseAxes } from "@animus/brain/personality";
 import { cloneVoice, designVoice, saveDesignedVoice, type DesignPreview } from "@animus/brain/voice-design";
-import { parseVoice, speechProvider } from "@animus/brain/voice";
+import { parseVoice, speechProvider, voiceInputError } from "@animus/brain/voice";
 import { getBrain } from "../lib/brain";
 
 export type ActionState = { error?: string };
@@ -139,7 +139,10 @@ export type DesignState = ActionState & { previews?: DesignPreview[] };
 
 export async function designVoiceAction(_prev: DesignState, formData: FormData): Promise<DesignState> {
   try {
-    const previews = await designVoice(fetch, elevenKey(), String(formData.get("description") ?? ""), String(formData.get("previewText") ?? ""));
+    const description = String(formData.get("description") ?? "");
+    const invalid = voiceInputError({ description });
+    if (invalid) return { error: invalid };
+    const previews = await designVoice(fetch, elevenKey(), description, String(formData.get("previewText") ?? ""));
     return previews.length ? { previews } : { error: "ElevenLabs gaf geen previews terug." };
   } catch (error) {
     return { error: error instanceof Error ? error.message : String(error) };
@@ -150,12 +153,12 @@ export async function applyDesignedVoice(_prev: ActionState, formData: FormData)
   return run(async () => {
     const id = parseId(formData);
     if (id === null) return INVALID_ID;
-    const description = String(formData.get("description") ?? "").trim().slice(0, 500);
-    const voice = await saveDesignedVoice(fetch, elevenKey(), {
-      name: String(formData.get("name") ?? ""),
-      description,
-      generatedVoiceId: String(formData.get("generatedVoiceId") ?? ""),
-    });
+    const description = String(formData.get("description") ?? "").trim();
+    const name = String(formData.get("name") ?? "");
+    const generatedVoiceId = String(formData.get("generatedVoiceId") ?? "");
+    const invalid = voiceInputError({ name, description, generatedVoiceId });
+    if (invalid) return invalid;
+    const voice = await saveDesignedVoice(fetch, elevenKey(), { name, description, generatedVoiceId });
     if (!(await getBrain().setVoiceProfile(id, { voice, description: description || null }))) return DYNIMO_GONE;
   });
 }
@@ -165,7 +168,10 @@ export async function cloneVoiceAction(_prev: ActionState, formData: FormData): 
     const id = parseId(formData);
     if (id === null) return INVALID_ID;
     const files = formData.getAll("files").filter((f): f is File => f instanceof File && f.size > 0);
-    const voice = await cloneVoice(fetch, elevenKey(), { name: String(formData.get("name") ?? ""), files, consent: formData.get("consent") === "on" });
+    const name = String(formData.get("name") ?? "");
+    const invalid = voiceInputError({ name });
+    if (invalid) return invalid;
+    const voice = await cloneVoice(fetch, elevenKey(), { name, files, consent: formData.get("consent") === "on" });
     if (!(await getBrain().setVoiceProfile(id, { voice, description: null }))) return DYNIMO_GONE;
   });
 }

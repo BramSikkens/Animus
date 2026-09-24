@@ -2013,11 +2013,11 @@ describe("createBrain", () => {
 
     // Type1 met een reeks antwoorden (één per beurt); registreert wat hij ontving.
     function type1Sequence(answers: { deltas: Partial<Record<string, number>>; indruk?: number }[]) {
-      const calls: { state: string; questions: Record<string, { type?: string; criteria: string[] }> }[] = [];
+      const calls: { state: string; questions: Record<string, { type?: string; instructions?: string; criteria: string[] }> }[] = [];
       const model = new Experimental_EvaluationMockModelV4({
         doEvaluate: async (options) => {
           const answer = answers[calls.length] ?? answers.at(-1)!;
-          calls.push({ state: String((options as { state: unknown }).state), questions: (options as unknown as { questions: Record<string, { type?: string; criteria: string[] }> }).questions });
+          calls.push({ state: String((options as { state: unknown }).state), questions: (options as unknown as { questions: Record<string, { type?: string; instructions?: string; criteria: string[] }> }).questions });
           return {
             answers: {
               ...deltaAnswers(answer.deltas),

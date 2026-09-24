@@ -125,3 +125,5 @@ li h3 {
 
 .axis { margin: 0; }
 .slider { display: flex; align-items: center; gap: 0.5rem; width: 100%; }
+/* Emoties in tegengestelde paren staan naast elkaar (ADR-0015). */
+.slider-group { display: flex; gap: 1rem; width: 100%; }

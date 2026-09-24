@@ -1,5 +1,5 @@
 import { desc, eq, isNull } from "drizzle-orm";
-import { EMOTIONS } from "@animus/brain/emotion";
+import { EMOTIONS, EMOTION_GROUPS } from "@animus/brain/emotion";
 import { formatAge } from "@animus/brain/age";
 import { moodOfRow } from "@animus/brain/mood";
 import { DRIVE_KINDS, DRIVE_LABELS, type DriveKind } from "@animus/brain/drives";
@@ -177,11 +177,15 @@ export default async function DashboardPage() {
                     <input name="intensity" type="number" min={0} max={1} step={0.05} defaultValue={0.8} aria-label="Intensiteit (0 tot 1)" required />
                   </ActionForm>
                   <ActionForm action={setMood} label="Stemming zetten" pendingLabel="Zet…" id={dynimo.id}>
-                    {EMOTIONS.map((emotion) => (
-                      <label key={emotion} className="slider">
-                        {emotion}
-                        <input name={`mood_${emotion}`} type="range" min={0} max={100} step={1} defaultValue={Math.round(moodOfRow(dynimo, new Date()).values[emotion])} />
-                      </label>
+                    {EMOTION_GROUPS.map((group) => (
+                      <div key={group[0]} className="slider-group">
+                        {group.map((emotion) => (
+                          <label key={emotion} className="slider">
+                            {emotion}
+                            <input name={`mood_${emotion}`} type="range" min={0} max={100} step={1} defaultValue={Math.round(moodOfRow(dynimo, new Date()).values[emotion])} />
+                          </label>
+                        ))}
+                      </div>
                     ))}
                   </ActionForm>
                   <ActionForm action={setAxes} label="Persoonlijkheid zetten" pendingLabel="Zet…" id={dynimo.id}>

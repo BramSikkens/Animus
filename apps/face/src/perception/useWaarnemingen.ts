@@ -107,10 +107,14 @@ export function useWaarnemingen({
           if (waarneming === "afwezig" && facePosition) facePosition.current = null;
 
           // Gezichts-embeddings (#93): nooit per frame, enkel bij verschijnen en daarna elke FACE_SEND_INTERVAL_MS.
-          if (!embedding && faceSendRule.update(detections.length, t)) {
+          // faceSendRule.update() draait elke tick (anders schuift zijn interval-klok op zodra een embed in-flight
+          // is); enkel het STARTEN van een nieuwe embed()-aanroep wordt overgeslagen zolang de vorige nog loopt.
+          const shouldSendFaces = faceSendRule.update(detections.length, t);
+          if (shouldSendFaces && !embedding) {
             embedding = true;
             void embed(video)
               .then((embeddings) => {
+                if (cancelled) return; // opgeruimd terwijl embed() liep: niet meer publiceren
                 for (const face of embeddings) publish({ soort: "gezicht", embedding: encodeEmbedding(face), aantal: embeddings.length });
               })
               .finally(() => {

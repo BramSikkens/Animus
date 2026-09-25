@@ -9,11 +9,19 @@ const MAX_FACES = 10;
 
 type HumanInstance = InstanceType<typeof Human>;
 
-// Eén Human-instantie voor de hele pagina (lazy, dynamische import zodat TFJS niet in de hoofdbundel zit); een
-// mislukte load wordt gecachet zodat embed() daarna stil [] teruggeeft i.p.v. elke aanroep opnieuw te loggen.
+// Eén Human-instantie voor de hele pagina (lazy, dynamische import zodat TFJS niet in de hoofdbundel zit). Een
+// mislukte load wordt kort gecachet (embed() geeft dan stil [] terug i.p.v. elke aanroep opnieuw te loggen), maar
+// niet voorgoed: na RETRY_AFTER_MS wordt een nieuwe poging gedaan (bv. een trage/tijdelijk onbereikbare CDN).
+const RETRY_AFTER_MS = 60_000;
 let humanPromise: Promise<HumanInstance | null> | undefined;
+let failedAt: number | undefined;
 
 async function loadHuman(): Promise<HumanInstance | null> {
+  if (failedAt !== undefined) {
+    if (Date.now() - failedAt < RETRY_AFTER_MS) return null; // binnen het retry-venster: stil niets, geen nieuwe poging
+    humanPromise = undefined; // venster verstreken: opnieuw proberen
+    failedAt = undefined;
+  }
   humanPromise ??= (async () => {
     try {
       const { default: HumanCtor } = await import("@vladmandic/human");
@@ -37,6 +45,7 @@ async function loadHuman(): Promise<HumanInstance | null> {
       return human;
     } catch (error) {
       console.error("Human (gezichts-embeddings) laden faalde:", error instanceof Error ? error.message : error);
+      failedAt = Date.now();
       return null;
     }
   })();

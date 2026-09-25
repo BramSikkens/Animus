@@ -114,6 +114,11 @@ function vectorAt(value: number): number[] {
   return v;
 }
 
+// Reviewfix #93: enkel opslaan bij een zekere match (< 0.7×drempel) én als de laatst opgeslagen embedding van die
+// Persoon ≥ 1 uur oud is (of er nog geen is). `hoursAgo` zet expliciete createdAt-tijdstippen t.o.v. de test-`now`,
+// want db-defaults (defaultNow()) zouden de echte wandkloktijd gebruiken, niet de geïnjecteerde `now()`.
+const hoursAgo = (hours: number) => new Date(now.getTime() - hours * 60 * 60 * 1000);
+
 describe("recognizeFaces (#93)", () => {
   it("matcht een embedding binnen de drempel aan de Persoon", async () => {
     const anna = await insertPerson("Anna");
@@ -138,34 +143,78 @@ describe("recognizeFaces (#93)", () => {
     expect(await brain.recognizeFaces([vectorAt(0)])).toEqual([null]);
   });
 
-  it("< 5 embeddings: een zekere match voegt toe (geen vervanging)", async () => {
+  it("< 5 embeddings, zekere match, laatste embedding ≥ 1 uur oud: voegt toe", async () => {
     const anna = await insertPerson("Anna");
     await insertDynimo();
-    await db.insert(faceEmbeddings).values({ personId: anna.id, embedding: vectorAt(0) });
-    const brain = createBrain({ db, embedder: embedder(), type1: type1(), type2: { light: textModel(), heavy: textModel() }, now: () => now, random: () => 0, faceMatchDistance: 10 });
+    await db.insert(faceEmbeddings).values({ personId: anna.id, embedding: vectorAt(0), createdAt: hoursAgo(2) });
+    const brain = createBrain({ db, embedder: embedder(), type1: type1(), type2: { light: textModel(), heavy: textModel() }, now: () => now, faceMatchDistance: 10 });
 
-    await brain.recognizeFaces([vectorAt(1)]);
+    await brain.recognizeFaces([vectorAt(1)]); // afstand 1 < 7 (0.7×10): zeker
 
     const rows = await db.select().from(faceEmbeddings).where(eq(faceEmbeddings.personId, anna.id));
     expect(rows).toHaveLength(2);
   });
 
-  it("op 5 embeddings: vervangt de oudste enkel als random() < FACE_REPLACE_PROBABILITY", async () => {
+  it("een match die herkend wordt maar niet zeker genoeg is (≥ 0.7×drempel): niet opgeslagen", async () => {
     const anna = await insertPerson("Anna");
     await insertDynimo();
-    for (let i = 0; i < 5; i++) await db.insert(faceEmbeddings).values({ personId: anna.id, embedding: vectorAt(i) });
+    await db.insert(faceEmbeddings).values({ personId: anna.id, embedding: vectorAt(0), createdAt: hoursAgo(2) });
+    const brain = createBrain({ db, embedder: embedder(), type1: type1(), type2: { light: textModel(), heavy: textModel() }, now: () => now, faceMatchDistance: 10 });
 
-    // random() net te hoog: geen vervanging.
-    const brainNoReplace = createBrain({ db, embedder: embedder(), type1: type1(), type2: { light: textModel(), heavy: textModel() }, now: () => now, random: () => 0.06, faceMatchDistance: 10 });
-    await brainNoReplace.recognizeFaces([vectorAt(4)]);
-    expect(await db.select().from(faceEmbeddings).where(eq(faceEmbeddings.personId, anna.id))).toHaveLength(5);
+    const result = await brain.recognizeFaces([vectorAt(8)]); // afstand 8: < 10 (herkend) maar ≥ 7 (niet zeker)
 
-    // random() onder de kans: de oudste (index 0) wordt vervangen.
-    const brainReplace = createBrain({ db, embedder: embedder(), type1: type1(), type2: { light: textModel(), heavy: textModel() }, now: () => now, random: () => 0.01, faceMatchDistance: 10 });
-    await brainReplace.recognizeFaces([vectorAt(4)]);
+    expect(result).toEqual([anna.id]);
+    expect(await db.select().from(faceEmbeddings).where(eq(faceEmbeddings.personId, anna.id))).toHaveLength(1);
+  });
+
+  it("een zekere match binnen het uur na de laatst opgeslagen embedding: niet opgeslagen", async () => {
+    const anna = await insertPerson("Anna");
+    await insertDynimo();
+    await db.insert(faceEmbeddings).values({ personId: anna.id, embedding: vectorAt(0), createdAt: new Date(now.getTime() - 30 * 60 * 1000) });
+    const brain = createBrain({ db, embedder: embedder(), type1: type1(), type2: { light: textModel(), heavy: textModel() }, now: () => now, faceMatchDistance: 10 });
+
+    await brain.recognizeFaces([vectorAt(1)]); // zeker, maar de laatste is pas 30 min oud
+
+    expect(await db.select().from(faceEmbeddings).where(eq(faceEmbeddings.personId, anna.id))).toHaveLength(1);
+  });
+
+  it("op 5 embeddings, zekere match, laatste ≥ 1 uur oud: vervangt de oudste", async () => {
+    const anna = await insertPerson("Anna");
+    await insertDynimo();
+    for (let i = 0; i < 5; i++) await db.insert(faceEmbeddings).values({ personId: anna.id, embedding: vectorAt(i), createdAt: hoursAgo(10 - i * 2) }); // oudste 10u, nieuwste 2u geleden
+    const brain = createBrain({ db, embedder: embedder(), type1: type1(), type2: { light: textModel(), heavy: textModel() }, now: () => now, faceMatchDistance: 10 });
+
+    await brain.recognizeFaces([vectorAt(4)]); // afstand 0 t.o.v. de nieuwste opgeslagen embedding: zeker
+
     const rows = await db.select().from(faceEmbeddings).where(eq(faceEmbeddings.personId, anna.id));
     expect(rows).toHaveLength(5);
-    expect(rows.map((row) => row.embedding[0])).not.toContain(0);
+    expect(rows.map((row) => row.embedding[0])).not.toContain(0); // de oudste (waarde 0) is vervangen
+  });
+
+  it("op 5 embeddings met de laatste < 1 uur oud: geen vervanging", async () => {
+    const anna = await insertPerson("Anna");
+    await insertDynimo();
+    for (let i = 0; i < 5; i++) await db.insert(faceEmbeddings).values({ personId: anna.id, embedding: vectorAt(i), createdAt: i === 4 ? new Date(now.getTime() - 30 * 60 * 1000) : hoursAgo(10) });
+    const brain = createBrain({ db, embedder: embedder(), type1: type1(), type2: { light: textModel(), heavy: textModel() }, now: () => now, faceMatchDistance: 10 });
+
+    await brain.recognizeFaces([vectorAt(4)]);
+
+    const rows = await db.select().from(faceEmbeddings).where(eq(faceEmbeddings.personId, anna.id));
+    expect(rows).toHaveLength(5);
+    expect(rows.map((row) => row.embedding[0]).sort((a, b) => a! - b!)).toEqual([0, 1, 2, 3, 4]); // ongewijzigd
+  });
+
+  it("gelijktijdige zekere matches voor dezelfde Persoon overschrijden de 5 niet (lock op de Persoon-rij)", async () => {
+    const anna = await insertPerson("Anna");
+    await insertDynimo();
+    for (let i = 0; i < 5; i++) await db.insert(faceEmbeddings).values({ personId: anna.id, embedding: vectorAt(i), createdAt: hoursAgo(10 - i * 2) });
+    const brainA = createBrain({ db, embedder: embedder(), type1: type1(), type2: { light: textModel(), heavy: textModel() }, now: () => now, faceMatchDistance: 10 });
+    const brainB = createBrain({ db, embedder: embedder(), type1: type1(), type2: { light: textModel(), heavy: textModel() }, now: () => now, faceMatchDistance: 10 });
+
+    await Promise.all([brainA.recognizeFaces([vectorAt(0)]), brainB.recognizeFaces([vectorAt(1)])]);
+
+    const rows = await db.select().from(faceEmbeddings).where(eq(faceEmbeddings.personId, anna.id));
+    expect(rows).toHaveLength(5);
   });
 
   it("onthoudt een onbekende embedding in de sessie zodat leerKennen hem kan koppelen", async () => {

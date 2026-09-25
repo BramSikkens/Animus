@@ -51,6 +51,12 @@ describe("isWaarneming", () => {
     expect(isWaarneming({ soort: "gezicht", embedding: encodeEmbedding(embedding), aantal: 1 })).toBe(false);
   });
 
+  it("verwerpt gezicht met een embedding-string die niet exact de verwachte base64-lengte heeft (vóór atob)", () => {
+    const valid = encodeEmbedding(validEmbedding());
+    expect(isWaarneming({ soort: "gezicht", embedding: valid.slice(0, valid.length - 4), aantal: 1 })).toBe(false);
+    expect(isWaarneming({ soort: "gezicht", embedding: `${valid}AAAA`, aantal: 1 })).toBe(false);
+  });
+
   it("verwerpt gezicht met aantal buiten 1–10 of niet-geheel", () => {
     const embedding = encodeEmbedding(validEmbedding());
     expect(isWaarneming({ soort: "gezicht", embedding, aantal: 0 })).toBe(false);

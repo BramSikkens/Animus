@@ -299,9 +299,12 @@ const RECALL_LIMIT = 5;
 // wortel) volgt: similarity > 0.5 ⇔ (0.8 − 0.05·L2)/0.6 > 0.5 ⇔ L2 < 10. Vandaar de default 10.
 const DEFAULT_FACE_MATCH_DISTANCE = 10;
 const MAX_FACE_EMBEDDINGS = 5;
-// Kans om bij een zekere match de oudste embedding te vervangen i.p.v. niets te doen (anders groeit de tabel
-// ongebreideld bij elke herkenning, #93).
-const FACE_REPLACE_PROBABILITY = 0.05;
+// Reviewfix #93: enkel opslaan bij een écht zekere match (ruim onder de matchdrempel) — een grensgeval vlak onder
+// de drempel mag de tabel niet in vervuilen.
+const FACE_SURE_MATCH_FACTOR = 0.7;
+// Reviewfix #93: geen bijna-kopieën van dezelfde zitting opslaan — enkel als de laatst opgeslagen embedding van
+// de Persoon al een tijd oud is (of er nog geen is).
+const FACE_EMBEDDING_MIN_AGE_MS = 60 * 60 * 1000;
 // Onbekende gezichts-embeddings van deze sessie (#93): hoogstens dit aantal, ouder dan dit vervalt (leerKennen
 // koppelt enkel wat hierbinnen valt).
 const MAX_UNKNOWN_FACE_EMBEDDINGS = 3;
@@ -1185,20 +1188,26 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     unknownFaceEmbeddings = [...unknownFaceEmbeddings.filter((entry) => at - entry.at < UNKNOWN_FACE_MAX_AGE_MS), { embedding, at }].slice(-MAX_UNKNOWN_FACE_EMBEDDINGS);
   }
 
-  // < 5 embeddings voor deze Persoon: toevoegen. Anders met kans FACE_REPLACE_PROBABILITY de oudste vervangen,
-  // anders niets (zodat de tabel niet bij elke herkenning groeit). Eén transactie: veilig bij overlappende matches.
-  async function storeFaceEmbedding(personId: number, embedding: number[]): Promise<void> {
+  // Reviewfix #93: enkel opslaan bij (a) een écht zekere match (afstand < FACE_SURE_MATCH_FACTOR × drempel) én
+  // (b) de laatst opgeslagen embedding van deze Persoon is FACE_EMBEDDING_MIN_AGE_MS oud, of er is nog geen enkele
+  // — anders niets (voorkomt bijna-kopieën van dezelfde zitting). Is dat zo: < 5 embeddings → toevoegen, op 5 → de
+  // oudste vervangen. `for("update")` op de Persoon-rij serialiseert gelijktijdige matches voor dezelfde Persoon
+  // (elke transactie wacht op de vorige), zodat er nooit meer dan 5 ontstaan.
+  async function storeFaceEmbedding(personId: number, embedding: number[], distance: number): Promise<void> {
+    if (distance >= faceMatchDistance * FACE_SURE_MATCH_FACTOR) return;
     await deps.db.transaction(async (tx) => {
+      await tx.select({ id: persons.id }).from(persons).where(eq(persons.id, personId)).for("update");
       const rows = await tx
-        .select({ id: faceEmbeddings.id })
+        .select({ id: faceEmbeddings.id, createdAt: faceEmbeddings.createdAt })
         .from(faceEmbeddings)
         .where(eq(faceEmbeddings.personId, personId))
         .orderBy(asc(faceEmbeddings.createdAt), asc(faceEmbeddings.id));
+      const newest = rows.at(-1);
+      if (newest && now().getTime() - newest.createdAt.getTime() < FACE_EMBEDDING_MIN_AGE_MS) return;
       if (rows.length < MAX_FACE_EMBEDDINGS) {
         await tx.insert(faceEmbeddings).values({ personId, embedding });
         return;
       }
-      if (random() >= FACE_REPLACE_PROBABILITY) return;
       await tx.delete(faceEmbeddings).where(eq(faceEmbeddings.id, rows[0]!.id));
       await tx.insert(faceEmbeddings).values({ personId, embedding });
     });
@@ -1224,7 +1233,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
       const distance = nearest ? Number(nearest.distance) : undefined;
       if (nearest && distance !== undefined && distance < faceMatchDistance) {
         results.push(nearest.personId);
-        await storeFaceEmbedding(nearest.personId, embedding);
+        await storeFaceEmbedding(nearest.personId, embedding, distance);
       } else {
         results.push(null);
         if (awake) rememberUnknownFace(embedding, at);

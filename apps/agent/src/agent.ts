@@ -181,8 +181,11 @@ class AnimusAgent extends voice.Agent {
     }
     const hasSpeaker = this.#speaker !== undefined && initiative === undefined;
     // Beslisregel (#92/#93): stem zeker → die Persoon; anders precies één bekend gezicht in beeld → die; anders
-    // onbekend. Zonder enig signaal (geen stemherkenning én geen gezicht in beeld) wordt gesprekspartner weggelaten,
-    // exact het gedrag van vóór stem-/gezichtsherkenning (hear() valt dan terug op de eigenaar).
+    // onbekend. Zonder enig signaal (geen stemherkenning én geen gezicht in beeld) wordt gesprekspartner weggelaten
+    // (hear() valt dan terug op de eigenaar) — dat is het enige geval dat exact het gedrag van vóór stem-/
+    // gezichtsherkenning blijft. Met camera én zonder stemherkenning is de eigenaar zelf (nog zonder gezichts-
+    // embeddings) géén uitzondering: hij begint ook als onbekend gezicht, en de nieuwe Persoon die daaruit ontstaat
+    // moet nadien via het dashboard (#95) weer met "eigenaar" samengevoegd worden.
     let gesprekspartner: number | null | undefined;
     if (shouldOverrideGesprekspartner({ hasSpeaker, faces: facesInView })) {
       gesprekspartner = decideGesprekspartner({ voice: hasSpeaker ? identified && { personId: identified.personId, sure: true } : null, faces: facesInView });

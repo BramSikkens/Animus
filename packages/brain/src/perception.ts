@@ -7,6 +7,10 @@ export const LOOK_TOPIC = "kijk";
 /** Lengte van Human's face.embedding (@vladmandic/human 3.3.6, faceres-model), zie ADR-0020 en het research-doc. */
 export const FACE_EMBEDDING_LENGTH = 1024;
 
+// Exacte base64-lengte van FACE_EMBEDDING_LENGTH float32's (4 bytes elk): 4 · ⌈bytes/3⌉. Trust boundary: een
+// binnenkomende string die hier niet exact aan voldoet, wordt geweigerd vóórdat `atob` er iets mee doet.
+const FACE_EMBEDDING_BASE64_LENGTH = Math.ceil((FACE_EMBEDDING_LENGTH * 4) / 3) * 4;
+
 /** Goedkoop, continu Type1-event uit de camera (CONTEXT.md: Waarneming). */
 export type Waarneming =
   | { soort: "aanwezig" }
@@ -57,6 +61,7 @@ export function isWaarneming(value: unknown): value is Waarneming {
     if (!("embedding" in value) || !("aantal" in value)) return false;
     if (typeof value.embedding !== "string" || typeof value.aantal !== "number") return false;
     if (!Number.isInteger(value.aantal) || value.aantal < 1 || value.aantal > 10) return false;
+    if (value.embedding.length !== FACE_EMBEDDING_BASE64_LENGTH) return false;
     const decoded = decodeEmbedding(value.embedding);
     return decoded !== null && decoded.length === FACE_EMBEDDING_LENGTH && decoded.every(Number.isFinite);
   }

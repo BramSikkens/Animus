@@ -11,8 +11,11 @@ export function decideGesprekspartner({ voice, faces }: { voice: { personId: num
 
 /**
  * Of de agent een Gesprekspartner-optie aan hear() moet meegeven, of die moet weglaten (dan valt hear() terug op
- * de eigenaar — het gedrag van vóór stem-/gezichtsherkenning, #93). Enkel weglaten als er geen enkel signaal is:
- * geen stemherkenning actief én geen gezicht in beeld (geen camera, of niemand aanwezig).
+ * de eigenaar). Enkel weglaten als er geen enkel signaal is — geen stemherkenning actief én geen gezicht in beeld
+ * (geen camera, of niemand aanwezig) — dat is het enige geval dat exact het gedrag van vóór stem-/gezichtsherkenning
+ * blijft. Zodra er wél een camera is, is de eigenaar zelf (die nog geen gezichts-embeddings heeft) daarmee géén
+ * uitzondering: hij begint ook als onbekend gezicht, de Dynimo vraagt dan zijn naam, en die nieuwe Persoon moet
+ * nadien via het dashboard (#95, samenvoegen) weer met "eigenaar" samengevoegd worden.
  */
 export function shouldOverrideGesprekspartner({ hasSpeaker, faces }: { hasSpeaker: boolean; faces: (number | null)[] }): boolean {
   return hasSpeaker || faces.length > 0;

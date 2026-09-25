@@ -111,6 +111,23 @@ export const voiceProfiles = pgTable("voice_profiles", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+// Gezichts-embeddings (#93): Human's face.embedding (faceres-model), hoogstens 5 per Persoon (zie recognizeFaces).
+// Nooit beelden zelf (art. 9 AVG, ADR-0020).
+export const FACE_EMBEDDING_DIMENSIONS = 1024;
+
+export const faceEmbeddings = pgTable(
+  "face_embeddings",
+  {
+    id: serial("id").primaryKey(),
+    personId: integer("person_id")
+      .notNull()
+      .references(() => persons.id, { onDelete: "cascade" }),
+    embedding: vector("embedding", { dimensions: FACE_EMBEDDING_DIMENSIONS }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("face_embeddings_embedding_idx").using("hnsw", table.embedding.op("vector_l2_ops"))],
+);
+
 // Dimensie van OpenAI text-embedding-3-small (ADR-0008): een andere embedding-provider
 // betekent een migratie én alles opnieuw embedden.
 export const EMBEDDING_DIMENSIONS = 1536;

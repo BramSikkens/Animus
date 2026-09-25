@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { createBrain, defaultVoiceDeps, type Brain } from "@animus/brain";
 import { DISPLAY_TOPIC, type DisplayMessage, type DisplayState } from "@animus/brain/display";
 import { COMMAND_TOPIC, GALLERY_TOPIC, type GalleryMessage } from "@animus/brain/gallery";
-import { isWaarneming, LOOK_TOPIC, PERCEPTION_TOPIC, type Aanleiding } from "@animus/brain/perception";
+import { decodeEmbedding, isWaarneming, LOOK_TOPIC, PERCEPTION_TOPIC, type Aanleiding } from "@animus/brain/perception";
 import { SOUND_TOPIC, type SoundMessage } from "@animus/brain/sound";
 import { EMOTION_TOPIC, type EmotionMessage } from "@animus/brain/emotion";
 import { initiativeFactor } from "@animus/brain/behavior";
@@ -40,7 +40,8 @@ import { createPerception, parseLookCooldownMinutes, parseReturnAfterMinutes } f
 import { createReflectionDisplay } from "./reflection-display.js";
 import { createSilenceTimer, parseSilenceMinutes } from "./silence-timer.js";
 import { createEagleSpeakerId } from "./eagle-speaker-id.js";
-import { decideGesprekspartner } from "./gesprekspartner.js";
+import { decideGesprekspartner, shouldOverrideGesprekspartner } from "./gesprekspartner.js";
+import { createFaces, parseFaceMatchDistance } from "./faces.js";
 import { parseSpeakerMatchThreshold, type SpeakerId } from "./speaker-id.js";
 import { createSpeakerAudio } from "./speaker-audio.js";
 import { voiceSettingsFor } from "@animus/brain/voice-emotion";
@@ -114,6 +115,7 @@ class AnimusAgent extends voice.Agent {
   readonly #onMoodValues: (values: EmotionMessage["values"]) => void;
   readonly #getExpressiveness: () => number;
   readonly #speaker: { speakerId: SpeakerId; audio: ReturnType<typeof createSpeakerAudio> } | undefined;
+  readonly #faces: ReturnType<typeof createFaces>;
   #pendingInitiative: string | undefined;
   // ponytail: hoogstens één lopende inschrijving tegelijk (een scalar, geen wachtrij); twee tegelijk leren kennen
   // in dezelfde sessie komt in de praktijk niet voor.
@@ -128,7 +130,8 @@ class AnimusAgent extends voice.Agent {
     onUtterance: () => void,
     onMoodValues: (values: EmotionMessage["values"]) => void,
     getExpressiveness: () => number = () => 0.5,
-    speaker?: { speakerId: SpeakerId; audio: ReturnType<typeof createSpeakerAudio> },
+    speaker: { speakerId: SpeakerId; audio: ReturnType<typeof createSpeakerAudio> } | undefined,
+    faces: ReturnType<typeof createFaces>,
   ) {
     // instructions is verplicht op voice.Agent, maar onbenut: llmNode hieronder draait i.p.v. het
     // ingebouwde LLM-pad de brein-kern.
@@ -139,6 +142,7 @@ class AnimusAgent extends voice.Agent {
     this.#onMoodValues = onMoodValues;
     this.#getExpressiveness = getExpressiveness;
     this.#speaker = speaker;
+    this.#faces = faces;
   }
 
   /** Zet een spontane uiting klaar; de eerstvolgende llmNode (via session.generateReply) draait die i.p.v. een user-turn. */
@@ -160,19 +164,30 @@ class AnimusAgent extends voice.Agent {
     if (!text) return null;
     this.#onUtterance();
 
+    // Gezichten (#93): wie is nu in beeld/aanwezig, ongeacht stemherkenning (ook bij initiatief).
+    const now = Date.now();
+    const facesInView = this.#faces.inView(now);
+    const aanwezig = this.#faces.present(now);
+
     // Stemherkenning (#92): enkel bij een echte beurt (niet bij initiatief, dan spreekt de Dynimo zelf).
-    let gesprekspartner: number | null | undefined;
-    if (this.#speaker && initiative === undefined && pcm) {
-      let identified: { personId: number; score: number } | null = null;
-      if (pcm.length > 0) {
-        try {
-          identified = this.#speaker.speakerId.identify(pcm);
-        } catch (error) {
-          // Nooit de beurt breken op een identificatiefout: gedraagt zich als geen match (onbekend/eigenaar-regel).
-          console.warn("Stem identificeren faalde:", error instanceof Error ? error.message : error);
-        }
+    let identified: { personId: number; score: number } | null = null;
+    if (this.#speaker && initiative === undefined && pcm && pcm.length > 0) {
+      try {
+        identified = this.#speaker.speakerId.identify(pcm);
+      } catch (error) {
+        // Nooit de beurt breken op een identificatiefout: gedraagt zich als geen match (onbekend/eigenaar-regel).
+        console.warn("Stem identificeren faalde:", error instanceof Error ? error.message : error);
       }
-      gesprekspartner = decideGesprekspartner({ voice: identified && { personId: identified.personId, sure: true } });
+    }
+    const hasSpeaker = this.#speaker !== undefined && initiative === undefined;
+    // Beslisregel (#92/#93): stem zeker → die Persoon; anders precies één bekend gezicht in beeld → die; anders
+    // onbekend. Zonder enig signaal (geen stemherkenning én geen gezicht in beeld) wordt gesprekspartner weggelaten,
+    // exact het gedrag van vóór stem-/gezichtsherkenning (hear() valt dan terug op de eigenaar).
+    let gesprekspartner: number | null | undefined;
+    if (shouldOverrideGesprekspartner({ hasSpeaker, faces: facesInView })) {
+      gesprekspartner = decideGesprekspartner({ voice: hasSpeaker ? identified && { personId: identified.personId, sure: true } : null, faces: facesInView });
+    }
+    if (hasSpeaker && pcm) {
       // Onzeker terwijl er een inschrijving loopt: dan is dit hoogstwaarschijnlijk nog steeds die Persoon (zijn
       // profiel is nog niet compleet genoeg om zichzelf te herkennen).
       if (identified === null && this.#enrollingPersonId !== undefined) gesprekspartner = this.#enrollingPersonId;
@@ -181,7 +196,7 @@ class AnimusAgent extends voice.Agent {
       if (gesprekspartner === this.#enrollingPersonId && this.#enrollingPersonId !== undefined && pcm.length > 0 && !this.#enrolling) {
         const enrollingPersonId = this.#enrollingPersonId;
         this.#enrolling = true;
-        this.#speaker.speakerId
+        this.#speaker!.speakerId
           .enroll(enrollingPersonId, pcm)
           .then((status) => {
             if (status === "klaar") this.#enrollingPersonId = undefined;
@@ -194,7 +209,7 @@ class AnimusAgent extends voice.Agent {
     }
 
     // tool-*-events uit brain.hear() worden hier genegeerd (ticket #7).
-    return textStream(this.#brain.hear(text, { initiatief: initiative !== undefined, ...(gesprekspartner !== undefined && { gesprekspartner }) }), {
+    return textStream(this.#brain.hear(text, { initiatief: initiative !== undefined, ...(gesprekspartner !== undefined && { gesprekspartner }), ...(aanwezig.length > 0 && { aanwezig }) }), {
       onPersoon: (personId) => {
         // Net leren kennen (#92): het stemprofiel van deze nieuwe Persoon beginnen opbouwen.
         this.#enrollingPersonId = personId;
@@ -249,9 +264,13 @@ export default defineAgent<AgentUserData>({
 
     // Kijken (ADR-0018/0019): het laatste camerabeeld van de room, vóór createBrain zodat lookFrame meteen mee kan.
     const frames = createFrameSource(ctx.room);
+    // Gezichtsherkenning (#93, ADR-0020): drempel via env, afgeleid van Human's similarity-vuistregel.
+    const faceMatchDistanceConfig = parseFaceMatchDistance(process.env.FACE_MATCH_DISTANCE);
+    if (faceMatchDistanceConfig.warning) console.warn(faceMatchDistanceConfig.warning);
+
     // In-process (spec: geen aparte brein-API); elke job krijgt zijn eigen brein-instantie.
     // voices: een geboorte vanuit de Galerij kiest net als in het dashboard een stem.
-    const brain = createBrain({ db, type1: TYPE1_MODEL, type2: loadType2Config(), embedder: EMBEDDING_MODEL, voices: defaultVoiceDeps(process.env), lookFrame: () => frames.latest() });
+    const brain = createBrain({ db, type1: TYPE1_MODEL, type2: loadType2Config(), embedder: EMBEDDING_MODEL, voices: defaultVoiceDeps(process.env), lookFrame: () => frames.latest(), faceMatchDistance: faceMatchDistanceConfig.distance });
 
     ctx.addShutdownCallback(async () => frames.dispose());
     ctx.addShutdownCallback(async () => {
@@ -405,6 +424,8 @@ export default defineAgent<AgentUserData>({
     const lookCooldownConfig = parseLookCooldownMinutes(process.env.SPONTANEOUS_LOOK_COOLDOWN_MINUTES);
     if (lookCooldownConfig.warning) console.warn(lookCooldownConfig.warning);
     const perception = createPerception({ now: Date.now, returnAfterMs: returnAfterConfig.ms, lookCooldownMs: lookCooldownConfig.ms });
+    // Gezichten (#93): aparte, klok-geïnjecteerde module (los van createPerception, dat gaat over aanwezig/afwezig/nieuw-object).
+    const faces = createFaces();
     let initiativeAxes: ReturnType<typeof rowAxes> = null;
     let initiativeMoodFactor = 1;
     const refreshInitiativeAxes = async (): Promise<void> => {
@@ -422,7 +443,7 @@ export default defineAgent<AgentUserData>({
       const expressiveness = initiativeAxes?.expressiveness ?? 0.5;
       // Tempo per Emotie (#70) via speed; de afronding in applyTtsEmotion voorkomt extra websocket-herstarts.
       applyTtsEmotion(speechProvider(process.env), tts, withPacingSpeed(voiceSettingsFor({ values, expressiveness }), pacingFor({ values, expressiveness }).speedFactor));
-    }, () => initiativeAxes?.expressiveness ?? 0.5, speakerRecognition);
+    }, () => initiativeAxes?.expressiveness ?? 0.5, speakerRecognition, faces);
     const isQuiet = (): boolean =>
       (session.agentState === "idle" || session.agentState === "listening") && session.userState !== "speaking" && perception.isPresent();
     // Gedeeld door de timer-tick en een Waarneming (aanleiding "terug"): een in-flight-guard voorkomt dat ze
@@ -465,11 +486,28 @@ export default defineAgent<AgentUserData>({
         return;
       }
       if (!isWaarneming(parsed)) return;
+      // Gezicht (#93): geen presence-Waarneming, apart afgehandeld (matchen + faces.ts bijwerken).
+      if (parsed.soort === "gezicht") {
+        const decoded = decodeEmbedding(parsed.embedding);
+        if (!decoded) return; // al gevalideerd door isWaarneming; defensief
+        const aantal = parsed.aantal;
+        brain
+          .recognizeFaces([decoded])
+          .then(([personId]) => {
+            faces.record(personId ?? null, Date.now(), aantal);
+            if (faces.unknownStableSince(Date.now())) return runInitiative({ soort: "onbekend" });
+          })
+          .catch((error: unknown) => console.warn("Gezicht herkennen faalde:", error instanceof Error ? error.message : error));
+        return;
+      }
       const aanleiding = perception.onWaarneming(parsed);
       if (aanleiding) runInitiative(aanleiding).catch((error: unknown) => console.warn("Initiatief-check faalde:", error instanceof Error ? error.message : error));
     });
     // Vertrekt de face-app terwijl niemand in beeld was, dan mag "afwezig" het initiatief niet voorgoed stilleggen.
-    ctx.room.on(RoomEvent.ParticipantDisconnected, () => perception.reset());
+    ctx.room.on(RoomEvent.ParticipantDisconnected, () => {
+      perception.reset();
+      faces.reset();
+    });
 
     // closeOnDisconnect uit: anders sluit de sessie (en stopt de job) zodra de eerste face disconnect, terwijl de room
     // voor een andere tab blijft bestaan; LiveKit dispatcht enkel bij room-creatie, dus die tab zag dan geen agent.
@@ -511,6 +549,7 @@ export default defineAgent<AgentUserData>({
         silence.reset();
         initiative.reset();
         perception.reset();
+        faces.reset();
         void refreshInitiativeAxes().catch(() => {});
         // interrupt gooit/weigert als er niets te onderbreken valt; dat is geen fout.
         try {

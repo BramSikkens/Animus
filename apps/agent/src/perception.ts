@@ -48,6 +48,8 @@ export function createPerception({ now, returnAfterMs, lookCooldownMs }: { now: 
         absentSince = undefined;
         return wasLongAbsent ? { soort: "terug" } : null;
       }
+      // gezicht (#93): geen presence-Waarneming; de agent routeert die apart naar recognizeFaces/faces.ts.
+      if (w.soort === "gezicht") return null;
       // nieuw-object: enkel buiten de cooldown en met iemand aanwezig.
       if (presentState === "afwezig") return null;
       if (lastLookAt !== undefined && now() - lastLookAt < lookCooldownMs) return null;

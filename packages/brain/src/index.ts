@@ -13,10 +13,10 @@ import {
   type SystemModelMessage,
   type ToolSet,
 } from "ai";
-import { and, asc, cosineDistance, desc, eq, gt, gte, inArray, isNotNull, isNull, lte, notInArray, sql } from "drizzle-orm";
+import { and, asc, cosineDistance, desc, eq, gt, gte, inArray, isNotNull, isNull, l2Distance, lte, notInArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { Db } from "@animus/db";
-import { dreams, drives, dynimos, epitaphs, familiarities, memories, persons, voiceProfiles as voiceProfilesTable } from "@animus/db/schema";
+import { dreams, drives, dynimos, epitaphs, faceEmbeddings, familiarities, memories, persons, voiceProfiles as voiceProfilesTable } from "@animus/db/schema";
 import { formatAge } from "./age.js";
 import { archetypeOfferText, getArchetype, pickOffer } from "./archetypes.js";
 import { DRIVE_DESCRIPTIONS, DRIVE_KINDS, drivesPromptBlock, isActiveDrive, type DriveRow } from "./drives.js";
@@ -105,6 +105,11 @@ export type Brain = {
   voiceProfiles(): Promise<{ personId: number; profile: Uint8Array }[]>;
   /** Voegt een Stemprofiel toe voor `personId`; houdt er hoogstens 5 (oudste eerst weg), in één transactie (#92). */
   addVoiceProfile(personId: number, profile: Uint8Array): Promise<void>;
+  /**
+   * Matcht gezichts-embeddings (Human, 1024-dimensionaal) tegen bekende Personen; `null` per embedding zonder
+   * zekere match. Onthoudt onbekende embeddings kort in de sessie zodat `leerKennen` ze kan koppelen (#93).
+   */
+  recognizeFaces(embeddings: number[][]): Promise<(number | null)[]>;
   /** Dashboard-override: zet het Verstand (0–1), zonder pinning. False bij een onbekende id. */
   setVerstand(id: number, verstand: number): Promise<boolean>;
   /** Dashboard-override: kiest een archetype en zet zijn zes assen, Basisemotie en Verstand (richtwaarde) als startpunt (geen pinning). False bij een onbekende id of een onbekend archetype. */
@@ -133,8 +138,10 @@ export type Brain = {
    * `gesprekspartner` (#91): een Persoon-id, `null` = onbekend (Vertrouwdheid 0.2, nooit opgeslagen, geen Persoon op
    * de Herinnering), weggelaten = de eigenaar. Bij `initiatief` krijgt de Herinnering ook de eigenaar tenzij hier
    * een Gesprekspartner is meegegeven.
+   * `aanwezig` (#93): de Persoon-ids die nu in beeld zijn (gezichtsherkenning); Type2 krijgt na het cachepunt wie
+   * er aanwezig is (eigenaar als "je eigenaar", onbekende ids overgeslagen). Weggelaten: geen regel (zoals nu).
    */
-  hear(text: string, options?: { initiatief?: boolean; gesprekspartner?: number | null }): AsyncIterable<BrainEvent>;
+  hear(text: string, options?: { initiatief?: boolean; gesprekspartner?: number | null; aanwezig?: number[] }): AsyncIterable<BrainEvent>;
 };
 
 // Serialiseert alle wissels van Wakker/Slapend tussen instanties en processen.
@@ -286,6 +293,20 @@ Schrijf je Afscheidsreflectie: je laatste woorden, in karakter, in een paar zinn
 
 const RECALL_LIMIT = 5;
 
+// Gezichtsherkenning (#93, ADR-0020): pgvector `<->` is de L2-afstand tussen twee embeddings. Human's eigen
+// similarity() (src/face/match.ts@3.3.6) rekent similarity = (1 − √(25·Σd²)/100 − 0.2) / 0.6, en Human's
+// vuistregel is "similarity > 0.5 is een match". Met Σd² = L2² (dezelfde som die pgvector's `<->` neemt vóór de
+// wortel) volgt: similarity > 0.5 ⇔ (0.8 − 0.05·L2)/0.6 > 0.5 ⇔ L2 < 10. Vandaar de default 10.
+const DEFAULT_FACE_MATCH_DISTANCE = 10;
+const MAX_FACE_EMBEDDINGS = 5;
+// Kans om bij een zekere match de oudste embedding te vervangen i.p.v. niets te doen (anders groeit de tabel
+// ongebreideld bij elke herkenning, #93).
+const FACE_REPLACE_PROBABILITY = 0.05;
+// Onbekende gezichts-embeddings van deze sessie (#93): hoogstens dit aantal, ouder dan dit vervalt (leerKennen
+// koppelt enkel wat hierbinnen valt).
+const MAX_UNKNOWN_FACE_EMBEDDINGS = 3;
+const UNKNOWN_FACE_MAX_AGE_MS = 15_000;
+
 // Kalenderdag in dezelfde tijdzone als tools.ts (ADR-0002: kalendertijd). Vanaf één jaar oud; 29 feb: ponytail, geen bijzondere behandeling.
 const dayOf = (date: Date) => date.toLocaleDateString("sv-SE", { timeZone: "Europe/Brussels" });
 const isBirthday = (bornAt: Date, at: Date) => dayOf(at) > dayOf(bornAt) && dayOf(at).slice(5) === dayOf(bornAt).slice(5);
@@ -361,6 +382,13 @@ const UNKNOWN_SPEAKER_MESSAGE: SystemModelMessage = { role: "system", content: "
 function speakerMessage(person: { name: string; owner: boolean } | undefined): SystemModelMessage {
   if (!person) return UNKNOWN_SPEAKER_MESSAGE;
   return { role: "system", content: person.owner ? "Je praat nu met je eigenaar." : `Je praat nu met ${person.name}.` };
+}
+
+// Aanwezige Personen (#93), na het cachepunt: verschilt per beurt. `aanwezig` weggelaten = geen regel (huidig gedrag).
+function aanwezigMessage(present: { name: string; owner: boolean }[]): SystemModelMessage | null {
+  if (present.length === 0) return null;
+  const names = present.map((person) => (person.owner ? "je eigenaar" : person.name));
+  return { role: "system", content: `Aanwezig: ${names.join(", ")}.` };
 }
 
 // #92: als de Gesprekspartner onbekend is en er deze sessie nog niet naar gevraagd is.
@@ -468,10 +496,13 @@ export function createBrain(deps: {
   voices?: GenesisVoiceDeps;
   /** Levert het laatste camerabeeld, of null zonder beeld. Ontbreekt deze: blind, brain gedraagt zich als nu. */
   lookFrame?: () => Promise<Frame | null>;
+  /** Drempel (L2-afstand, pgvector `<->`) voor een "zekere" gezichtsmatch (#93); default afgeleid, zie DEFAULT_FACE_MATCH_DISTANCE. */
+  faceMatchDistance?: number;
 }): Brain {
   const now = deps.now ?? (() => new Date());
   const random = deps.random ?? Math.random;
   const voices = deps.voices;
+  const faceMatchDistance = deps.faceMatchDistance ?? DEFAULT_FACE_MATCH_DISTANCE;
   let lastIgnored = false; // vorige beurt genegeerd? Voorkomt twee keer achter elkaar negeren.
   let turnCount = 0; // beurten (zonder initiatief) van deze brain-instantie, voor de cooldown van het Standpunt.
   let lastOpinionTurn: number | undefined;
@@ -484,6 +515,8 @@ export function createBrain(deps: {
   const unknownSessionMemoryIds: number[] = [];
   // Al naar de naam gevraagd deze sessie (#92)? Voorkomt opnieuw vragen na een weigering.
   let askedName = false;
+  // Onbekende gezichts-embeddings van deze sessie (#93): leerKennen koppelt wat hier nog binnen de vervaltijd valt.
+  let unknownFaceEmbeddings: { embedding: number[]; at: number }[] = [];
   // Spontane herinnering die considerInitiative koos: pas na de initiatief-beurt als aangehaald gemarkeerd.
   let pendingSpontaneousId: number | undefined;
   // Idem voor een Droom die considerInitiative koos (verteld = told_at).
@@ -744,6 +777,7 @@ ${fresh.map((memory) => `- (indruk ${memory.impression}) ${memory.text}`).join("
     workingMemory.length = 0;
     sessionMemoryIds.length = 0;
     unknownSessionMemoryIds.length = 0;
+    unknownFaceEmbeddings = [];
     askedName = false;
     turnCount = 0;
     lastOpinionTurn = undefined;
@@ -1060,17 +1094,25 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     return owner!.id;
   }
 
-  // leerKennen (#92): maakt de Persoon aan en koppelt de onbekende-Herinneringen van déze sessie eraan. Leegt
-  // de lijst nadien: een latere, andere onbekende Gesprekspartner (nieuwe bezoeker) in dezelfde sessie mag deze
-  // al-gekoppelde Herinneringen niet nog eens meekrijgen bij zíjn leerKennen.
+  // leerKennen (#92/#93): maakt de Persoon aan en koppelt de onbekende-Herinneringen én onbekende gezichts-
+  // embeddings van déze sessie (niet ouder dan UNKNOWN_FACE_MAX_AGE_MS, hoogstens MAX_FACE_EMBEDDINGS) eraan. Leegt
+  // beide lijsten nadien: een latere, andere onbekende Gesprekspartner (nieuwe bezoeker) in dezelfde sessie mag ze
+  // niet nog eens meekrijgen bij zíjn leerKennen.
   async function leerKennenPersoon(naam: string): Promise<{ id: number; name: string }> {
     const linked = [...unknownSessionMemoryIds];
+    // ponytail: koppelt alle nog-niet-vervallen onbekende embeddings aan déze ene nieuwe Persoon. Staan er twee
+    // onbekende gezichten in de buffer (twee vreemden tegelijk in beeld), dan belanden ze allebei bij wie het eerst
+    // zijn naam geeft. Upgradepad: embeddings pas koppelen als recognizeFaces ze aan hetzelfde gezicht toeschrijft
+    // (bv. per-embedding clustering), of leerKennen een gezicht laten kiezen i.p.v. "alles wat onbekend is".
+    const faces = unknownFaceEmbeddings.filter((entry) => now().getTime() - entry.at < UNKNOWN_FACE_MAX_AGE_MS).slice(-MAX_FACE_EMBEDDINGS);
     const created = await deps.db.transaction(async (tx) => {
       const [row] = await tx.insert(persons).values({ name: naam }).returning();
       if (linked.length) await tx.update(memories).set({ personId: row!.id }).where(inArray(memories.id, linked));
+      if (faces.length) await tx.insert(faceEmbeddings).values(faces.map(({ embedding }) => ({ personId: row!.id, embedding })));
       return row!;
     });
     unknownSessionMemoryIds.length = 0;
+    unknownFaceEmbeddings = [];
     return created;
   }
 
@@ -1137,6 +1179,60 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     });
   }
 
+  // Onthoudt een onbekende gezichts-embedding in de sessie (#93): hoogstens MAX_UNKNOWN_FACE_EMBEDDINGS, ouder dan
+  // UNKNOWN_FACE_MAX_AGE_MS vervalt. leerKennen koppelt wat hier op dat moment nog binnen de vervaltijd valt.
+  function rememberUnknownFace(embedding: number[], at: number): void {
+    unknownFaceEmbeddings = [...unknownFaceEmbeddings.filter((entry) => at - entry.at < UNKNOWN_FACE_MAX_AGE_MS), { embedding, at }].slice(-MAX_UNKNOWN_FACE_EMBEDDINGS);
+  }
+
+  // < 5 embeddings voor deze Persoon: toevoegen. Anders met kans FACE_REPLACE_PROBABILITY de oudste vervangen,
+  // anders niets (zodat de tabel niet bij elke herkenning groeit). Eén transactie: veilig bij overlappende matches.
+  async function storeFaceEmbedding(personId: number, embedding: number[]): Promise<void> {
+    await deps.db.transaction(async (tx) => {
+      const rows = await tx
+        .select({ id: faceEmbeddings.id })
+        .from(faceEmbeddings)
+        .where(eq(faceEmbeddings.personId, personId))
+        .orderBy(asc(faceEmbeddings.createdAt), asc(faceEmbeddings.id));
+      if (rows.length < MAX_FACE_EMBEDDINGS) {
+        await tx.insert(faceEmbeddings).values({ personId, embedding });
+        return;
+      }
+      if (random() >= FACE_REPLACE_PROBABILITY) return;
+      await tx.delete(faceEmbeddings).where(eq(faceEmbeddings.id, rows[0]!.id));
+      await tx.insert(faceEmbeddings).values({ personId, embedding });
+    });
+  }
+
+  /**
+   * Matcht gezichts-embeddings tegen bekende Personen (pgvector L2 `<->`, #93; zie DEFAULT_FACE_MATCH_DISTANCE voor
+   * de afgeleide drempel). Onbekend (null): de embedding wordt in de sessie onthouden (rememberUnknownFace), zodat
+   * een latere leerKennen hem kan koppelen. Adopteert eerst de wakkere Dynimo (net als considerInitiative), zodat
+   * de sessie bij het juiste wezen hoort; is niemand wakker, dan wordt er niets onthouden (wel gewoon gematcht).
+   */
+  async function recognizeFaces(embeddings: number[][]): Promise<(number | null)[]> {
+    const [awake] = await deps.db.select().from(dynimos).where(isNotNull(dynimos.awakeSince));
+    if (awake) adopt(awake);
+    const at = now().getTime();
+    const results: (number | null)[] = [];
+    for (const embedding of embeddings) {
+      const [nearest] = await deps.db
+        .select({ personId: faceEmbeddings.personId, distance: l2Distance(faceEmbeddings.embedding, embedding) })
+        .from(faceEmbeddings)
+        .orderBy(l2Distance(faceEmbeddings.embedding, embedding))
+        .limit(1);
+      const distance = nearest ? Number(nearest.distance) : undefined;
+      if (nearest && distance !== undefined && distance < faceMatchDistance) {
+        results.push(nearest.personId);
+        await storeFaceEmbedding(nearest.personId, embedding);
+      } else {
+        results.push(null);
+        if (awake) rememberUnknownFace(embedding, at);
+      }
+    }
+    return results;
+  }
+
   async function setVerstand(id: number, verstand: number): Promise<boolean> {
     const updated = await deps.db.update(dynimos).set({ verstand }).where(eq(dynimos.id, id)).returning({ id: dynimos.id });
     return updated.length > 0;
@@ -1186,7 +1282,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     });
   }
 
-  async function* hear(text: string, options: { initiatief?: boolean; gesprekspartner?: number | null } = {}): AsyncIterable<BrainEvent> {
+  async function* hear(text: string, options: { initiatief?: boolean; gesprekspartner?: number | null; aanwezig?: number[] } = {}): AsyncIterable<BrainEvent> {
     // Elke beurt opnieuw: een ander proces (dashboard) kan intussen wisselen van Wakker Dynimo.
     const [awake] = await deps.db.select().from(dynimos).where(isNotNull(dynimos.awakeSince));
     if (!awake) {
@@ -1381,6 +1477,11 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
       ? undefined
       : await deps.db.select({ name: persons.name, owner: persons.owner }).from(persons).where(eq(persons.id, personId)).then((rows) => rows[0]);
 
+    // Aanwezige Personen (#93): onbekende ids (intussen verwijderd, of nooit bestaan) worden overgeslagen.
+    const present = options.aanwezig?.length
+      ? await deps.db.select({ name: persons.name, owner: persons.owner }).from(persons).where(inArray(persons.id, options.aanwezig))
+      : [];
+
     // ponytail: sequentieel na de emotie; parallel met Type1 als de latency ooit telt.
     const recalled = await recall(text, being.id);
     // Spontane herinnering: bij initiatief die van considerInitiative (al in `text`), anders heel zelden een aanleiding.
@@ -1410,7 +1511,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     const result = streamText({
       abortSignal: abort.signal,
       model: intent === "complex" ? deps.type2.heavy : deps.type2.light,
-      instructions: [stable, ageMessage(being), ...birthdayMessages(awake), moodMessage(mood, axes?.expressiveness ?? 0.5), familiarityMessage(familiarity), speakerMessage(speakerPerson), ...(askNameNow ? [UNKNOWN_NAME_PROMPT] : []), ...(BEHAVIOR_PROMPTS[behavior] ? [BEHAVIOR_PROMPTS[behavior]] : []), ...opinionMessage, recallPrompt(recalled), ...spontaneousPromptMessage, ...(dream ? [dreamPrompt(dream.text)] : []), ...noFrameMessage],
+      instructions: [stable, ageMessage(being), ...birthdayMessages(awake), moodMessage(mood, axes?.expressiveness ?? 0.5), familiarityMessage(familiarity), speakerMessage(speakerPerson), ...(aanwezigMessage(present) ? [aanwezigMessage(present)!] : []), ...(askNameNow ? [UNKNOWN_NAME_PROMPT] : []), ...(BEHAVIOR_PROMPTS[behavior] ? [BEHAVIOR_PROMPTS[behavior]] : []), ...opinionMessage, recallPrompt(recalled), ...spontaneousPromptMessage, ...(dream ? [dreamPrompt(dream.text)] : []), ...noFrameMessage],
       messages: [...workingMemory, promptMessage],
       tools: { ...turnTools, ...kijkTools, ...leerKennenTools },
       // Genoeg stappen om een tool te gebruiken en daarna het resultaat te verwoorden.
@@ -1628,5 +1729,5 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     }
   }
 
-  return { bringToLife, wake, sleep, kill, list, backfill, reflect, considerInitiative, hear, forceMood, setMood, setAxes, setFamiliarity, familiarityOf, voiceProfiles, addVoiceProfile, setVerstand, setVoiceProfile, setArchetype, addMemory, removeMemory };
+  return { bringToLife, wake, sleep, kill, list, backfill, reflect, considerInitiative, hear, forceMood, setMood, setAxes, setFamiliarity, familiarityOf, voiceProfiles, addVoiceProfile, recognizeFaces, setVerstand, setVoiceProfile, setArchetype, addMemory, removeMemory };
 }

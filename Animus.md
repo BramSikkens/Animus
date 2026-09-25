@@ -162,7 +162,7 @@ Er kunnen meerdere wezens naast elkaar bestaan, elk met een eigen identiteit, ge
 - **Slapen = verwerken:** de Leeftijd telt door (ADR-0002), en de reflectie-taak en Dromen draaien bij voorkeur tijdens de slaap. Slapen wordt het moment waarop het wezen zijn ervaringen verwerkt.
 - **Datamodel:** `identity` is in fase 1 een singleton (`id = 1`); in fase 2 wordt het een tabel met één rij per wezen (plus een status wakker/slapend), en krijgen geheugens, Drijfveren en Dromen een verwijzing naar hun wezen. Dat raakt ADR-0003 niet: Grafschriften blijven los van alles.
 - **Dashboard schrijft:** het dashboard is in fase 1 read-only; beheren betekent dat het mag schrijven. Zolang het enkel lokaal draait volstaat dat; zodra het online staat is authenticatie verplicht.
-- Niet te verwarren met **meerdere gebruikers** (meerdere gesprekspartners, per-persoon-geheugen): dat blijft fase 3.
+- Niet te verwarren met **meerdere Personen** (meerdere Gesprekspartners, per-persoon-geheugen, fase 3): Personen zijn globaal, de relatie is per Dynimo × Persoon — zie [ADR-0020](docs/adr/0020-gezicht-en-stem-herkennen.md).
 
 ### Verjaardag
 
@@ -290,7 +290,7 @@ Twee sporen, te combineren:
 
 **Fase 2 — uitbreiding op de computer:** volledige feature-set (dromen, verjaardag, nieuwsgierigheid, zelf geluiden, doodle-modus, levendige idle-animatie) + karakterevolutie via de reflectie-loop (basis voor de dromen), inclusief een MBTI-persoonlijkheid met traag verschuivende assen (spraakzaamheid via I/E, initiatief afgeleid van N/P) + Langfuse-kostenmonitoring (uitgesteld, nog niet gebouwd) + handmatige overrides (emotie forceren, herinnering toevoegen/verwijderen) in het dashboard + meerdere wezens, te beheren via het dashboard (tot leven wekken, wakker maken, laten slapen, doden) + Drijfveren (wensen, doelen, toekomstdromen, afkeren, ergernissen) + emotie als reactie van het wezen, met een uitdovende stemming die de toon van Type2 kleurt.
 
-**Fase 3 — zintuigen, privacy & dashboard:** camera + MediaPipe (Type1-perceptie) en multimodale Type2-vision (verschoven uit fase 2), zodat de Type1-initiatiefcheck ook op een onbekend object in beeld kan triggeren + schermpje in kiosk-mode voor het gezichtje + privacy-maatregelen (mute-knop, luister-indicator, wake-word) + per-persoon-geheugen (stem-/gezichtsherkenning, meerdere gebruikers) + modelwissel-experiment (Type2-model wisselen vanuit het dashboard) + BullMQ + Redis voor achtergrondtaken (retries/backoff/meerdere workers) + een mooi, overzichtelijk dashboard.
+**Fase 3 — zintuigen, privacy & dashboard:** camera + MediaPipe (Type1-perceptie) en multimodale Type2-vision (verschoven uit fase 2), zodat de Type1-initiatiefcheck ook op een onbekend object in beeld kan triggeren + schermpje in kiosk-mode voor het gezichtje + privacy-maatregelen (mute-knop, luister-indicator, wake-word) + per-persoon-geheugen (stem-/gezichtsherkenning, meerdere Personen, zie ADR-0020) + modelwissel-experiment (Type2-model wisselen vanuit het dashboard) + BullMQ + Redis voor achtergrondtaken (retries/backoff/meerdere workers) + een mooi, overzichtelijk dashboard.
 
 **Fase 4 — Raspberry Pi + motoren:** Alles porteren naar de Pi, motoraansturing (johnny-five) gekoppeld aan de tool-laag, hoofdvolggedrag via servo's, ervaringsgeheugen voor fysieke acties, veiligheidslaag (Type1) voor motorbewegingen.
 

@@ -21,15 +21,19 @@ _Avoid_: complexiteit, moeilijkheidsgraad
 ### Geheugen
 
 **Gesprekspartner**:
-De persoon die met Animus praat. In Fase 1 is er één: de eigenaar.
+Wie er in deze beurt met de Dynimo praat: een bekende Persoon of *onbekend*. De stem bepaalt wie praat; is die onzeker en staat er precies één gezicht in beeld, dan is het die Persoon. Tot fase 3 was er één: de eigenaar.
 _Avoid_: gebruiker, user
+
+**Persoon** (fase 3):
+Een bekend lid van het huishouden, met een naam en maximaal 5 gezichts- en 5 stem-embeddings (lokaal bewaard, nooit beelden of audio). Globaal: alle Dynimo's herkennen dezelfde Personen, maar de relatie (Vertrouwdheid, Herinneringen) is per Dynimo × Persoon. Ontstaat wanneer een Dynimo een onbekende naar de naam vraagt (`leerKennen`); wie weigert blijft onbekend. Hernoemen, samenvoegen, verwijderen en opnieuw laten leren via het dashboard. Zie [ADR-0020](docs/adr/0020-gezicht-en-stem-herkennen.md).
+_Avoid_: gebruiker, user, gezinslid
 
 **Werkgeheugen**:
 De lopende conversatie van de huidige sessie, letterlijk meegegeven aan Type2. Verdwijnt bij herstart en wanneer de Dynimo gaat slapen.
 _Avoid_: context, chatgeschiedenis
 
 **Herinnering**:
-Eén opgeslagen, afgeronde beurt (uiting van de Gesprekspartner + antwoord) met een embedding en een Indruk, of iets dat Animus expliciet moest onthouden. Blijft bewaard over herstarts heen; Type2 krijgt vóór elk antwoord de meest relevante herinneringen uit eerdere sessies mee.
+Eén opgeslagen, afgeronde beurt (uiting van de Gesprekspartner + antwoord) met een embedding en een Indruk, of iets dat Animus expliciet moest onthouden. Blijft bewaard over herstarts heen; Hoort bij een Persoon, of bij niemand als de Gesprekspartner onbekend was. Type2 krijgt vóór elk antwoord de meest relevante herinneringen uit eerdere sessies mee, met voorrang voor de aanwezige Persoon (geen harde muur, wel een discretieregel over privézaken van anderen).
 _Avoid_: memory (in proza), log
 
 **Indruk**:
@@ -37,7 +41,7 @@ Een score (0–1) die Type1 per uiting geeft voor hoe vormend die is voor de Dyn
 _Avoid_: prioriteit, urgentie, gewicht
 
 **Spontane herinnering**:
-Een oude, vormende Herinnering waar de Dynimo zelf op terugkomt ('Je zei vorige week dat je ziek was, ben je beter?'). Pure kiezer `pickSpontaneousMemory` (`recall-spontaneous.ts`): alleen Herinneringen ouder dan 1 dag met Indruk ≥ 0.5 en niet aangehaald in de laatste 7 dagen (kolom `memories.last_recalled_at`), gewogen op Indruk × ouderdom; de kans schaalt met F (T↔F) en expressiviteit. Bij een initiatief-moment (hoge basiskans) gaat de Herinnering in de initiatief-instructie mee naar Type2; in een normale beurt (heel lage basiskans) als optionele aanleiding in de systeem-prompt. Pas na de voltooide beurt gemarkeerd als aangehaald.
+Een oude, vormende Herinnering waar de Dynimo zelf op terugkomt ('Je zei vorige week dat je ziek was, ben je beter?'). Pure kiezer `pickSpontaneousMemory` (`recall-spontaneous.ts`): alleen Herinneringen ouder dan 1 dag met Indruk ≥ 0.5 en niet aangehaald in de laatste 7 dagen (kolom `memories.last_recalled_at`), gewogen op Indruk × ouderdom; de kans schaalt met F (T↔F) en expressiviteit. Bij een initiatief-moment (hoge basiskans) gaat de Herinnering in de initiatief-instructie mee naar Type2; in een normale beurt (heel lage basiskans) als optionele aanleiding in de systeem-prompt. Sinds fase 3 enkel over een Persoon die aanwezig is. Pas na de voltooide beurt gemarkeerd als aangehaald.
 _Avoid_: terugval, flashback
 
 **Langetermijngeheugen**:
@@ -90,7 +94,7 @@ Het MBTI-type van een Dynimo, afgeleid uit vier assen (I↔E, S↔N, T↔F, J↔
 _Avoid_: karakter (dat is de vrije tekst), Big Five
 
 **Vertrouwdheid**:
-Een getal van 0 tot 1 per Dynimo (start op 0.2) voor hoe vertrouwd de relatie met de Gesprekspartner is. Het stijgt langzaam en asymptotisch bij elke beurt en extra bij positieve emoties (blij-delta), en daalt bij een genegeerde beurt en bij een Reflectie na lange stilte (nooit onder 0.05); de Persoonlijkheid (T↔F en expressiviteit) schaalt de groeisnelheid. Vier banden (afstandelijk, vriendelijk, vertrouwd, intiem) geven Type2 een toonregel: van beleefd en formeel ('u' mag, afhankelijk van archetype en karakter) tot bijnamen en plagen. Instelbaar in het dashboard. Zie [ADR-0016](docs/adr/0016-vertrouwdheid-als-aparte-schaal.md).
+Een getal van 0 tot 1 per Dynimo × Persoon (start op 0.2; een onbekende Gesprekspartner krijgt 0.2 zonder opslag) voor hoe vertrouwd de relatie met die Persoon is. Sinds fase 3 per Persoon: een genegeerde beurt raakt de Gesprekspartner van die beurt, de daling na lange stilte enkel wie niet aanwezig was. Het stijgt langzaam en asymptotisch bij elke beurt en extra bij positieve emoties (blij-delta), en daalt bij een genegeerde beurt en bij een Reflectie na lange stilte (nooit onder 0.05); de Persoonlijkheid (T↔F en expressiviteit) schaalt de groeisnelheid. Vier banden (afstandelijk, vriendelijk, vertrouwd, intiem) geven Type2 een toonregel: van beleefd en formeel ('u' mag, afhankelijk van archetype en karakter) tot bijnamen en plagen. Instelbaar in het dashboard. Zie [ADR-0016](docs/adr/0016-vertrouwdheid-als-aparte-schaal.md).
 _Avoid_: vertrouwen, band, zevende as
 
 **Verstand**:

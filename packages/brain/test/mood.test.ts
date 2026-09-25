@@ -16,8 +16,8 @@ describe("currentMood", () => {
     expect(mood.intensity).toBeCloseTo(0.3);
   });
 
-  it("gebruikt neutraal als Basisemotie ontbreekt", () => {
-    expect(currentMood(null, null, T0)).toMatchObject({ emotion: "neutraal", values: values({ neutraal: BASE_LEVEL }) });
+  it("gebruikt kalm als Basisemotie ontbreekt", () => {
+    expect(currentMood(null, null, T0)).toMatchObject({ emotion: "kalm", values: values({ kalm: BASE_LEVEL }) });
   });
 
   it("houdt de waarden vers op het moment zelf en kiest de hoogste als zichtbare emotie", () => {
@@ -117,9 +117,9 @@ describe("reactiviteit", () => {
 describe("moodOfRow", () => {
   const empty = { baseEmotion: null, moodValues: null, moodAt: null };
 
-  it("geeft zonder Stemming de ruststand van de Basisemotie, en neutraal zonder Basisemotie", () => {
+  it("geeft zonder Stemming de ruststand van de Basisemotie, en kalm zonder Basisemotie", () => {
     expect(moodOfRow({ ...empty, baseEmotion: "blij" }, T0)).toMatchObject({ emotion: "blij", intensity: 0.3 });
-    expect(moodOfRow(empty, T0).emotion).toBe("neutraal");
+    expect(moodOfRow(empty, T0).emotion).toBe("kalm");
   });
 
   it("leest de opgeslagen vector uit de kolommen en dooft hem uit", () => {
@@ -164,46 +164,46 @@ describe("parseMoodValues", () => {
 
 describe("emotieparen (ADR-0015)", () => {
   it("een positieve delta trekt de tegenpool met 50% van die delta omlaag (blij +30 -> droevig -15)", () => {
-    const { mood } = applyDeltas(stored({ droevig: 40 }), "neutraal", { blij: 30 }, T0);
+    const { mood } = applyDeltas(stored({ droevig: 40 }), "verveeld", { blij: 30 }, T0);
     expect(mood.values.blij).toBeCloseTo(30);
     expect(mood.values.droevig).toBeCloseTo(25);
   });
 
   it("werkt ook omgekeerd en voor de andere paren", () => {
-    expect(applyDeltas(stored({ blij: 40 }), "neutraal", { droevig: 20 }, T0).mood.values.blij).toBeCloseTo(30);
-    expect(applyDeltas(stored({ vredig: 40 }), "neutraal", { boos: 20 }, T0).mood.values.vredig).toBeCloseTo(30);
-    expect(applyDeltas(stored({ druk: 40 }), "neutraal", { kalm: 20 }, T0).mood.values.druk).toBeCloseTo(30);
+    expect(applyDeltas(stored({ blij: 40 }), "verveeld", { droevig: 20 }, T0).mood.values.blij).toBeCloseTo(30);
+    expect(applyDeltas(stored({ vredig: 40 }), "verveeld", { boos: 20 }, T0).mood.values.vredig).toBeCloseTo(30);
+    expect(applyDeltas(stored({ druk: 40 }), "verveeld", { kalm: 20 }, T0).mood.values.druk).toBeCloseTo(30);
   });
 
   it("schaalt de tegenpool-trek mee met reactiviteit en clampt op 0", () => {
-    expect(applyDeltas(stored({ droevig: 40 }), "neutraal", { blij: 30 }, T0, 1).mood.values.droevig).toBeCloseTo(40 - 15 * reactivityFactor(1));
-    expect(applyDeltas(stored({ droevig: 5 }), "neutraal", { blij: 30 }, T0).mood.values.droevig).toBe(0);
+    expect(applyDeltas(stored({ droevig: 40 }), "verveeld", { blij: 30 }, T0, 1).mood.values.droevig).toBeCloseTo(40 - 15 * reactivityFactor(1));
+    expect(applyDeltas(stored({ droevig: 5 }), "verveeld", { blij: 30 }, T0).mood.values.droevig).toBe(0);
   });
 
   it("een negatieve delta trekt de tegenpool niet omhoog", () => {
-    expect(applyDeltas(stored({ droevig: 10, blij: 40 }), "neutraal", { blij: -20 }, T0).mood.values.droevig).toBeCloseTo(10);
+    expect(applyDeltas(stored({ droevig: 10, blij: 40 }), "verveeld", { blij: -20 }, T0).mood.values.droevig).toBeCloseTo(10);
   });
 
   it("emoties zonder tegenpool trekken niets", () => {
-    const { mood } = applyDeltas(stored({ blij: 40, droevig: 10 }), "neutraal", { bang: 50 }, T0);
+    const { mood } = applyDeltas(stored({ blij: 40, droevig: 10 }), "verveeld", { bang: 50 }, T0);
     expect(mood.values).toMatchObject({ blij: 40, droevig: 10, bang: 50 });
   });
 
   it("twee hoge waarden van een paar kunnen niet tegelijk bestaan: zelfs bij twee gelijktijdige delta's blijft de som van een paar <= 100", () => {
-    const { mood, next } = applyDeltas(stored({}), "neutraal", { blij: 80, droevig: 80 }, T0);
+    const { mood, next } = applyDeltas(stored({}), "verveeld", { blij: 80, droevig: 80 }, T0);
     for (const [a, b] of EMOTION_PAIRS) expect(mood.values[a] + mood.values[b]).toBeLessThanOrEqual(100);
     expect(mood.values.blij).toBeCloseTo(40); // 80 min de trek van de tegenpool (0.5 * 80)
     expect(next?.values).toEqual(mood.values);
   });
 
   it("de opgeslagen vector en de gelezen Stemming blijven consistent (idempotent)", () => {
-    const { next } = applyDeltas(stored({}), "neutraal", { blij: 80, droevig: 80 }, T0);
-    expect(currentMood(next, "neutraal", T0).values).toEqual(next?.values);
+    const { next } = applyDeltas(stored({}), "verveeld", { blij: 80, droevig: 80 }, T0);
+    expect(currentMood(next, "verveeld", T0).values).toEqual(next?.values);
   });
 
   it("na het uitdoven blijft een paar consistent: de hoogste remt de ander af", () => {
     // Handmatig gezet (dashboard) kunnen beide hoog zijn; bij het lezen geldt de paar-regel alsnog.
-    const mood = currentMood(stored({ boos: 90, vredig: 80 }), "neutraal", T0);
+    const mood = currentMood(stored({ boos: 90, vredig: 80 }), "verveeld", T0);
     expect(mood.values.boos).toBeCloseTo(90);
     expect(mood.values.vredig).toBeCloseTo(10);
     const later = currentMood(stored({ boos: 100, vredig: 100 }), "vredig", after(MOOD_HALF_LIFE_MS));
@@ -211,7 +211,7 @@ describe("emotieparen (ADR-0015)", () => {
   });
 
   it("ontbrekende sleutels in opgeslagen mood_values lezen als 0", () => {
-    const oud = { blij: 50, boos: 0, verrast: 0, kalm: 30, verveeld: 0, nieuwsgierig: 0, bang: 0, neutraal: 0 };
+    const oud = { blij: 50, boos: 0, verrast: 0, kalm: 30, verveeld: 0, nieuwsgierig: 0, bang: 0 };
     expect(storedMoodOf({ moodValues: oud, moodAt: T0 })?.values).toMatchObject({ blij: 50, droevig: 0, vredig: 0, druk: 0 });
   });
 });

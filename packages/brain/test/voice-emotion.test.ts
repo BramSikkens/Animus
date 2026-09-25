@@ -66,8 +66,8 @@ describe("voiceSettingsFor", () => {
     }
   });
 
-  it("neutraal blijft neutraal", () => {
-    expect(at("neutraal")).toEqual(NEUTRAL);
+  it("zonder emotiewaarde blijft de stem neutraal", () => {
+    expect(voiceSettingsFor({ values: singleEmotionValues("boos", 0), expressiveness: 1 })).toEqual(NEUTRAL);
   });
 
   it("schaalt met expressiviteit en met de waarde van de emotie", () => {
@@ -79,7 +79,7 @@ describe("voiceSettingsFor", () => {
   });
 
   it("clampt binnen geldige ranges bij een extreme vector", () => {
-    const values = { blij: 100, boos: 100, verrast: 100, kalm: 0, verveeld: 0, nieuwsgierig: 100, bang: 100, neutraal: 0, droevig: 0, vredig: 0, druk: 100 };
+    const values = { blij: 100, boos: 100, verrast: 100, kalm: 0, verveeld: 0, nieuwsgierig: 100, bang: 100, droevig: 0, vredig: 0, druk: 100 };
     const s = voiceSettingsFor({ values, expressiveness: 1 });
     expect(s.style).toBeLessThanOrEqual(1);
     expect(s.stability).toBeGreaterThanOrEqual(0);

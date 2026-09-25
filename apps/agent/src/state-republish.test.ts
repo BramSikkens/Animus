@@ -37,6 +37,6 @@ describe("emotionMessageFor", () => {
   });
 
   it("geeft bij geen Stemming (slapend) een reset zonder values", () => {
-    expect(emotionMessageFor(null)).toEqual({ emotion: "neutraal", intensity: 0 });
+    expect(emotionMessageFor(null)).toEqual({ emotion: "kalm", intensity: 0 });
   });
 });

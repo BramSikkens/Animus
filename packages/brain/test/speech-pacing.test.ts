@@ -10,7 +10,7 @@ describe("pacingFor", () => {
     expect(at("droevig", 1, 0)).toEqual({ pauseLevel: 0, speedFactor: 1, halting: false });
   });
   it("is neutraal bij een neutrale of zwakke Stemming", () => {
-    expect(at("neutraal")).toEqual({ pauseLevel: 0, speedFactor: 1, halting: false });
+    expect(at("nieuwsgierig")).toEqual({ pauseLevel: 0, speedFactor: 1, halting: false });
     expect(at("blij", 0.1).pauseLevel).toBe(0);
   });
   it.each(["blij", "druk", "verrast"] as const)("%s: korte pauzes, sneller", (e) => {

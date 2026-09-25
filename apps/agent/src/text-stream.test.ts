@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { BrainEvent } from "@animus/brain";
 import { textStream } from "./text-stream.js";
 
-const VALUES = { blij: 0, boos: 0, verrast: 0, kalm: 0, verveeld: 0, nieuwsgierig: 0, bang: 0, neutraal: 0, droevig: 0, vredig: 0, druk: 0 };
+const VALUES = { blij: 0, boos: 0, verrast: 0, kalm: 0, verveeld: 0, nieuwsgierig: 0, bang: 0, droevig: 0, vredig: 0, druk: 0 };
 
 async function* gen(events: BrainEvent[]): AsyncGenerator<BrainEvent> {
   for (const event of events) yield event;

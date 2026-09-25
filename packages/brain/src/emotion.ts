@@ -1,5 +1,5 @@
 // Browser-veilig: geen node-imports. De agent én de gezichtje-app delen dit contract.
-export const EMOTIONS = ["blij", "boos", "verrast", "kalm", "verveeld", "nieuwsgierig", "bang", "neutraal", "droevig", "vredig", "druk"] as const;
+export const EMOTIONS = ["blij", "boos", "verrast", "kalm", "verveeld", "nieuwsgierig", "bang", "droevig", "vredig", "druk"] as const;
 export type Emotion = (typeof EMOTIONS)[number];
 
 /** Tegenpolen (ADR-0015): de ene kant remt de andere af. Emoties buiten de paren hebben geen tegenpool. */

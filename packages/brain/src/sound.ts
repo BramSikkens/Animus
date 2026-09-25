@@ -24,7 +24,7 @@ export function isVisibleMoodChange(before: Pick<Mood, "emotion" | "intensity">,
   return Math.abs(after.intensity - before.intensity) >= VISIBLE_INTENSITY_DELTA;
 }
 
-/** Triggersoort bij een nieuwe Stemming-emotie; neutraal maakt geen geluid. */
+/** Triggersoort bij een nieuwe Stemming-emotie; druk maakt geen geluid. */
 export function soundKindFor(emotion: Emotion): SoundKind | null {
   switch (emotion) {
     case "blij":
@@ -39,7 +39,6 @@ export function soundKindFor(emotion: Emotion): SoundKind | null {
     case "droevig":
     case "vredig":
       return "zuchten";
-    case "neutraal":
     case "druk":
       return null;
   }

@@ -3,14 +3,6 @@ import { frameFor, frameForDisplay } from "./interpolate.js";
 import { KEYFRAMES, NEUTRAL, REFLECT, SLEEP } from "./keyframes.js";
 
 describe("frameFor", () => {
-  it("neutraal geeft precies het neutrale gezicht, ongeacht intensiteit", () => {
-    const frame = frameFor("neutraal", 0.8);
-    expect(frame.background).toBe(NEUTRAL.background);
-    expect(frame.mouth).toEqual(NEUTRAL.mouth);
-    expect(frame.eyes).toEqual(NEUTRAL.eyes);
-    expect(frame.brow).toEqual({ angle: 0, raise: 0 });
-  });
-
   it("intensiteit 0 toont de emotie toch op minimum-zichtbaarheid (35% richting doel)", () => {
     // Type1 scoort gewone gesprekszinnen laag (0.02-0.2); zonder ondergrens bleef het gezicht neutraal.
     const expectedCurve = NEUTRAL.mouth.curve * 0.65 + KEYFRAMES.blij.mouth.curve * 0.35;

@@ -19,7 +19,7 @@ const dream = (id: number, over: Partial<TellableDream> = {}): TellableDream => 
 });
 
 const pick = (dreams: TellableDream[], over: Partial<Parameters<typeof pickDreamToTell>[0]> = {}) =>
-  pickDreamToTell({ dreams, values: values("neutraal"), displayState: "wakker", rng: () => 0, now, ...over });
+  pickDreamToTell({ dreams, values: values("nieuwsgierig"), displayState: "wakker", rng: () => 0, now, ...over });
 
 describe("pickDreamToTell", () => {
   it("kiest een ongeziene, recente Droom", () => {
@@ -49,9 +49,9 @@ describe("pickDreamToTell", () => {
   });
 
   it("kans hoger bij verveeld/kalm/vredig, lager bij boos/druk", () => {
-    // rng net boven de basiskans: neutraal mist, kalm haalt het, boos haalt het niet
+    // rng net boven de basiskans: nieuwsgierig (geen factor) mist, kalm haalt het, boos haalt het niet
     const rng = () => DREAM_TELL_CHANCE + 0.01;
-    expect(pick([dream(1)], { values: values("neutraal"), rng })).toBeNull();
+    expect(pick([dream(1)], { values: values("nieuwsgierig"), rng })).toBeNull();
     for (const e of ["verveeld", "kalm", "vredig"] as const) expect(pick([dream(1)], { values: values(e), rng })?.id).toBe(1);
     const low = () => DREAM_TELL_CHANCE - 0.01;
     for (const e of ["boos", "druk"] as const) expect(pick([dream(1)], { values: values(e), rng: low })).toBeNull();

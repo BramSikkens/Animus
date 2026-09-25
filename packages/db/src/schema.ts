@@ -49,12 +49,12 @@ export const dynimos = pgTable(
   (table) => [
     check(
       "dynimos_base_emotion_check",
-      sql`${table.baseEmotion} in ('blij', 'boos', 'verrast', 'kalm', 'verveeld', 'nieuwsgierig', 'bang', 'neutraal', 'droevig', 'vredig', 'druk')`,
+      sql`${table.baseEmotion} in ('blij', 'boos', 'verrast', 'kalm', 'verveeld', 'nieuwsgierig', 'bang', 'droevig', 'vredig', 'druk')`,
     ),
     check("dynimos_mood_all_or_none", sql`(${table.moodValues} is null) = (${table.moodAt} is null)`),
     check(
       "dynimos_wake_mood_emotion_check",
-      sql`${table.wakeMoodEmotion} in ('blij', 'boos', 'verrast', 'kalm', 'verveeld', 'nieuwsgierig', 'bang', 'neutraal', 'droevig', 'vredig', 'druk')`,
+      sql`${table.wakeMoodEmotion} in ('blij', 'boos', 'verrast', 'kalm', 'verveeld', 'nieuwsgierig', 'bang', 'droevig', 'vredig', 'druk')`,
     ),
     check("dynimos_wake_mood_intensity_range", sql`${table.wakeMoodIntensity} between 0 and 1`),
     check(
@@ -142,7 +142,7 @@ export const dreams = pgTable(
     index("dreams_dynimo_id_idx").on(table.dynimoId),
     check(
       "dreams_emotion_check",
-      sql`${table.emotion} in ('blij', 'boos', 'verrast', 'kalm', 'verveeld', 'nieuwsgierig', 'bang', 'neutraal', 'droevig', 'vredig', 'druk')`,
+      sql`${table.emotion} in ('blij', 'boos', 'verrast', 'kalm', 'verveeld', 'nieuwsgierig', 'bang', 'droevig', 'vredig', 'druk')`,
     ),
     check("dreams_intensity_range", sql`${table.intensity} between 0 and 1`),
   ],

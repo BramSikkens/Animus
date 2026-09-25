@@ -27,12 +27,13 @@ const MAX_RECONNECTS = 3;
 const RECONNECT_DELAY_MS = 2000;
 const AGENT_CHECK_MS = 5000;
 import { emotionBarGroups } from "./emotion-bars.js";
+import { FALLBACK_BASE } from "@animus/brain/mood";
 
 type TokenSession = { serverUrl: string; token: string };
 // `values` (de volledige vector) voedt de balken; ontbreekt hij (debugpaneel), dan tonen we geen balken.
 type EmotionState = Pick<EmotionMessage, "emotion" | "intensity"> & { values?: Record<Emotion, number> };
 
-const NEUTRAL_STATE: EmotionState = { emotion: "neutraal", intensity: 0 };
+const NEUTRAL_STATE: EmotionState = { emotion: FALLBACK_BASE, intensity: 0 };
 const DEFAULT_DISPLAY: DisplayState = "wakker";
 // Eigen lokale idle-drempel voor de doodle-modus, los van de stiltedrempel van Reflectie in de agent.
 const DOODLE_IDLE_MS = 5 * 60 * 1000;

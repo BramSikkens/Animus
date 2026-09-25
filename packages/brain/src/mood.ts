@@ -5,6 +5,8 @@ import { EMOTIONS, EMOTION_PAIRS, isEmotion, oppositeOf, type Emotion } from "./
 export const MOOD_HALF_LIFE_MS = 3 * 60_000;
 /** Ruststand (0–100) van de Basisemotie; alle andere emoties rusten op 0. */
 export const BASE_LEVEL = 30;
+/** Basisemotie als die ontbreekt (nog niet gebackfilld). */
+export const FALLBACK_BASE: Emotion = "kalm";
 
 /**
  * Reactiviteit (0–1, 0.5 = neutraal) → factor 0.05..1.95 (0.5 geeft 1; 0 = nauwelijks bewegen). Schaalt zowel de Type1-delta's als de
@@ -58,7 +60,7 @@ function moodOf(values: MoodValues, base: Emotion): Mood {
 
 /** De effectieve Stemming: de opgeslagen waarden, per emotie exponentieel uitgedoofd naar de ruststand. */
 export function currentMood(stored: StoredMood, baseEmotion: Emotion | null, now: Date, reactivity = 0.5): Mood {
-  const base = baseEmotion ?? "neutraal";
+  const base = baseEmotion ?? FALLBACK_BASE;
   const rest = restValues(base);
   if (!stored) return moodOf(rest, base);
   // Max(0, …): een klok die terugloopt (at in de toekomst) mag de waarden niet boven de opgeslagen waarde tillen.
@@ -95,7 +97,7 @@ export function applyDeltas(
       }),
     ) as MoodValues,
   );
-  return { mood: moodOf(values, baseEmotion ?? "neutraal"), next: { values, at: now } };
+  return { mood: moodOf(values, baseEmotion ?? FALLBACK_BASE), next: { values, at: now } };
 }
 
 /** De mood-kolommen van een Dynimo-rij (text/jsonb/timestamptz uit de database). */

@@ -1011,7 +1011,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
       ? Promise.resolve<Type1Result>({ deltas: {}, indruk: 0.2, intent: "simpel" })
       : classify(deps.type1, text, context)
     ).catch((error: unknown): Type1Result => {
-      console.warn("Type1 faalde, val terug op neutraal/simpel:", error instanceof Error ? error.message : error);
+      console.warn("Type1 faalde, val terug op geen delta/simpel:", error instanceof Error ? error.message : error);
       return { deltas: {}, indruk: 0, intent: "simpel" };
     });
 

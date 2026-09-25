@@ -30,7 +30,4 @@ describe("soundKindFor", () => {
     expect(soundKindFor("vredig")).toBe("zuchten");
     expect(soundKindFor("druk")).toBeNull();
   });
-  it("maakt geen geluid bij neutraal", () => {
-    expect(soundKindFor("neutraal")).toBeNull();
-  });
 });

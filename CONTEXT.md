@@ -112,7 +112,7 @@ _Avoid_: niet te verwarren met een Toekomstdroom (een Drijfveer, geen nachtelijk
 ### Expressie
 
 **Emotie**:
-Een vaste, eindige categorie uit de set {blij, boos, verrast, kalm, verveeld, nieuwsgierig, bang, neutraal, droevig, vredig, druk}. Drie **paren** zijn tegenpolen: boos↔vredig, blij↔droevig en druk↔kalm (`EMOTION_PAIRS`); de overige Emoties hebben geen tegenpool. Elke Emotie heeft in de Stemming altijd een waarde van 0 tot 100. Type1 levert per uiting per Emotie een delta (positief of negatief) die de waarde verschuift; vanaf fase 2 is dat hoe de Dynimo zich bij de uiting voelt (met zijn Drijfveren en persoonlijkheid als context), niet de emotie van de Gesprekspartner. Een delta verschuift enkel de Stemming; ze wordt zelf niet getoond.
+Een vaste, eindige categorie uit de set {blij, boos, verrast, kalm, verveeld, nieuwsgierig, bang, droevig, vredig, druk}. 'Neutraal' is geen Emotie: de ruststand toont de Basisemotie (ontbreekt die, dan kalm). Drie **paren** zijn tegenpolen: boos↔vredig, blij↔droevig en druk↔kalm (`EMOTION_PAIRS`); de overige Emoties hebben geen tegenpool. Elke Emotie heeft in de Stemming altijd een waarde van 0 tot 100. Type1 levert per uiting per Emotie een delta (positief of negatief) die de waarde verschuift; vanaf fase 2 is dat hoe de Dynimo zich bij de uiting voelt (met zijn Drijfveren en persoonlijkheid als context), niet de emotie van de Gesprekspartner. Een delta verschuift enkel de Stemming; ze wordt zelf niet getoond.
 _Avoid_: sentiment
 
 **Stemming**:

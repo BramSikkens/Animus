@@ -120,6 +120,59 @@ describe("considerInitiative(): Type1-check", () => {
   });
 });
 
+describe("considerInitiative(aanleiding)", () => {
+  it("zet de aanleiding 'terug' in de Type1-state", async () => {
+    await insertDynimo();
+    const type1 = initiativeType1({ spreken: "nee" });
+
+    await brainWith(type1.model).considerInitiative({ soort: "terug" });
+
+    expect(type1.calls[0]!.state).toContain("Aanleiding: de Gesprekspartner is net terug in beeld na een tijd weg te zijn geweest.");
+  });
+
+  it("zet de aanleiding 'nieuw-object' in de Type1-state", async () => {
+    await insertDynimo();
+    const type1 = initiativeType1({ spreken: "nee" });
+
+    await brainWith(type1.model).considerInitiative({ soort: "nieuw-object", object: "cat" });
+
+    expect(type1.calls[0]!.state).toContain("Aanleiding: er verscheen net iets nieuws in beeld: cat.");
+  });
+
+  it("zet de aanleiding 'terug' in de instructie bij ja", async () => {
+    const dynimo = await insertDynimo();
+    const type1 = initiativeType1({ spreken: "ja" });
+
+    const result = await brainWith(type1.model).considerInitiative({ soort: "terug" });
+
+    expect(result).toContain("terug in beeld");
+  });
+
+  it("geeft null bij nee, ook met aanleiding", async () => {
+    await insertDynimo();
+    const type1 = initiativeType1({ spreken: "nee" });
+
+    expect(await brainWith(type1.model).considerInitiative({ soort: "terug" })).toBeNull();
+  });
+
+  it("kiest bij een aanleiding geen Spontane herinnering of Droom", async () => {
+    const dynimo = await insertDynimo();
+    await db.insert(memories).values({
+      dynimoId: dynimo.id,
+      text: "Iets vormends van lang geleden.",
+      embedding: new Array<number>(EMBEDDING_DIMENSIONS).fill(0),
+      createdAt: new Date(bornAt.getTime() - 10 * 24 * 60 * 60 * 1000),
+      impression: 1,
+    });
+    const type1 = initiativeType1({ spreken: "ja" });
+
+    const result = await brainWith(type1.model).considerInitiative({ soort: "terug" });
+
+    expect(result).not.toContain("Iets vormends van lang geleden.");
+    expect(result).toContain("terug in beeld");
+  });
+});
+
 describe("considerInitiative(): Reflectie", () => {
   it("geeft niets zolang er een Reflectie loopt en werkt daarna weer", async () => {
     const dynimo = await insertDynimo();

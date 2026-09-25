@@ -12,6 +12,7 @@
     "./familiarity": "./src/familiarity.ts",
     "./display": "./src/display.ts",
     "./gallery": "./src/gallery.ts",
+    "./perception": "./src/perception.ts",
     "./personality": "./src/personality.ts",
     "./drives": "./src/drives.ts",
     "./mood": "./src/mood.ts",

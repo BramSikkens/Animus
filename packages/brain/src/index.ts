@@ -34,6 +34,7 @@ import { EMOTIONS, oppositeOf, type Emotion } from "./emotion.js";
 import { SEEDS } from "./seeds.js";
 import { createTools } from "./tools.js";
 import { chooseGenesisVoice, type GenesisVoiceDeps } from "./genesis-voice.js";
+import type { Aanleiding } from "./perception.js";
 export { defaultVoiceDeps } from "./genesis-voice.js";
 
 export { EMOTIONS, type Emotion };
@@ -106,8 +107,10 @@ export type Brain = {
    * Initiatief-check (Type1): wil de wakkere Dynimo nu uit zichzelf iets zeggen? Geeft een instructie voor het
    * spontane openingswoord (te voeden aan `hear(..., { initiatief: true })`), of null. Niemand wakker of een
    * lopende Reflectie: altijd null. Gooit nooit; wijzigt nooit de status van een Doel.
+   * Met `aanleiding` (een Waarneming, ADR-0018) krijgt Type1 die als extra context; bij "ja" gaat de aanleiding
+   * vóór Spontane herinnering en Droom (die worden dan niet gekozen) en verwerkt de instructie de aanleiding.
    */
-  considerInitiative(): Promise<string | null>;
+  considerInitiative(aanleiding?: Aanleiding): Promise<string | null>;
   /**
    * Praat met de Wakker Dynimo (elke beurt uit de database gelezen). Niemand wakker: geen events.
    * Met `initiatief` is `text` de instructie uit `considerInitiative()` i.p.v. een uiting van de Gesprekspartner:
@@ -1304,7 +1307,13 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     return epitaph;
   }
 
-  async function considerInitiative(): Promise<string | null> {
+  function aanleidingText(aanleiding: Aanleiding): string {
+    return aanleiding.soort === "terug"
+      ? "de Gesprekspartner is net terug in beeld na een tijd weg te zijn geweest"
+      : `er verscheen net iets nieuws in beeld: ${aanleiding.object}`;
+  }
+
+  async function considerInitiative(aanleiding?: Aanleiding): Promise<string | null> {
     if (reflecting > 0) return null;
     const [awake] = await deps.db.select().from(dynimos).where(isNotNull(dynimos.awakeSince));
     if (!awake) return null;
@@ -1317,6 +1326,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
         personalityText(awake),
         drivesPromptBlock(driveRows),
         `Huidige stemming: ${mood.emotion} (intensiteit ${mood.intensity.toFixed(2)})`,
+        aanleiding && `Aanleiding: ${aanleidingText(aanleiding)}.`,
       ]
         .filter(Boolean)
         .join("\n");
@@ -1341,6 +1351,14 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
         },
       });
       if (answers.spreken.choice !== "ja") return null;
+      // Een aanleiding (Waarneming) gaat vóór Spontane herinnering en Droom: die worden dan niet gekozen.
+      if (aanleiding) {
+        pendingSpontaneousId = undefined;
+        pendingDreamId = undefined;
+        return `Je begint uit jezelf een gesprek: ${aanleidingText(aanleiding)}. ${
+          aanleiding.soort === "terug" ? "Begroet hem kort, op je eigen manier." : "Reageer daar kort en nieuwsgierig op, op je eigen manier."
+        }`;
+      }
       const axes = rowAxes(awake);
       const spontaneous = axes ? await pickSpontaneous(awake.id, axes, SPONTANEOUS_INITIATIVE_CHANCE) : null;
       pendingSpontaneousId = spontaneous?.id;

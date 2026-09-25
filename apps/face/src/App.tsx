@@ -21,6 +21,7 @@ import { isSoundKind, SOUND_TOPIC } from "@animus/brain/sound";
 import { clipUrl } from "./sound.js";
 import { Face } from "./face/Face.js";
 import { voiceReaction, type VoiceReaction } from "./face/voice-reaction.js";
+import { useWaarnemingen } from "./perception/useWaarnemingen.js";
 
 const VOICE_WINDOW = 20; // samples van 100ms
 const MAX_RECONNECTS = 3;
@@ -207,6 +208,12 @@ function CameraControl({ enabled, onError }: { enabled: boolean; onError: (messa
   useEffect(() => {
     localParticipant.setCameraEnabled(enabled).catch(() => onError("Camera niet beschikbaar; controleer de permissie."));
   }, [enabled, localParticipant, onError]);
+  return null;
+}
+
+// Aanwezigheidsdetectie op de al gepubliceerde cameratrack (ADR-0018), enkel actief zolang de camera aan is.
+function Perception({ enabled }: { enabled: boolean }) {
+  useWaarnemingen({ enabled });
   return null;
 }
 
@@ -444,6 +451,7 @@ export function App() {
             <AgentWatchdog />
             <MicControl enabled={selectedId !== null} onError={setMicError} />
             <CameraControl enabled={view.screen === "gezicht" && displayState !== "slapend"} onError={setMicError} />
+            <Perception enabled={view.screen === "gezicht" && displayState !== "slapend"} />
             <ConnectionStatus />
             <RoomAudioRenderer />
             <StartAudio label="Zet geluid aan" />

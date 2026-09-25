@@ -3,8 +3,12 @@ import { EMOTIONS, EMOTION_PAIRS, isEmotion, oppositeOf, type Emotion } from "./
 
 /** Halveringstijd waarmee elke emotiewaarde naar haar ruststand uitdooft. */
 export const MOOD_HALF_LIFE_MS = 3 * 60_000;
-/** Ruststand (0–100) van de Basisemotie; alle andere emoties rusten op 0. */
-export const BASE_LEVEL = 30;
+/** Ruststand (0–100) van elke emotie, behalve de Basisemotie (zie BASE_LEVEL). */
+export const REST_LEVEL = 50;
+/** Ruststand (0–100) van de Basisemotie; de rest rust op REST_LEVEL (via reconcilePairs zakt een tegenpool naar 100 - dit). */
+export const BASE_LEVEL = 65;
+/** Basisemotie als die ontbreekt (nog niet gebackfilld). */
+export const FALLBACK_BASE: Emotion = "kalm";
 
 /**
  * Reactiviteit (0–1, 0.5 = neutraal) → factor 0.05..1.95 (0.5 geeft 1; 0 = nauwelijks bewegen). Schaalt zowel de Type1-delta's als de
@@ -21,6 +25,10 @@ export type StoredMood = { values: MoodValues; at: Date } | null;
 export type Mood = { emotion: Emotion; intensity: number; values: MoodValues };
 
 const clamp = (value: number) => Math.min(100, Math.max(0, value));
+const clamp01 = (value: number) => Math.min(1, Math.max(0, value));
+
+/** Hoe ver `value` boven de ruststand (REST_LEVEL) staat, als 0..1. De enige sterktemaat (ADR-0017). */
+export const strength = (value: number): number => clamp01((value - REST_LEVEL) / (100 - REST_LEVEL));
 
 /** Trek van een positieve delta op de tegenpool, als fractie van die delta (blij +30 -> droevig -15). */
 export const PAIR_PULL = 0.5;
@@ -39,7 +47,8 @@ function reconcilePairs(values: MoodValues): MoodValues {
 }
 
 function restValues(base: Emotion): MoodValues {
-  return Object.fromEntries(EMOTIONS.map((emotion) => [emotion, emotion === base ? BASE_LEVEL : 0])) as MoodValues;
+  const raw = Object.fromEntries(EMOTIONS.map((emotion) => [emotion, emotion === base ? BASE_LEVEL : REST_LEVEL])) as MoodValues;
+  return reconcilePairs(raw);
 }
 
 /** De hoogste emotie; bij een gelijkstand de Basisemotie, anders de eerste in EMOTIONS. */
@@ -53,12 +62,12 @@ function dominantOf(values: MoodValues, base: Emotion): Emotion {
 
 function moodOf(values: MoodValues, base: Emotion): Mood {
   const emotion = dominantOf(values, base);
-  return { emotion, intensity: values[emotion] / 100, values };
+  return { emotion, intensity: strength(values[emotion]), values };
 }
 
 /** De effectieve Stemming: de opgeslagen waarden, per emotie exponentieel uitgedoofd naar de ruststand. */
 export function currentMood(stored: StoredMood, baseEmotion: Emotion | null, now: Date, reactivity = 0.5): Mood {
-  const base = baseEmotion ?? "neutraal";
+  const base = baseEmotion ?? FALLBACK_BASE;
   const rest = restValues(base);
   if (!stored) return moodOf(rest, base);
   // Max(0, …): een klok die terugloopt (at in de toekomst) mag de waarden niet boven de opgeslagen waarde tillen.
@@ -95,7 +104,7 @@ export function applyDeltas(
       }),
     ) as MoodValues,
   );
-  return { mood: moodOf(values, baseEmotion ?? "neutraal"), next: { values, at: now } };
+  return { mood: moodOf(values, baseEmotion ?? FALLBACK_BASE), next: { values, at: now } };
 }
 
 /** De mood-kolommen van een Dynimo-rij (text/jsonb/timestamptz uit de database). */
@@ -110,13 +119,13 @@ export function baseEmotionOf(row: Pick<MoodColumns, "baseEmotion">): Emotion | 
   return isEmotion(row.baseEmotion) ? row.baseEmotion : null;
 }
 
-/** Ontbrekende of ongeldige emoties tellen als 0; waarden worden geclampt. */
+/** Ontbrekende of ongeldige emoties tellen als in rust (REST_LEVEL); waarden worden geclampt. */
 export function storedMoodOf(row: Pick<MoodColumns, "moodValues" | "moodAt">): StoredMood {
   const raw = row.moodValues;
   if (typeof raw !== "object" || raw === null || Array.isArray(raw) || !row.moodAt) return null;
   const record = raw as Record<string, unknown>;
   const values = Object.fromEntries(
-    EMOTIONS.map((emotion) => [emotion, typeof record[emotion] === "number" ? clamp(record[emotion]) : 0]),
+    EMOTIONS.map((emotion) => [emotion, typeof record[emotion] === "number" ? clamp(record[emotion]) : REST_LEVEL]),
   ) as MoodValues;
   return { values, at: row.moodAt };
 }
@@ -126,9 +135,60 @@ export function moodOfRow(row: MoodColumns, now: Date): Mood {
   return currentMood(storedMoodOf(row), baseEmotionOf(row), now, row.axisReactivity);
 }
 
-/** Eén emotie op `intensity` (0–1), de rest op 0: voor Ontwaakstemming en handmatige override. */
-export function singleEmotionValues(emotion: Emotion, intensity: number): MoodValues {
-  return { ...restValues(emotion), [emotion]: clamp(intensity * 100) } as MoodValues;
+/** Amplitude (in punten) van de trage weergave-drift rond de ruststand; geschaald met reactiviteit in `displayMood`. */
+export const DRIFT_AMPLITUDE = 10;
+/** Hysterese (in punten): de dominante emotie wisselt pas als de kandidaat met minstens dit verschil wint. */
+export const DRIFT_HYSTERESIS = 8;
+
+/** Simpele 31-hash naar [0, 2π), voor de fase van elke driftsinus. */
+function phaseHash(text: string): number {
+  let hash = 0;
+  for (let i = 0; i < text.length; i++) hash = (hash * 31 + text.charCodeAt(i)) | 0;
+  return ((hash % 1000) / 1000) * 2 * Math.PI;
+}
+
+// Eén dragende golf (113s) plus twee kleine variaties; gewichten tellen op tot 1. Een gelijk gemiddelde van drie
+// sinussen dooft zichzelf grotendeels uit (zelden voorbij ±0.5), waardoor ±DRIFT_AMPLITUDE nooit zichtbaar werd.
+const DRIFT_WAVES = [
+  { periodMs: 113_000, weight: 0.75 },
+  { periodMs: 47_000, weight: 0.2 },
+  { periodMs: 271_000, weight: 0.05 },
+];
+
+/** Traag, deterministisch golfje in [-1, 1], per emotie+seed anders gefaseerd. */
+export function driftOf(emotion: Emotion, seed: string, now: Date): number {
+  const t = now.getTime();
+  return DRIFT_WAVES.reduce(
+    (total, { periodMs, weight }, i) => total + weight * Math.sin((2 * Math.PI * t) / periodMs + phaseHash(`${seed}:${emotion}:${i}`)),
+    0,
+  );
+}
+
+/**
+ * Alleen voor weergave (gezichtje, dashboardbalk): de echte Stemming (`currentMood`) plus een trage, per emotie
+ * verschillende drift rond de ruststand (ADR-0017). Stateloze hysterese voorkomt dat de dominante emotie
+ * heen-en-weer springt door een klein driftverschil.
+ */
+export function displayMood(stored: StoredMood, baseEmotion: Emotion | null, now: Date, reactivity: number, seed: string): Mood {
+  const base = baseEmotion ?? FALLBACK_BASE;
+  const truth = currentMood(stored, baseEmotion, now, reactivity);
+  const amplitude = DRIFT_AMPLITUDE * Math.min(1, reactivityFactor(reactivity));
+  const shown = reconcilePairs(
+    Object.fromEntries(EMOTIONS.map((emotion) => [emotion, clamp(truth.values[emotion] + amplitude * driftOf(emotion, seed, now))])) as MoodValues,
+  );
+  const candidate = dominantOf(shown, base);
+  const dominant = candidate !== truth.emotion && shown[candidate] - shown[truth.emotion] < DRIFT_HYSTERESIS ? truth.emotion : candidate;
+  return { emotion: dominant, intensity: strength(shown[dominant]), values: shown };
+}
+
+/** De weergave-Stemming van een rij op tijdstip `now`, met de rij-id als drift-seed. */
+export function displayMoodOfRow(row: MoodColumns & { id: number }, now: Date): Mood {
+  return displayMood(storedMoodOf(row), baseEmotionOf(row), now, row.axisReactivity ?? 0.5, String(row.id));
+}
+
+/** Eén emotie op de ruststand van `base` plus `intensity` (0–1) erboven, de rest in rust: voor Ontwaakstemming en handmatige override. */
+export function singleEmotionValues(emotion: Emotion, intensity: number, base: Emotion = emotion): MoodValues {
+  return reconcilePairs({ ...restValues(base), [emotion]: clamp(REST_LEVEL + intensity * (100 - REST_LEVEL)) });
 }
 
 /** Dashboard-formulier: veld `mood_<emotie>` (0–100, geclampt) voor elke emotie; null als er één ontbreekt of geen getal is. */

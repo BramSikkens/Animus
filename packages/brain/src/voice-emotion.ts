@@ -1,6 +1,6 @@
 // Browser-veilig: geen node-imports. Pure vertaling van Stemming + expressiviteit naar ElevenLabs voiceSettings.
 import type { Emotion } from "./emotion.js";
-import type { MoodValues } from "./mood.js";
+import { strength, type MoodValues } from "./mood.js";
 
 export type VoiceSettings = { stability: number; style: number; speed: number; similarity_boost: number };
 
@@ -23,7 +23,7 @@ const PROFILES: Partial<Record<Emotion, { stability: number; style: number; spee
 export function voiceSettingsFor({ values, expressiveness }: { values: MoodValues; expressiveness: number }): VoiceSettings {
   const out = { ...NEUTRAL };
   for (const [emotion, profile] of Object.entries(PROFILES)) {
-    const weight = (values[emotion as Emotion] / 100) * expressiveness;
+    const weight = strength(values[emotion as Emotion]) * expressiveness;
     out.stability += profile.stability * weight;
     out.style += profile.style * weight;
     out.speed += profile.speed * weight;

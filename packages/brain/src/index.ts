@@ -220,7 +220,7 @@ Wees niet allemaal in het midden: kies een eigen, uitgesproken positie.
 Kies ook je Drijfveren: per soort 1 of 2 items, passend bij de Seed én bij de persoonlijkheid die je koos:
 ${DRIVE_DESCRIPTIONS}
 Doelen starten actief.
-${BASE_EMOTION_DESCRIPTION} Kies ze passend bij je persoonlijkheid en de Seed.
+${BASE_EMOTION_DESCRIPTION} Leid ze af uit de Seed: welk temperament past bij dat beeld? Niet uit het feit dat je net ontwaakt — pas geboren zijn maakt je niet vanzelf nieuwsgierig.
 Beschrijf ook je stem in het veld "voiceDescription": een korte Nederlandse stembeschrijving (bv. "oude man, hees, langzaam" of "robotachtig, metaalachtig"). Geef in "voiceSearchTerms" 3 tot 6 Engelse zoektermen voor die stem (bv. "old man", "raspy", "robotic", "alien").
 Antwoord in het Nederlands.`;
 
@@ -312,7 +312,7 @@ function moodMessage(mood: Mood): SystemModelMessage {
     .join(", ");
   return {
     role: "system",
-    content: `Je huidige stemming (emoties, 0 tot 100, hoog naar laag): ${vector}. Dominant: ${mood.emotion}. Wees eerlijk over hoe je je voelt: als iemand vraagt hoe je je voelt of of je boos (of een andere emotie) bent en die emotie staat hoog, ontken die niet. Laat je toon en antwoord kloppen met deze stemming (een geërgerde Dynimo antwoordt korter en stugger).`,
+    content: `Je huidige stemming (emoties, 0 tot 100, hoog naar laag; 50 is de ruststand, hoger is sterker dan normaal, lager is minder dan normaal): ${vector}. Dominant: ${mood.emotion}. Wees eerlijk over hoe je je voelt: als iemand vraagt hoe je je voelt of of je boos (of een andere emotie) bent en die emotie staat hoog, ontken die niet. Laat je toon en antwoord kloppen met deze stemming (een geërgerde Dynimo antwoordt korter en stugger).`,
   };
 }
 
@@ -681,7 +681,7 @@ ${fresh.map((memory) => `- (indruk ${memory.impression}) ${memory.text}`).join("
       const wakeMood =
         found.wakeMoodEmotion !== null
           ? {
-              moodValues: singleEmotionValues(found.wakeMoodEmotion as Emotion, found.wakeMoodIntensity ?? 0),
+              moodValues: singleEmotionValues(found.wakeMoodEmotion as Emotion, found.wakeMoodIntensity ?? 0, baseEmotionOf(found) ?? undefined),
               moodAt: at,
               wakeMoodEmotion: null,
               wakeMoodIntensity: null,
@@ -908,7 +908,9 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
   }
 
   async function forceMood(id: number, emotion: Emotion, intensity: number): Promise<boolean> {
-    return setMood(id, singleEmotionValues(emotion, intensity));
+    const [row] = await deps.db.select().from(dynimos).where(eq(dynimos.id, id));
+    if (!row) return false;
+    return setMood(id, singleEmotionValues(emotion, intensity, baseEmotionOf(row) ?? undefined));
   }
 
   async function setAxes(id: number, axes: Axes): Promise<boolean> {
@@ -984,7 +986,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     const context = [
       personalityText(awake),
       drivesPromptBlock(driveRows),
-      `Huidige stemming (0–100): ${EMOTIONS.map((emotion) => `${emotion} ${Math.round(before.values[emotion])}`).join(", ")}`,
+      `Huidige stemming (0–100, ruststand 50: hoger is sterker dan normaal, lager is minder dan normaal): ${EMOTIONS.map((emotion) => `${emotion} ${Math.round(before.values[emotion])}`).join(", ")}`,
     ]
       .filter(Boolean)
       .join("\n");
@@ -1011,7 +1013,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
       ? Promise.resolve<Type1Result>({ deltas: {}, indruk: 0.2, intent: "simpel" })
       : classify(deps.type1, text, context)
     ).catch((error: unknown): Type1Result => {
-      console.warn("Type1 faalde, val terug op neutraal/simpel:", error instanceof Error ? error.message : error);
+      console.warn("Type1 faalde, val terug op geen delta/simpel:", error instanceof Error ? error.message : error);
       return { deltas: {}, indruk: 0, intent: "simpel" };
     });
 

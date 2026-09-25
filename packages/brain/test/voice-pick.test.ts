@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { chooseGenesisVoice, defaultVoiceDeps, elevenLabsGenesisVoices, pickVoiceForCharacter } from "../src/genesis-voice.js";
 import type { CatalogVoice } from "../src/voice-catalog.js";
 
@@ -65,6 +65,24 @@ describe("ElevenLabs-fetches hebben een timeout", () => {
 
     const result = await chooseGenesisVoice(deps, { description: "oude man", searchTerms: [], hint: "", name: "Nova" });
 
+    expect(result).toBeNull();
+  });
+});
+
+describe("chooseGenesisVoice met Voice Library-stemmen", () => {
+  const library = [v("s1", { name: "Marianne", description: "old woman", publicOwnerId: "own1" })];
+  const input = { description: "old woman", searchTerms: [], hint: "", name: "Vela" };
+
+  it("voegt een gekozen bibliotheekstem eerst aan het account toe en bewaart dat voice_id", async () => {
+    const adopt = vi.fn(async () => "s1-eigen");
+    const result = await chooseGenesisVoice({ loadCatalog: async () => ({ catalog: library, tier: "starter" }), adopt }, input);
+    expect(adopt).toHaveBeenCalledWith(library[0]);
+    expect(result?.voice).toBe("s1-eigen");
+  });
+
+  it("valt terug op de default-stem als toevoegen faalt (geen onbruikbaar voice_id opslaan)", async () => {
+    const adopt = vi.fn(async () => { throw new Error("voice limit reached"); });
+    const result = await chooseGenesisVoice({ loadCatalog: async () => ({ catalog: library, tier: "starter" }), adopt }, input);
     expect(result).toBeNull();
   });
 });

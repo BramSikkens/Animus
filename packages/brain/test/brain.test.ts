@@ -487,11 +487,11 @@ describe("createBrain", () => {
 
   it("geeft de Type2-prompt de volledige emotievector mee, hoog naar laag, met de dominante emotie benoemd", async () => {
     const system = await systemAfterHearing({ blij: 50 });
-    expect(system).toContain("blij: 50");
-    expect(system).toContain("kalm: 30");
-    expect(system).toContain("boos: 0");
-    expect(system.indexOf("blij: 50")).toBeLessThan(system.indexOf("kalm: 30"));
-    expect(system.indexOf("kalm: 30")).toBeLessThan(system.indexOf("boos: 0"));
+    expect(system).toContain("blij: 100");
+    expect(system).toContain("kalm: 65");
+    expect(system).toContain("boos: 50");
+    expect(system.indexOf("blij: 100")).toBeLessThan(system.indexOf("kalm: 65"));
+    expect(system.indexOf("kalm: 65")).toBeLessThan(system.indexOf("boos: 50"));
     expect(system).toContain("Dominant: blij");
   });
 
@@ -518,7 +518,7 @@ describe("createBrain", () => {
     const events: BrainEvent[] = [];
     for await (const event of brain.hear("Hoi!")) events.push(event);
 
-    expect(events[0]).toMatchObject({ type: "mood", emotion: "blij", intensity: 0.5, values: { blij: 50, kalm: 30, boos: 0 } });
+    expect(events[0]).toMatchObject({ type: "mood", emotion: "blij", intensity: 1, values: { blij: 100, kalm: 65, boos: 50 } });
     const emotionIndex = events.findIndex((e) => e.type === "mood");
     const firstTextIndex = events.findIndex((e) => e.type === "text");
     expect(emotionIndex).toBeLessThan(firstTextIndex);
@@ -593,7 +593,7 @@ describe("createBrain", () => {
     await collectText(brain.hear("Vertel eens iets nieuws."));
 
     const rows = await db.select().from(dynimos);
-    expect(rows[0]?.moodValues).toMatchObject({ nieuwsgierig: 50, kalm: 30, blij: 0 });
+    expect(rows[0]?.moodValues).toMatchObject({ nieuwsgierig: 100, kalm: 65, blij: 50 });
     expect(rows[0]?.moodAt).toEqual(bornAt);
   });
 
@@ -2219,8 +2219,8 @@ describe("createBrain", () => {
         if (event.type === "mood") moods.push(event);
       }
 
-      expect(moods[0]!.values.blij).toBeCloseTo(50);
-      expect(moods[0]!.values.droevig).toBeCloseTo(35); // 60 - 0.5 * 50
+      expect(moods[0]!.values.blij).toBeCloseTo(70);
+      expect(moods[0]!.values.droevig).toBeCloseTo(30); // 80 - 0.5*50=55, verder afgeremd door de paar-regel
     });
 
     it("stelt Type1 alleen Score-vragen met hoogstens 10 niveaus (limiet van de typesafe-Score)", async () => {
@@ -2250,13 +2250,13 @@ describe("createBrain", () => {
       }
 
       expect(moods.map((m) => m.type === "mood" && m.emotion)).toEqual(["boos", "boos", "blij"]);
-      expect(moods[2]).toMatchObject({ intensity: 1, values: { blij: 100, boos: 50 } });
-      expect((await db.select().from(dynimos))[0]?.moodValues).toMatchObject({ blij: 100, boos: 50 });
+      expect(moods[2]).toMatchObject({ intensity: 1, values: { blij: 100, boos: 100 } });
+      expect((await db.select().from(dynimos))[0]?.moodValues).toMatchObject({ blij: 100, boos: 100 });
     });
 
     it.each([
-      [0, 2.5],
-      [1, 97.5],
+      [0, 52.5],
+      [1, 100],
     ])("schaalt de Type1-delta's met de reactiviteit van de Dynimo (%s geeft boos %s)", async (axisReactivity, expected) => {
       await insertDynimo({ axisReactivity });
       const { model } = type1Sequence([{ deltas: { boos: 50 } }]);
@@ -2277,7 +2277,7 @@ describe("createBrain", () => {
         for await (const event of brain.hear(utterance)) if (event.type === "mood") moods.push(event);
       }
 
-      expect(moods[0]).toMatchObject({ emotion: "kalm", values: { boos: 46, kalm: 50 } }); // kalm stond op 0 in de opgeslagen vector
+      expect(moods[0]).toMatchObject({ emotion: "kalm", values: { boos: 48, kalm: 100 } });
       expect(moods[1]).toMatchObject({ emotion: "kalm", values: { boos: 0, kalm: 100 } });
     });
 
@@ -2292,7 +2292,7 @@ describe("createBrain", () => {
       const events: BrainEvent[] = [];
       for await (const event of brain.hear("Twee")) events.push(event);
 
-      expect(events[0]).toMatchObject({ type: "mood", emotion: "blij", values: { blij: 50, boos: 25 } });
+      expect(events[0]).toMatchObject({ type: "mood", emotion: "blij", values: { blij: 100, boos: 75 } });
       const [row] = await db.select().from(dynimos);
       expect(row?.moodAt).toEqual(clock);
     });
@@ -2305,7 +2305,7 @@ describe("createBrain", () => {
       const events: BrainEvent[] = [];
       for await (const event of brain.hear("Wat een dag")) events.push(event);
 
-      expect(events[0]).toMatchObject({ type: "mood", emotion: "boos", intensity: 0.5 });
+      expect(events[0]).toMatchObject({ type: "mood", emotion: "boos", intensity: 1 });
       expect(events[1]).toEqual({ type: "sound", kind: "brommen" });
     });
 
@@ -2333,7 +2333,7 @@ describe("createBrain", () => {
 
     it("levert geen sound-event bij een kleine Emotie die de Basisemotie amper verschuift", async () => {
       await insertDynimo();
-      const { model } = type1Sequence([{ deltas: { blij: 20 } }]); // basisniveau is 0.3
+      const { model } = type1Sequence([{ deltas: { blij: 10 } }]); // blij (60) blijft onder de Basisemotie kalm (65): dominant en intensiteit blijven gelijk
       const brain = brainWith({ type1: model, light: textModel(["Hoi."]) });
 
       const events: BrainEvent[] = [];
@@ -2363,7 +2363,7 @@ describe("createBrain", () => {
       const systems = contentsByRole(light.doStreamCalls[0]?.prompt, "system");
       expect(systems[0]).not.toContain("Je huidige stemming");
       expect(moodMessage(light, 0)).toContain("boos");
-      expect(moodMessage(light, 0)).toContain("boos: 50");
+      expect(moodMessage(light, 0)).toContain("boos: 100");
       expect(systems.indexOf(moodMessage(light, 0)!)).toBeGreaterThan(1); // na stabiel en leeftijd
     });
 
@@ -2376,7 +2376,7 @@ describe("createBrain", () => {
       await collectText(brainWith({ type1: model, light, now: () => clock }).hear("Hoi"));
 
       expect(moodMessage(light, 0)).toContain("boos");
-      expect(moodMessage(light, 0)).toContain("boos: 40");
+      expect(moodMessage(light, 0)).toContain("boos: 70");
     });
 
     it("valt na lange tijd terug op de Basisemotie", async () => {
@@ -2388,7 +2388,7 @@ describe("createBrain", () => {
       await collectText(brainWith({ type1: model, light, now: () => clock }).hear("Hoi"));
 
       expect(moodMessage(light, 0)).toContain("kalm");
-      expect(moodMessage(light, 0)).toContain("kalm: 30");
+      expect(moodMessage(light, 0)).toContain("kalm: 65");
     });
 
     it("bewaart de Stemming over beurten en over een nieuwe brain-instantie", async () => {
@@ -2401,7 +2401,7 @@ describe("createBrain", () => {
       await collectText(brainWith({ type1: second.model, light }).hear("Sorry."));
 
       expect(moodMessage(light, 0)).toContain("boos");
-      expect(moodMessage(light, 0)).toContain("boos: 50");
+      expect(moodMessage(light, 0)).toContain("boos: 100");
     });
 
     it("laat een mislukte Type1 de Stemming ongewijzigd", async () => {
@@ -2417,7 +2417,7 @@ describe("createBrain", () => {
       for await (const event of brainWith({ type1: broken, light }).hear("Hoi")) events.push(event);
 
       expect(events[0]).toMatchObject({ type: "mood", emotion: "boos", intensity: 0.8 });
-      expect((await db.select().from(dynimos))[0]?.moodValues).toMatchObject({ boos: 80 });
+      expect((await db.select().from(dynimos))[0]?.moodValues).toMatchObject({ boos: 90 });
     });
 
     describe("Verjaardag", () => {
@@ -2431,7 +2431,7 @@ describe("createBrain", () => {
         await collectText(brainWith({ type1: model, light: textModel(["Hoi."]), now: () => birthday }).hear("Hoi"));
 
         const row = (await db.select().from(dynimos))[0];
-        expect(row?.moodValues).toMatchObject({ blij: 90 });
+        expect(row?.moodValues).toMatchObject({ blij: 100 });
       });
 
       it("geeft de boost maar één keer per kalenderdag, ook niet bij een tweede uiting of na een herstart", async () => {
@@ -2450,7 +2450,8 @@ describe("createBrain", () => {
       });
 
       it("laat een sterkere bestaande Stemming staan, maar telt de boost van vandaag wel als gegeven", async () => {
-        await insertDynimo({ bornAt: born, moodValues: singleEmotionValues("boos", 1), moodAt: birthday });
+        // blij expliciet op 0 (i.p.v. de rust-default): anders klemt de verjaardagsboost blij toch al op 100, gelijk aan boos.
+        await insertDynimo({ bornAt: born, moodValues: { ...singleEmotionValues("boos", 1), blij: 0 }, moodAt: birthday });
         const { model } = type1Sequence([{ deltas: {} }]);
 
         await collectText(brainWith({ type1: model, light: textModel(["Hoi."]), now: () => birthday }).hear("Hoi"));
@@ -2979,7 +2980,7 @@ describe("createBrain", () => {
       await brain.wake(vero.id);
 
       const awake = await rowOf(vero.id);
-      expect(awake.moodValues).toMatchObject({ nieuwsgierig: 70, kalm: 0 });
+      expect(awake.moodValues).toMatchObject({ nieuwsgierig: 85, kalm: 65 }); // ruststand van de Basisemotie (kalm), nieuwsgierig erboven
       expect(awake.moodAt).toEqual(clock);
       expect([awake.wakeMoodEmotion, awake.wakeMoodIntensity]).toEqual([null, null]);
     });
@@ -2989,12 +2990,12 @@ describe("createBrain", () => {
       const brain = brainWith(unusedModel());
 
       await brain.wake(vero.id); // al wakker
-      expect((await rowOf(vero.id)).moodValues).toMatchObject({ boos: 80 });
+      expect((await rowOf(vero.id)).moodValues).toMatchObject({ boos: 90 });
 
       await db.update(dynimos).set({ awakeSince: null }).where(eq(dynimos.id, vero.id));
       await brain.wake(vero.id); // zonder wake_mood
       const row = await rowOf(vero.id);
-      expect(row.moodValues).toMatchObject({ boos: 80 });
+      expect(row.moodValues).toMatchObject({ boos: 90 });
       expect(row.moodAt).toEqual(bornAt);
     });
 
@@ -3583,7 +3584,7 @@ describe("createBrain", () => {
 
         expect(await brainWith().forceMood(vero.id, "blij", 0.4)).toBe(true);
 
-        expect(await rowOf(vero.id)).toMatchObject({ moodValues: { blij: 40, boos: 0 }, moodAt: bornAt, baseEmotion: "kalm" });
+        expect(await rowOf(vero.id)).toMatchObject({ moodValues: { blij: 70, boos: 50 }, moodAt: bornAt, baseEmotion: "kalm" });
       });
 
       it("dooft de geforceerde Stemming daarna normaal uit (niet gepind)", async () => {

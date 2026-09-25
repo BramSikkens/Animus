@@ -1,7 +1,7 @@
 // Browser-veilig: geen node-imports. Pure Spraakgeluiden ('hmm…', 'ha ha') die vóór TTS aan een beurt worden toegevoegd.
 // Geschreven vorm i.p.v. audio tags (ElevenLabs Flash v2.5 ondersteunt die niet; Deepgram spreekt de tekst ook gewoon uit).
 import type { Emotion } from "./emotion.js";
-import type { MoodValues } from "./mood.js";
+import { strength, type MoodValues } from "./mood.js";
 import type { Axes } from "./personality.js";
 
 /** Basiskans op een geluid per beurt, vóór × expressiviteit (0-1) en × waarde van de dominante Emotie (0-1). */
@@ -33,7 +33,7 @@ export function pickSpeechSound({ values, axes, rng, isShort = false, previous }
   const [top, value] = (Object.entries(values) as [Emotion, number][]).reduce((a, b) => (b[1] > a[1] ? b : a));
   const sound = SOUND_BY_EMOTION[top] ?? (axes.jp > HESITATION_JP ? HESITATION : undefined);
   if (!sound || sound === previous) return null;
-  const chance = clamp01(SPEECH_SOUND_CHANCE * clamp01(axes.expressiveness) * clamp01(value / 100));
+  const chance = clamp01(SPEECH_SOUND_CHANCE * clamp01(axes.expressiveness) * strength(value));
   return rng() < chance ? sound : null;
 }
 

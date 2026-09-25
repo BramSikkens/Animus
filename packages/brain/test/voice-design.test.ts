@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cloneVoice, designVoice, saveDesignedVoice } from "../src/voice-design.js";
+import { adoptVoice, cloneVoice, designVoice, saveDesignedVoice } from "../src/voice-design.js";
 
 const TEXT = "Dit is een Nederlandse voorbeeldtekst voor de stem. ".repeat(3);
 
@@ -103,5 +103,26 @@ describe("cloneVoice", () => {
   it("meldt API-fouten", async () => {
     const { fn } = fakeFetch(401, {});
     await expect(cloneVoice(fn, "k", { name: "n", files: [audio()], consent: true })).rejects.toThrow(/key/i);
+  });
+});
+
+describe("adoptVoice", () => {
+  it("voegt een bibliotheekstem toe aan het account en geeft het bruikbare voice_id terug", async () => {
+    const { fn, calls } = fakeFetch(200, { voice_id: "s1" });
+    expect(await adoptVoice(fn, "sleutel", { id: "s1", name: "Marianne", publicOwnerId: "own1" })).toBe("s1");
+    expect(calls[0]!.url).toBe("https://api.elevenlabs.io/v1/voices/add/own1/s1");
+    expect(calls[0]!.init.method).toBe("POST");
+    expect(JSON.parse(String(calls[0]!.init.body))).toEqual({ new_name: "Marianne" });
+  });
+
+  it("laat een eigen stem ongemoeid (geen netwerk)", async () => {
+    const { fn, calls } = fakeFetch(200, {});
+    expect(await adoptVoice(fn, "sleutel", { id: "v2", name: "Adam" })).toBe("v2");
+    expect(calls).toHaveLength(0);
+  });
+
+  it("gooit bij een fout van ElevenLabs", async () => {
+    const { fn } = fakeFetch(400, { detail: { message: "voice limit reached" } });
+    await expect(adoptVoice(fn, "sleutel", { id: "s1", name: "M", publicOwnerId: "own1" })).rejects.toThrow();
   });
 });

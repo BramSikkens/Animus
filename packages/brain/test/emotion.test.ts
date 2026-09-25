@@ -4,6 +4,8 @@ import { EMOTIONS, EMOTION_GROUPS, EMOTION_PAIRS, oppositeOf } from "../src/emot
 describe("emotie-paren", () => {
   it("kent droevig, vredig en druk", () => {
     expect(EMOTIONS).toEqual(expect.arrayContaining(["droevig", "vredig", "druk", "kalm"]));
+    // Geen 'neutraal' meer: de ruststand is geen emotie, het gezicht valt terug op de Basisemotie.
+    expect(EMOTIONS).not.toContain("neutraal");
   });
 
   it("paart boos↔vredig, blij↔droevig en druk↔kalm", () => {

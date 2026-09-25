@@ -2,23 +2,23 @@ import { describe, expect, it, vi } from "vitest";
 import { createCommandHandler, galleryMessageFor } from "./gallery-commands.js";
 
 const rows = [
-  { id: 1, name: "Anna", awakeSince: null },
-  { id: 2, name: "Bo", awakeSince: new Date() },
+  { id: 1, name: "Anna", awakeSince: null, bornAt: new Date("2026-01-01T00:00:00.000Z") },
+  { id: 2, name: "Bo", awakeSince: new Date(), bornAt: new Date("2026-02-01T00:00:00.000Z") },
 ];
 
 function setup(list = rows) {
-  const brain = { list: vi.fn(async () => list), wake: vi.fn(async () => null), sleep: vi.fn(async () => {}) };
+  const brain = { list: vi.fn(async () => list), wake: vi.fn(async () => null), sleep: vi.fn(async () => {}), kill: vi.fn(async () => null), bringToLife: vi.fn(async () => ({})) };
   const publishGallery = vi.fn();
   const handle = createCommandHandler({ brain, publishGallery, onError: () => {} });
   return { brain, publishGallery, handle };
 }
 
 describe("galleryMessageFor", () => {
-  it("geeft id, naam en of de Dynimo wakker is", () => {
+  it("geeft id, naam, of de Dynimo wakker is en zijn geboortedatum (ISO)", () => {
     expect(galleryMessageFor(rows, [])).toEqual({
       beings: [
-        { id: 1, name: "Anna", awake: false },
-        { id: 2, name: "Bo", awake: true },
+        { id: 1, name: "Anna", awake: false, bornAt: "2026-01-01T00:00:00.000Z" },
+        { id: 2, name: "Bo", awake: true, bornAt: "2026-02-01T00:00:00.000Z" },
       ],
       graves: [],
     });
@@ -60,9 +60,24 @@ describe("createCommandHandler", () => {
     expect(brain.sleep).not.toHaveBeenCalled();
   });
 
+  it("doodt bij kill met id en bevestigde naam en publiceert daarna de Galerij", async () => {
+    const { brain, publishGallery, handle } = setup();
+    await handle({ type: "kill", id: 1, name: "Anna" });
+    expect(brain.kill).toHaveBeenCalledWith(1, "Anna");
+    expect(publishGallery).toHaveBeenCalledTimes(1);
+  });
+
+  it("brengt een nieuwe Dynimo tot leven bij birth en publiceert daarna de Galerij", async () => {
+    const { brain, publishGallery, handle } = setup();
+    await handle({ type: "birth" });
+    expect(brain.bringToLife).toHaveBeenCalledTimes(1);
+    expect(publishGallery).toHaveBeenCalledTimes(1);
+  });
+
   it("doet niets bij ongeldige commando's", async () => {
     const { brain, publishGallery, handle } = setup();
-    for (const bad of [null, "wake", { type: "kill", id: 1 }, { type: "wake", id: "1" }, { type: "wake", id: 1.5 }]) await handle(bad);
+    for (const bad of [null, "wake", { type: "kill", id: 1 }, { type: "wake", id: "1" }, { type: "wake", id: 1.5 }, { type: "kill", id: 1, name: 3 }]) await handle(bad);
+    expect(brain.kill).not.toHaveBeenCalled();
     expect(brain.wake).not.toHaveBeenCalled();
     expect(brain.sleep).not.toHaveBeenCalled();
     expect(publishGallery).not.toHaveBeenCalled();

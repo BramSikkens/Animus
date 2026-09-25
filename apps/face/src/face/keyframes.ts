@@ -89,7 +89,6 @@ export const KEYFRAMES = {
     background: "#3a3a5c",
     brow: { angle: -20, raise: 8 },
   },
-  neutraal: NEUTRAL,
   droevig: {
     eyes: {
       left: { open: 0.55, scale: 0.95, pupilX: 0, pupilY: 4 },

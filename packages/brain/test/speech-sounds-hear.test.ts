@@ -59,7 +59,7 @@ function light() {
   });
 }
 
-async function insertDynimo(emotion: "blij" | "droevig" | "neutraal") {
+async function insertDynimo(emotion: "blij" | "droevig" | "boos", value = 0.9) {
   await db.insert(dynimos).values({
     name: "Vero",
     coreCharacter: "Rustig.",
@@ -73,7 +73,7 @@ async function insertDynimo(emotion: "blij" | "droevig" | "neutraal") {
     axisJp: 0.5,
     axisReactivity: 1,
     axisExpressiveness: 1,
-    moodValues: singleEmotionValues(emotion, 0.9),
+    moodValues: singleEmotionValues(emotion, value),
     moodAt: bornAt,
   });
 }
@@ -176,7 +176,8 @@ describe("hear(): spraakpauzes", () => {
   });
 
   it("laat de tekst ongemoeid bij een emotie zonder pauzes", async () => {
-    await insertDynimo("neutraal");
+    // boos heeft geen pauzes en geen Spraakgeluid; laag genoeg om niet te negeren.
+    await insertDynimo("boos", 0.3);
     const events = await collect(brainWith(twoSentences()).hear("Hallo"));
 
     expect(textOf(events)).toBe(TWO);

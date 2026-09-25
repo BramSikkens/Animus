@@ -33,7 +33,7 @@ export const ARCHETYPES: readonly Archetype[] = [
     name: "Robot",
     description: "Pure logica: precies, droog en zonder omhaal.",
     axes: a(0.3, 0.2, 0.05, 0.1, 0.1, 0.1),
-    baseEmotion: "neutraal",
+    baseEmotion: "kalm",
     speechStyle: "Praat monotoon, exact en feitelijk; geen gevoelstaal, geen uitroepen. Geef antwoorden als korte constateringen of conclusies.",
     voiceHint: "robotachtig, vlak en monotoon, precies",
   },

@@ -1,7 +1,7 @@
 import { desc, eq, isNull } from "drizzle-orm";
 import { EMOTIONS, EMOTION_GROUPS } from "@animus/brain/emotion";
 import { formatAge } from "@animus/brain/age";
-import { moodOfRow } from "@animus/brain/mood";
+import { displayMoodOfRow, moodOfRow } from "@animus/brain/mood";
 import { DRIVE_KINDS, DRIVE_LABELS, type DriveKind } from "@animus/brain/drives";
 import { ARCHETYPES, getArchetype } from "@animus/brain/archetypes";
 import { familiarityStyle } from "@animus/brain/familiarity";
@@ -99,7 +99,7 @@ export default async function DashboardPage() {
               const awake = dynimo.awakeSince !== null;
               const axes = rowAxes(dynimo);
               // Enkel de wakkere Dynimo heeft een levende Stemming.
-              const mood = awake ? moodOfRow(dynimo, new Date()) : null;
+              const mood = awake ? displayMoodOfRow(dynimo, new Date()) : null;
               return (
                 <li key={dynimo.id}>
                   <h3>{dynimo.name}</h3>

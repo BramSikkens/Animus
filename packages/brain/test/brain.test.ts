@@ -28,6 +28,12 @@ const NULL_USAGE = {
 
 const STOP: { unified: "stop"; raw: undefined } = { unified: "stop", raw: undefined };
 
+// Reeks van vaste waarden voor een ingespoten rng, in aanroepvolgorde (Verstand-genesistests).
+function seq(values: number[]): () => number {
+  let i = 0;
+  return () => values[i++] ?? 0;
+}
+
 const MID_AXES = { ie: 0.5, sn: 0.5, tf: 0.5, jp: 0.5 };
 
 const MID_DRIVES = {
@@ -348,6 +354,27 @@ describe("createBrain", () => {
       await brain.bringToLife();
       await collectText(brain.hear("Hallo"));
       expect(contentsByRole(light.doStreamCalls[0]?.prompt, "system").join(" ")).toContain(getArchetype("robot")!.speechStyle);
+    });
+
+    it("rolt Verstand vanuit de richtwaarde van het gekozen archetype", async () => {
+      // eerste 5 random()-aanroepen: Seed (1) + aanbod (4), zoals in de andere genesis-tests hierboven.
+      // random 0 → robot wordt aangeboden en gekozen, geen fallback-aanroep nodig (zie test hierboven).
+      const rng = seq([0, 0, 0, 0, 0, 0.5, 0]); // 6e call: geen 5%-worp (0.5 >= 0.05); 7e call: -volle spreiding
+      const { dynimo } = await genesisWith("robot", rng);
+      expect(dynimo.verstand).toBe(getArchetype("robot")!.verstand - 0.3);
+    });
+
+    it("geeft een volledig willekeurige Verstand bij de 5%-worp", async () => {
+      const rng = seq([0, 0, 0, 0, 0, 0.04, 0.33]); // 6e call: wél de 5%-worp; 7e call: de willekeurige waarde zelf
+      const { dynimo } = await genesisWith("robot", rng);
+      expect(dynimo.verstand).toBe(0.33);
+    });
+
+    it("klemt Verstand op 0..1", async () => {
+      // schattig-wezentje (richtwaarde 0.2) - volle spreiding (-0.3) zou onder 0 komen
+      const rng = seq([0, 0, 0, 0, 0, 0.5, 0]); // 6e call: geen 5%-worp; 7e call: -volle spreiding
+      const { dynimo } = await genesisWith("schattig-wezentje", rng);
+      expect(dynimo.verstand).toBe(0);
     });
   });
 
@@ -1651,7 +1678,7 @@ describe("createBrain", () => {
     ) {
       const [row] = await db
         .insert(dynimos)
-        .values({ name, coreCharacter: `Kern van ${name}.`, birthStory: "Geboren.", seed: "z", bornAt, baseEmotion: "kalm", ...extra })
+        .values({ name, coreCharacter: `Kern van ${name}.`, birthStory: "Geboren.", seed: "z", bornAt, baseEmotion: "kalm", verstand: 0.5, ...extra })
         .returning();
       // Standaard mét Drijfveer, zodat alleen de assen-stap iets te doen heeft.
       if (options.withDrive ?? true) {
@@ -1814,6 +1841,7 @@ describe("createBrain", () => {
           seed: "z",
           bornAt,
           baseEmotion: "kalm",
+          verstand: 0.5,
           awakeSince: awake ? bornAt : null,
         })
         .returning();
@@ -2135,6 +2163,7 @@ describe("createBrain", () => {
           bornAt,
           awakeSince: bornAt,
           baseEmotion: "kalm",
+          verstand: 0.5,
           axisIe: 0.1,
           axisSn: 0.5,
           axisTf: 0.5,
@@ -2560,6 +2589,34 @@ describe("createBrain", () => {
         expect((await db.select().from(dynimos))[0]?.baseEmotion).toBe("bang");
       });
     });
+
+    describe("backfill van Verstand", () => {
+      const noopBrain = () => brainWith({ type1: type1Model(), light: unusedModel() });
+
+      it("vult Verstand vanuit de richtwaarde van het archetype", async () => {
+        await insertDynimo({ archetype: "professor", verstand: null });
+
+        expect(await noopBrain().backfill()).toBe(1);
+
+        expect((await db.select().from(dynimos))[0]?.verstand).toBe(getArchetype("professor")!.verstand);
+      });
+
+      it("gebruikt 0.5 zonder archetype", async () => {
+        await insertDynimo({ archetype: null, verstand: null });
+
+        expect(await noopBrain().backfill()).toBe(1);
+
+        expect((await db.select().from(dynimos))[0]?.verstand).toBe(0.5);
+      });
+
+      it("overschrijft nooit een bestaande waarde", async () => {
+        await insertDynimo({ archetype: "professor", verstand: 0.1 });
+
+        expect(await noopBrain().backfill()).toBe(0);
+
+        expect((await db.select().from(dynimos))[0]?.verstand).toBe(0.1);
+      });
+    });
   });
 
   describe("Indruk", () => {
@@ -2629,6 +2686,7 @@ describe("createBrain", () => {
     const reflection = (over: Record<string, unknown> = {}, driveOps: Record<string, unknown> = {}) => ({
       evolvedCharacter: "Wat rustiger geworden.",
       axisShifts: { ie: 0, sn: 0, tf: 0, jp: 0, reactivity: 0, expressiveness: 0 },
+      verstandShift: 0,
       drives: { ...noOps, ...driveOps },
       wakeMood: { emotion: "kalm", intensity: 0.4 },
       dream: null, // strikte structured output: key verplicht, null = geen Droom
@@ -2807,6 +2865,64 @@ describe("createBrain", () => {
       const row = await rowOf(vero.id);
       expect([row.axisIe, row.axisSn, row.axisTf, row.axisJp]).toEqual([null, null, null, null]);
       expect(row.evolvedCharacter).toBe("Wat rustiger geworden.");
+    });
+
+    it("groeit Verstand hoogstens +0.02 per Reflectie (bij slapen)", async () => {
+      const vero = await insertDynimo({ verstand: 0.5 });
+      await addMemory(vero.id, "iets", 1);
+
+      await brainWith(heavyReturning(reflection({ verstandShift: 1 }))).sleep();
+
+      const row = await rowOf(vero.id);
+      expect(row.verstand).toBeCloseTo(0.52, 5);
+    });
+
+    it("laat een negatieve Verstand-verschuiving ongemoeid", async () => {
+      const vero = await insertDynimo({ verstand: 0.5 });
+      await addMemory(vero.id, "iets", 1);
+
+      await brainWith(heavyReturning(reflection({ verstandShift: -0.3 }))).sleep();
+
+      const row = await rowOf(vero.id);
+      expect(row.verstand).toBeCloseTo(0.5, 5);
+    });
+
+    it("laat een leeg Verstand leeg na een Reflectie", async () => {
+      const vero = await insertDynimo({ verstand: null });
+      await addMemory(vero.id, "iets", 1);
+
+      await brainWith(heavyReturning(reflection({ verstandShift: 0.02 }))).sleep();
+
+      const row = await rowOf(vero.id);
+      expect(row.verstand).toBeNull();
+    });
+
+    it("groeit Verstand ook bij een Reflectie door stilte", async () => {
+      const vero = await insertDynimo({ verstand: 0.5, awakeSince: bornAt });
+      await addMemory(vero.id, "iets", 1);
+
+      await brainWith(heavyReturning(reflection({ verstandShift: 0.02 }))).reflect();
+
+      const row = await rowOf(vero.id);
+      expect(row.verstand).toBeCloseTo(0.52, 5);
+    });
+
+    it("zet het huidige Verstand in de Reflectie-prompt, of '(nog niet bepaald)' als het leeg is", async () => {
+      const vero = await insertDynimo({ verstand: 0.42 });
+      await addMemory(vero.id, "iets", 1);
+      const heavy = heavyReturning(reflection());
+
+      await brainWith(heavy).sleep();
+
+      expect(JSON.stringify(heavy.doGenerateCalls[0]?.prompt)).toContain("Verstand: 0.42");
+
+      const zonder = await insertDynimo({ verstand: null });
+      await addMemory(zonder.id, "iets", 1);
+      const heavyZonder = heavyReturning(reflection());
+
+      await brainWith(heavyZonder).sleep();
+
+      expect(JSON.stringify(heavyZonder.doGenerateCalls[0]?.prompt)).toContain("Verstand: (nog niet bepaald)");
     });
 
     it("voegt een Drijfveer toe", async () => {
@@ -3670,6 +3786,14 @@ describe("createBrain", () => {
           axisReactivity: professor.axes.reactivity,
           axisExpressiveness: professor.axes.expressiveness,
         });
+      });
+
+      it("zet ook Verstand op de richtwaarde van het nieuwe archetype (zonder spreiding)", async () => {
+        const vero = await insertDynimo({ verstand: 0.2 });
+
+        await brainWith().setArchetype(vero.id, "professor");
+
+        expect((await rowOf(vero.id)).verstand).toBeCloseTo(getArchetype("professor")!.verstand);
       });
 
       it("geeft false bij een onbekende Dynimo of een onbekend archetype en wijzigt niets", async () => {

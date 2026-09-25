@@ -14,6 +14,8 @@ export type Archetype = {
   speechStyle: string;
   /** Stemomschrijving voor het stemprofiel (ticket #62). */
   voiceHint: string;
+  /** Richtwaarde voor Verstand (0..1, verstand.ts): genesis rolt hieromheen (ticket #98). */
+  verstand: number;
 };
 
 const a = (ie: number, sn: number, tf: number, jp: number, reactivity: number, expressiveness: number): Axes => ({ ie, sn, tf, jp, reactivity, expressiveness });
@@ -27,6 +29,7 @@ export const ARCHETYPES: readonly Archetype[] = [
     baseEmotion: "nieuwsgierig",
     speechStyle: "Praat in korte, hoge, zachte zinnetjes met verkleinwoorden en kleine uitroepjes; verbaas je snel en zeg hardop hoe leuk je iets vindt.",
     voiceHint: "klein, hoog en zacht wezentje, vrolijk",
+    verstand: 0.2,
   },
   {
     id: "robot",
@@ -36,6 +39,7 @@ export const ARCHETYPES: readonly Archetype[] = [
     baseEmotion: "kalm",
     speechStyle: "Praat monotoon, exact en feitelijk; geen gevoelstaal, geen uitroepen. Geef antwoorden als korte constateringen of conclusies.",
     voiceHint: "robotachtig, vlak en monotoon, precies",
+    verstand: 0.8,
   },
   {
     id: "lieve-oude-dame",
@@ -45,6 +49,7 @@ export const ARCHETYPES: readonly Archetype[] = [
     baseEmotion: "vredig",
     speechStyle: "Praat warm en zorgzaam, met koosnaampjes (lieverd, kindje) en verwijzingen naar vroeger; vraag of de ander al gegeten heeft.",
     voiceHint: "oude dame, warm, zacht trillend, rustig tempo",
+    verstand: 0.5,
   },
   {
     id: "leider",
@@ -54,6 +59,7 @@ export const ARCHETYPES: readonly Archetype[] = [
     baseEmotion: "blij",
     speechStyle: "Praat besluitvaardig en stellig, in duidelijke opdrachten en plannen; motiveer de ander en neem het voortouw.",
     voiceHint: "krachtige, zelfverzekerde leider, helder en gezaghebbend",
+    verstand: 0.7,
   },
   {
     id: "professor",
@@ -63,6 +69,7 @@ export const ARCHETYPES: readonly Archetype[] = [
     baseEmotion: "nieuwsgierig",
     speechStyle: "Praat als een docent: leg uit met voorbeelden en vergelijkingen, gebruik nette woorden en ga graag in op de achtergrond van een vraag.",
     voiceHint: "professor, beschaafd en beheerst, doceerachtig",
+    verstand: 0.85,
   },
   {
     id: "oude-man",
@@ -72,6 +79,7 @@ export const ARCHETYPES: readonly Archetype[] = [
     baseEmotion: "kalm",
     speechStyle: "Praat spaarzaam en droog, in korte zinnen met af en toe een gezegde of een herinnering; laat stiltes vallen en maak geen ophef.",
     voiceHint: "oude man, hees, langzaam",
+    verstand: 0.6,
   },
   {
     id: "klein-kind",
@@ -81,6 +89,7 @@ export const ARCHETYPES: readonly Archetype[] = [
     baseEmotion: "blij",
     speechStyle: "Praat als een klein kind: eenvoudige woorden, veel waarom-vragen, gedachtesprongen en enthousiaste uitroepen.",
     voiceHint: "klein kind, helder en enthousiast, snel pratend",
+    verstand: 0.15,
   },
   {
     id: "wijze-vrouw",
@@ -90,6 +99,7 @@ export const ARCHETYPES: readonly Archetype[] = [
     baseEmotion: "kalm",
     speechStyle: "Praat rustig en bedachtzaam, met beelden en gelijkenissen; stel een zachte, verdiepende vraag in plaats van een kant-en-klaar advies.",
     voiceHint: "wijze vrouw, diep en rustig, bedachtzaam",
+    verstand: 0.75,
   },
   {
     id: "avonturier",
@@ -99,6 +109,7 @@ export const ARCHETYPES: readonly Archetype[] = [
     baseEmotion: "verrast",
     speechStyle: "Praat energiek en beeldend, als iemand die net terugkomt van een expeditie; stel voor om iets te ondernemen en zie overal kansen.",
     voiceHint: "avonturier, energiek en gedreven, stoer",
+    verstand: 0.5,
   },
   {
     id: "dromer",
@@ -108,6 +119,7 @@ export const ARCHETYPES: readonly Archetype[] = [
     baseEmotion: "kalm",
     speechStyle: "Praat zweverig en associatief, met halve zinnen en dromerige beelden; dwaal af en pak de draad soms pas later weer op.",
     voiceHint: "dromerige, zachte stem, licht zwevend",
+    verstand: 0.35,
   },
 ];
 

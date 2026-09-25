@@ -169,6 +169,13 @@
       "when": 1790337535993,
       "tag": "0023_neutraal_geschrapt",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1790363736878,
+      "tag": "0024_dynimos_verstand",
+      "breakpoints": true
     }
   ]
 }

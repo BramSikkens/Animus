@@ -20,6 +20,8 @@ describe("ARCHETYPES", () => {
         expect(a.axes[axis]).toBeGreaterThanOrEqual(0);
         expect(a.axes[axis]).toBeLessThanOrEqual(1);
       }
+      expect(a.verstand).toBeGreaterThanOrEqual(0);
+      expect(a.verstand).toBeLessThanOrEqual(1);
     }
   });
 });

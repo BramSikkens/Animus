@@ -28,6 +28,12 @@ const NULL_USAGE = {
 
 const STOP: { unified: "stop"; raw: undefined } = { unified: "stop", raw: undefined };
 
+// Reeks van vaste waarden voor een ingespoten rng, in aanroepvolgorde (Verstand-genesistests).
+function seq(values: number[]): () => number {
+  let i = 0;
+  return () => values[i++] ?? 0;
+}
+
 const MID_AXES = { ie: 0.5, sn: 0.5, tf: 0.5, jp: 0.5 };
 
 const MID_DRIVES = {
@@ -348,6 +354,27 @@ describe("createBrain", () => {
       await brain.bringToLife();
       await collectText(brain.hear("Hallo"));
       expect(contentsByRole(light.doStreamCalls[0]?.prompt, "system").join(" ")).toContain(getArchetype("robot")!.speechStyle);
+    });
+
+    it("rolt Verstand vanuit de richtwaarde van het gekozen archetype", async () => {
+      // eerste 5 random()-aanroepen: Seed (1) + aanbod (4), zoals in de andere genesis-tests hierboven.
+      // random 0 → robot wordt aangeboden en gekozen, geen fallback-aanroep nodig (zie test hierboven).
+      const rng = seq([0, 0, 0, 0, 0, 0.5, 0]); // 6e call: geen 5%-worp (0.5 >= 0.05); 7e call: -volle spreiding
+      const { dynimo } = await genesisWith("robot", rng);
+      expect(dynimo.verstand).toBe(getArchetype("robot")!.verstand - 0.3);
+    });
+
+    it("geeft een volledig willekeurige Verstand bij de 5%-worp", async () => {
+      const rng = seq([0, 0, 0, 0, 0, 0.04, 0.33]); // 6e call: wél de 5%-worp; 7e call: de willekeurige waarde zelf
+      const { dynimo } = await genesisWith("robot", rng);
+      expect(dynimo.verstand).toBe(0.33);
+    });
+
+    it("klemt Verstand op 0..1", async () => {
+      // schattig-wezentje (richtwaarde 0.2) - volle spreiding (-0.3) zou onder 0 komen
+      const rng = seq([0, 0, 0, 0, 0, 0.5, 0]); // 6e call: geen 5%-worp; 7e call: -volle spreiding
+      const { dynimo } = await genesisWith("schattig-wezentje", rng);
+      expect(dynimo.verstand).toBe(0);
     });
   });
 
@@ -1651,7 +1678,7 @@ describe("createBrain", () => {
     ) {
       const [row] = await db
         .insert(dynimos)
-        .values({ name, coreCharacter: `Kern van ${name}.`, birthStory: "Geboren.", seed: "z", bornAt, baseEmotion: "kalm", ...extra })
+        .values({ name, coreCharacter: `Kern van ${name}.`, birthStory: "Geboren.", seed: "z", bornAt, baseEmotion: "kalm", verstand: 0.5, ...extra })
         .returning();
       // Standaard mét Drijfveer, zodat alleen de assen-stap iets te doen heeft.
       if (options.withDrive ?? true) {
@@ -1814,6 +1841,7 @@ describe("createBrain", () => {
           seed: "z",
           bornAt,
           baseEmotion: "kalm",
+          verstand: 0.5,
           awakeSince: awake ? bornAt : null,
         })
         .returning();
@@ -2135,6 +2163,7 @@ describe("createBrain", () => {
           bornAt,
           awakeSince: bornAt,
           baseEmotion: "kalm",
+          verstand: 0.5,
           axisIe: 0.1,
           axisSn: 0.5,
           axisTf: 0.5,
@@ -2558,6 +2587,34 @@ describe("createBrain", () => {
         expect(await brainWith({ type1: type1Model(), light: unusedModel(), heavy }).backfill()).toBe(0);
 
         expect((await db.select().from(dynimos))[0]?.baseEmotion).toBe("bang");
+      });
+    });
+
+    describe("backfill van Verstand", () => {
+      const noopBrain = () => brainWith({ type1: type1Model(), light: unusedModel() });
+
+      it("vult Verstand vanuit de richtwaarde van het archetype", async () => {
+        await insertDynimo({ archetype: "professor", verstand: null });
+
+        expect(await noopBrain().backfill()).toBe(1);
+
+        expect((await db.select().from(dynimos))[0]?.verstand).toBe(getArchetype("professor")!.verstand);
+      });
+
+      it("gebruikt 0.5 zonder archetype", async () => {
+        await insertDynimo({ archetype: null, verstand: null });
+
+        expect(await noopBrain().backfill()).toBe(1);
+
+        expect((await db.select().from(dynimos))[0]?.verstand).toBe(0.5);
+      });
+
+      it("overschrijft nooit een bestaande waarde", async () => {
+        await insertDynimo({ archetype: "professor", verstand: 0.1 });
+
+        expect(await noopBrain().backfill()).toBe(0);
+
+        expect((await db.select().from(dynimos))[0]?.verstand).toBe(0.1);
       });
     });
   });

@@ -3,6 +3,17 @@
 
 export type VerstandBand = "sterk-laag" | "laag" | "midden" | "hoog" | "sterk-hoog";
 
+/** Genesis-worp (spec #98): meestal richtwaarde ± spreiding, zelden (VERSTAND_WILD_CHANCE) volledig willekeurig. */
+export const VERSTAND_SPREAD = 0.3;
+export const VERSTAND_WILD_CHANCE = 0.05;
+
+/** Rolt Verstand bij genesis vanuit de richtwaarde van het gekozen Archetype, geklemd op 0..1. */
+export function rollVerstand(richtwaarde: number, random: () => number): number {
+  if (random() < VERSTAND_WILD_CHANCE) return random();
+  const value = richtwaarde + (random() * 2 - 1) * VERSTAND_SPREAD;
+  return Math.min(1, Math.max(0, value));
+}
+
 /** Zelfde bandgrenzen als de Persoonlijkheidsassen (personality.ts); null (nog te backfillen) valt in het midden. */
 export function verstandBand(verstand: number | null): VerstandBand {
   if (verstand === null) return "midden";

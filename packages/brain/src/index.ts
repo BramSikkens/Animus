@@ -30,7 +30,7 @@ import { applyDeltas, baseEmotionOf, currentMood, moodOfRow, singleEmotionValues
 import { isVisibleMoodChange, soundKindFor, type SoundKind } from "./sound.js";
 import { FAMILIARITY_POSITIVE_DELTA, familiarityStyle, updateFamiliarity } from "./familiarity.js";
 import { AXIS_DESCRIPTIONS, type Axes, axisGuidelines, mbtiType, rowAxes } from "./personality.js";
-import { tempersAxisRules, verstandGuidelines } from "./verstand.js";
+import { rollVerstand, tempersAxisRules, verstandGuidelines } from "./verstand.js";
 import { EMOTIONS, oppositeOf, type Emotion } from "./emotion.js";
 import { SEEDS } from "./seeds.js";
 import { createTools } from "./tools.js";
@@ -465,6 +465,8 @@ export function createBrain(deps: {
     // Enkel een aangeboden archetype telt; anders kiest de rng er een uit het aanbod.
     const archetype = offer.find((candidate) => candidate.id === result.output.archetype) ?? offer[Math.floor(random() * offer.length)]!;
     const { axes } = archetype;
+    // Verstand-worp (ticket #98): ná alle bovenstaande random()-aanroepen, zodat hun volgorde ongewijzigd blijft.
+    const verstand = rollVerstand(archetype.verstand, random);
     return {
       dynimo: {
         name: result.output.name,
@@ -478,6 +480,7 @@ export function createBrain(deps: {
         axisJp: axes.jp,
         axisReactivity: axes.reactivity,
         axisExpressiveness: axes.expressiveness,
+        verstand,
         seed,
         bornAt: now(),
       },
@@ -840,6 +843,20 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
           .update(dynimos)
           .set({ baseEmotion: output.baseEmotion })
           .where(and(eq(dynimos.id, row.id), isNull(dynimos.baseEmotion)))
+          .returning({ id: dynimos.id });
+        return updated.length > 0;
+      },
+    },
+    {
+      // Geen LLM-call: de richtwaarde van het archetype (zonder spreiding), of 0.5 zonder archetype (ticket #98).
+      isMissing: async (row) => row.verstand === null,
+      fill: async (row) => {
+        const verstand = getArchetype(row.archetype)?.verstand ?? 0.5;
+        // Race-veilig: enkel schrijven als een andere instantie er niet al Verstand op gezet heeft.
+        const updated = await deps.db
+          .update(dynimos)
+          .set({ verstand })
+          .where(and(eq(dynimos.id, row.id), isNull(dynimos.verstand)))
           .returning({ id: dynimos.id });
         return updated.length > 0;
       },

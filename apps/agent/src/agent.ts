@@ -544,6 +544,11 @@ export default defineAgent<AgentUserData>({
       onMood: () => void publishState(),
       onNotify: () => void publishGallery(),
       onVoice: () => void readState(brain).then((state) => applyVoice(state.voice)).catch(() => {}),
+      // Personen samengevoegd/verwijderd/opnieuw geleerd (#95): Stemprofielen en de gezien-bijhouding zijn verouderd.
+      onPersons: () => {
+        void speakerRecognition?.speakerId.reload().catch(() => {});
+        faces.reset();
+      },
       onChange: (state) => {
         applyVoice(state.voice);
         // Een wissel beëindigt het reflecterende gezicht; een lopende Reflectie mag doorlopen maar publiceert

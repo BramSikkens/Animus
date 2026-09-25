@@ -32,17 +32,27 @@ export default async function PersonenPage() {
                   <input name="name" placeholder="Nieuwe naam" aria-label="Nieuwe naam" defaultValue={person.name} required />
                 </ActionForm>
                 {persons.length > 1 && (
-                  <ActionForm action={mergePersons} label="Samenvoegen" pendingLabel="Voegt samen…" id={person.id}>
-                    <select name="removeId" aria-label="Samenvoegen met">
+                  <details>
+                    <summary>Samenvoegen in…</summary>
+                    <ul>
                       {persons
                         .filter((other) => other.id !== person.id)
                         .map((other) => (
-                          <option key={other.id} value={other.id}>
-                            {other.name}
-                          </option>
+                          <li key={other.id}>
+                            {/* Richting expliciet in het label: {person.name} (removeId) verdwijnt in {other.name} (keepId). */}
+                            <ActionForm
+                              action={mergePersons}
+                              label={`Voeg ${person.name} samen in ${other.name} — ${person.name} verdwijnt`}
+                              pendingLabel="Voegt samen…"
+                              id={other.id}
+                              confirmName
+                            >
+                              <input type="hidden" name="removeId" value={person.id} />
+                            </ActionForm>
+                          </li>
                         ))}
-                    </select>
-                  </ActionForm>
+                    </ul>
+                  </details>
                 )}
                 <ActionForm action={relearnPerson} label="Opnieuw leren" pendingLabel="Wist…" id={person.id} />
                 {!person.owner && <ActionForm action={deletePerson} label="Verwijderen" pendingLabel="Verwijdert…" id={person.id} confirmName />}

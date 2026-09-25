@@ -1,15 +1,28 @@
 // Personen-beheer voor het dashboard (#95, ADR-0020): hernoemen, samenvoegen, verwijderen, opnieuw leren.
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
+import postgres from "postgres";
 import { MockEmbeddingModelV4, MockLanguageModelV4, Experimental_EvaluationMockModelV4 } from "ai/test";
 import { dynimos, EMBEDDING_DIMENSIONS, faceEmbeddings, familiarities, memories, persons, voiceProfiles } from "@animus/db/schema";
 import { EMOTIONS } from "../src/emotion.js";
-import { createBrain } from "../src/index.js";
-import { createTestDb, truncateAll } from "./db.js";
+import { createBrain, STATE_CHANNEL } from "../src/index.js";
+import { createTestDb, databaseUrl, TEST_DB_NAME, truncateAll } from "./db.js";
 
 const db = createTestDb();
 const bornAt = new Date("2026-01-01T12:00:00.000Z");
 const now = new Date("2026-06-15T12:00:00.000Z");
+
+// Zoals brain.test.ts "toestandsnotificaties": aparte connectie, want Postgres levert pas na commit.
+async function listenState() {
+  const client = postgres(databaseUrl(TEST_DB_NAME), { onnotice: () => {} });
+  const received: string[] = [];
+  await client.listen(STATE_CHANNEL, (payload) => received.push(payload));
+  const settle = async () => {
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    return received;
+  };
+  return { settle, close: () => client.end() };
+}
 
 beforeEach(async () => {
   await truncateAll(db);
@@ -124,7 +137,7 @@ describe("deletePerson (#95)", () => {
     await insertVoiceProfile(anna.id, now);
     const memory = await insertMemory(vero.id, anna.id);
 
-    expect(await brain().deletePerson(anna.id)).toBe(true);
+    expect(await brain().deletePerson(anna.id, "Anna")).toBe(true);
 
     expect(await db.select().from(persons).where(eq(persons.id, anna.id))).toHaveLength(0);
     expect(await db.select().from(faceEmbeddings).where(eq(faceEmbeddings.personId, anna.id))).toHaveLength(0);
@@ -133,14 +146,42 @@ describe("deletePerson (#95)", () => {
     expect(remainingMemory!.personId).toBeNull();
   });
 
-  it("false voor de eigenaar; niets wordt verwijderd", async () => {
+  it("false bij een foute naam; niets wordt verwijderd (zoals kill)", async () => {
+    const anna = await insertPerson("Anna");
+    expect(await brain().deletePerson(anna.id, "Ana")).toBe(false);
+    expect(await db.select().from(persons).where(eq(persons.id, anna.id))).toHaveLength(1);
+  });
+
+  it("false voor de eigenaar, ook met de juiste naam; niets wordt verwijderd", async () => {
     const owner = await insertPerson("eigenaar", { owner: true });
-    expect(await brain().deletePerson(owner.id)).toBe(false);
+    expect(await brain().deletePerson(owner.id, "eigenaar")).toBe(false);
     expect(await db.select().from(persons).where(eq(persons.id, owner.id))).toHaveLength(1);
   });
 
   it("false bij een onbekende id", async () => {
-    expect(await brain().deletePerson(999)).toBe(false);
+    expect(await brain().deletePerson(999, "wie dan ook")).toBe(false);
+  });
+
+  it("meldt \"persons:\" op het toestandskanaal bij succes", async () => {
+    const anna = await insertPerson("Anna");
+    const listener = await listenState();
+    try {
+      expect(await brain().deletePerson(anna.id, "Anna")).toBe(true);
+      expect(await listener.settle()).toEqual(["persons:"]);
+    } finally {
+      await listener.close();
+    }
+  });
+
+  it("meldt niets op het toestandskanaal bij een foute naam", async () => {
+    const anna = await insertPerson("Anna");
+    const listener = await listenState();
+    try {
+      expect(await brain().deletePerson(anna.id, "Fout")).toBe(false);
+      expect(await listener.settle()).toEqual([]);
+    } finally {
+      await listener.close();
+    }
   });
 });
 
@@ -165,6 +206,27 @@ describe("relearnPerson (#95)", () => {
 
   it("false bij een onbekende id", async () => {
     expect(await brain().relearnPerson(999)).toBe(false);
+  });
+
+  it("meldt \"persons:\" op het toestandskanaal bij succes", async () => {
+    const anna = await insertPerson("Anna");
+    const listener = await listenState();
+    try {
+      expect(await brain().relearnPerson(anna.id)).toBe(true);
+      expect(await listener.settle()).toEqual(["persons:"]);
+    } finally {
+      await listener.close();
+    }
+  });
+
+  it("meldt niets op het toestandskanaal bij een onbekende id", async () => {
+    const listener = await listenState();
+    try {
+      expect(await brain().relearnPerson(999)).toBe(false);
+      expect(await listener.settle()).toEqual([]);
+    } finally {
+      await listener.close();
+    }
   });
 });
 
@@ -260,5 +322,29 @@ describe("mergePersons (#95)", () => {
 
     const [row] = await db.select().from(persons).where(eq(persons.id, owner.id));
     expect(row!.owner).toBe(true);
+  });
+
+  it("meldt \"persons:\" op het toestandskanaal bij succes", async () => {
+    const anna = await insertPerson("Anna");
+    const anna2 = await insertPerson("Anna2");
+    const listener = await listenState();
+    try {
+      expect(await brain().mergePersons(anna.id, anna2.id)).toBe(true);
+      expect(await listener.settle()).toEqual(["persons:"]);
+    } finally {
+      await listener.close();
+    }
+  });
+
+  it("meldt niets op het toestandskanaal bij gelijke of onbekende ids", async () => {
+    const anna = await insertPerson("Anna");
+    const listener = await listenState();
+    try {
+      expect(await brain().mergePersons(anna.id, anna.id)).toBe(false);
+      expect(await brain().mergePersons(anna.id, 999)).toBe(false);
+      expect(await listener.settle()).toEqual([]);
+    } finally {
+      await listener.close();
+    }
   });
 });

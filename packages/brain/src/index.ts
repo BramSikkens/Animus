@@ -61,6 +61,9 @@ export type Dynimo = typeof dynimos.$inferSelect;
 
 export type Epitaph = typeof epitaphs.$inferSelect;
 
+/** Dashboard (#95): één rij van `listPersons()`. */
+export type PersonSummary = { id: number; name: string; owner: boolean; createdAt: Date; faceCount: number; voiceCount: number; memoryCount: number };
+
 export type Type2Models = { light: LanguageModel; heavy: LanguageModel };
 
 export type Brain = {
@@ -124,19 +127,26 @@ export type Brain = {
   /** Dashboard-override: verwijdert een Herinnering hard, enkel als die van deze Dynimo is. False als er niets verwijderd is. */
   removeMemory(id: number, memoryId: number): Promise<boolean>;
   /** Dashboard (#95): alle Personen met hun aantal gezichts-/stemprofielen en Herinneringen; eigenaar eerst, dan op aanmaakdatum. */
-  listPersons(): Promise<{ id: number; name: string; owner: boolean; createdAt: Date; faceCount: number; voiceCount: number; memoryCount: number }[]>;
+  listPersons(): Promise<PersonSummary[]>;
   /** Dashboard (#95): hernoemt een Persoon (zelfde naamvalidatie als leerKennen). False bij een ongeldige naam of een onbekende id; de eigenaar mag ook hernoemd worden. */
   renamePerson(id: number, name: string): Promise<boolean>;
   /**
    * Dashboard (#95): voegt removeId samen in keepId. Herinneringen en embeddings (gezicht + stem) verhuizen, per
    * soort blijven daarna hoogstens 5 over (de nieuwste). Per Dynimo blijft de hoogste Vertrouwdheid van beide
    * Personen over op keepId. Is removeId de eigenaar, dan gaat de owner-vlag naar keepId. False bij gelijke of
-   * onbekende ids.
+   * onbekende ids. Meldt "persons:" op het toestandskanaal (#95): de agent herlaadt zijn stemprofielen en gezichten.
    */
   mergePersons(keepId: number, removeId: number): Promise<boolean>;
-  /** Dashboard (#95): verwijdert een Persoon; embeddings/stemprofielen cascaden weg, Herinneringen blijven zonder Persoon. False bij de eigenaar of een onbekende id. */
-  deletePerson(id: number): Promise<boolean>;
-  /** Dashboard (#95): wist gezichts-embeddings en Stemprofielen van een Persoon; de Persoon blijft. False bij een onbekende id. */
+  /**
+   * Dashboard (#95): verwijdert een Persoon, enkel als `confirmedName` exact zijn naam is (zoals `kill`).
+   * Embeddings/stemprofielen cascaden weg, Herinneringen blijven zonder Persoon. False bij de eigenaar, een foute
+   * naam of een onbekende id. Meldt "persons:" op het toestandskanaal bij succes.
+   */
+  deletePerson(id: number, confirmedName: string): Promise<boolean>;
+  /**
+   * Dashboard (#95): wist gezichts-embeddings en Stemprofielen van een Persoon; de Persoon blijft. False bij een
+   * onbekende id. Meldt "persons:" op het toestandskanaal bij succes.
+   */
   relearnPerson(id: number): Promise<boolean>;
   /**
    * Initiatief-check (Type1): wil de wakkere Dynimo nu uit zichzelf iets zeggen? Geeft een instructie voor het
@@ -1176,7 +1186,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
   }
 
   /** Dashboard (#95): alle Personen met hun aantal gezichts-/stemprofielen en Herinneringen; eigenaar eerst, dan op aanmaakdatum. */
-  async function listPersons(): Promise<{ id: number; name: string; owner: boolean; createdAt: Date; faceCount: number; voiceCount: number; memoryCount: number }[]> {
+  async function listPersons(): Promise<PersonSummary[]> {
     const rows = await deps.db.select().from(persons).orderBy(desc(persons.owner), asc(persons.createdAt));
     const [faceCounts, voiceCounts, memoryCounts] = await Promise.all([
       deps.db.select({ personId: faceEmbeddings.personId, count: sql<number>`count(*)` }).from(faceEmbeddings).groupBy(faceEmbeddings.personId),
@@ -1261,24 +1271,32 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
 
       await tx.delete(persons).where(eq(persons.id, removeId));
       if (remove.owner) await tx.update(persons).set({ owner: true }).where(eq(persons.id, keepId));
+      // Payload "persons:" (zoals "mood:"/"voice:"): de agent herlaadt zijn Stemprofielen en gezichten (#95).
+      await notifyStateChange(tx, "persons:");
       return true;
     });
   }
 
-  /** Dashboard (#95): verwijdert een Persoon; embeddings/stemprofielen cascaden weg, Herinneringen blijven zonder Persoon (set null). False bij de eigenaar of een onbekende id. */
-  async function deletePerson(id: number): Promise<boolean> {
-    const [row] = await deps.db.select({ owner: persons.owner }).from(persons).where(eq(persons.id, id));
-    if (!row || row.owner) return false;
-    const result = await deps.db.delete(persons).where(eq(persons.id, id)).returning({ id: persons.id });
-    return result.length > 0;
+  /**
+   * Dashboard (#95): verwijdert een Persoon, enkel als `confirmedName` exact zijn naam is (zoals `kill`). Embeddings/
+   * stemprofielen cascaden weg, Herinneringen blijven zonder Persoon (set null). False bij de eigenaar, een foute
+   * naam of een onbekende id.
+   */
+  async function deletePerson(id: number, confirmedName: string): Promise<boolean> {
+    // Naam vergelijken met de rij in de database, niet met wat de aanroeper meent (zoals kill).
+    const [row] = await deps.db.select({ name: persons.name, owner: persons.owner }).from(persons).where(eq(persons.id, id));
+    if (!row || row.owner || confirmedName !== row.name) return false;
+    return deps.db.transaction(async (tx) => {
+      const result = await tx.delete(persons).where(eq(persons.id, id)).returning({ id: persons.id });
+      if (result.length === 0) return false;
+      await notifyStateChange(tx, "persons:");
+      return true;
+    });
   }
 
   /**
    * Dashboard (#95): wist gezichts-embeddings en Stemprofielen van een Persoon; de Persoon (en zijn Herinneringen,
    * Vertrouwdheid) blijft. False bij een onbekende id.
-   * ponytail: de agent laadt Stemprofielen bij het opstarten en na een inschrijving; een al draaiende agent kan
-   * hierna tijdelijk met een verouderde lijst blijven werken. Upgradepad: een NOTIFY-kanaal zoals STATE_CHANNEL, als
-   * dat ooit echt stoort.
    */
   async function relearnPerson(id: number): Promise<boolean> {
     const [row] = await deps.db.select({ id: persons.id }).from(persons).where(eq(persons.id, id));
@@ -1286,6 +1304,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     await deps.db.transaction(async (tx) => {
       await tx.delete(faceEmbeddings).where(eq(faceEmbeddings.personId, id));
       await tx.delete(voiceProfilesTable).where(eq(voiceProfilesTable.personId, id));
+      await notifyStateChange(tx, "persons:");
     });
     return true;
   }
@@ -1341,13 +1360,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
   async function addVoiceProfile(personId: number, profile: Uint8Array): Promise<void> {
     await deps.db.transaction(async (tx) => {
       await tx.insert(voiceProfilesTable).values({ personId, profile });
-      const rows = await tx
-        .select({ id: voiceProfilesTable.id })
-        .from(voiceProfilesTable)
-        .where(eq(voiceProfilesTable.personId, personId))
-        .orderBy(desc(voiceProfilesTable.createdAt), desc(voiceProfilesTable.id));
-      const excess = rows.slice(MAX_VOICE_PROFILES);
-      if (excess.length) await tx.delete(voiceProfilesTable).where(inArray(voiceProfilesTable.id, excess.map((row) => row.id)));
+      await trimVoiceProfiles(tx, personId);
     });
   }
 

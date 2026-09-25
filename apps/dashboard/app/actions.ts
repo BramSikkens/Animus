@@ -10,10 +10,7 @@ import { parseVerstand } from "@animus/brain/verstand";
 import { adoptVoice, cloneVoice, designVoice, saveDesignedVoice, type DesignPreview } from "@animus/brain/voice-design";
 import { parseVoice, speechProvider, voiceInputError } from "@animus/brain/voice";
 import { unusableVoiceError } from "@animus/brain/voice-catalog";
-import { eq } from "drizzle-orm";
-import { persons } from "@animus/db/schema";
 import { getBrain } from "../lib/brain";
-import { db } from "../lib/db";
 import { getCatalog } from "../lib/voice-catalog";
 
 export type ActionState = { error?: string };
@@ -182,11 +179,16 @@ export async function renamePerson(_prev: ActionState, formData: FormData): Prom
   }, "/personen");
 }
 
+// Bevestiging zoals bij verwijderen: de exacte naam van de Persoon die verdwijnt (removeId), vóór het samenvoegen.
 export async function mergePersons(_prev: ActionState, formData: FormData): Promise<ActionState> {
   return run(async () => {
     const keepId = parseId(formData);
     const removeId = Number(formData.get("removeId"));
     if (keepId === null || !Number.isInteger(removeId) || removeId <= 0) return INVALID_PERSON;
+    const remove = (await getBrain().listPersons()).find((person) => person.id === removeId);
+    if (!remove || remove.name !== String(formData.get("name") ?? "")) {
+      return "De naam klopt niet (of de Persoon bestaat niet meer). Er is niets samengevoegd.";
+    }
     if (!(await getBrain().mergePersons(keepId, removeId))) return "Kan deze twee Personen niet samenvoegen.";
   }, "/personen");
 }
@@ -199,16 +201,15 @@ export async function relearnPerson(_prev: ActionState, formData: FormData): Pro
   }, "/personen");
 }
 
-// Zoals kill(): de exacte naam ter bevestiging. deletePerson() kent zelf geen naam-parameter, dus de check gebeurt hier.
+// Zoals kill(): de exacte naam ter bevestiging; de check gebeurt in de brain.
 export async function deletePerson(_prev: ActionState, formData: FormData): Promise<ActionState> {
   return run(async () => {
     const id = parseId(formData);
     if (id === null) return INVALID_PERSON;
-    const [person] = await db.select({ name: persons.name }).from(persons).where(eq(persons.id, id));
-    if (!person || person.name !== String(formData.get("name") ?? "")) {
-      return "De naam klopt niet (of de Persoon bestaat niet meer). Er is niets verwijderd.";
+    const name = String(formData.get("name") ?? "");
+    if (!(await getBrain().deletePerson(id, name))) {
+      return "De naam klopt niet, of dit is de eigenaar (of de Persoon bestaat niet meer). Er is niets verwijderd.";
     }
-    if (!(await getBrain().deletePerson(id))) return "De eigenaar kan niet verwijderd worden.";
   }, "/personen");
 }
 

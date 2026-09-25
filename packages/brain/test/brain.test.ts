@@ -2,7 +2,7 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { MockEmbeddingModelV4, MockLanguageModelV4, Experimental_EvaluationMockModelV4 } from "ai/test";
 import { simulateReadableStream } from "ai";
 import { eq, isNotNull } from "drizzle-orm";
-import { EMBEDDING_DIMENSIONS, dreams, drives, dynimos, epitaphs, memories } from "@animus/db/schema";
+import { EMBEDDING_DIMENSIONS, dreams, drives, dynimos, epitaphs, memories, persons } from "@animus/db/schema";
 import postgres from "postgres";
 import { EMOTIONS } from "../src/emotion.js";
 import { moodOfRow, singleEmotionValues, type MoodValues } from "../src/mood.js";
@@ -3622,6 +3622,16 @@ describe("createBrain", () => {
       it("geeft false en bewaart niets bij een onbekende Dynimo", async () => {
         expect(await brainWith().addMemory(999, "De kat heet Pluis")).toBe(false);
         expect(await db.select().from(memories)).toHaveLength(0);
+      });
+
+      it("koppelt de Herinnering aan de eigenaar (reviewfix #94)", async () => {
+        const vero = await insertDynimo();
+
+        await brainWith().addMemory(vero.id, "De kat heet Pluis");
+
+        const [memory] = await db.select().from(memories).where(eq(memories.dynimoId, vero.id));
+        const owner = (await db.select().from(persons).where(eq(persons.owner, true)))[0]!;
+        expect(memory!.personId).toBe(owner.id);
       });
 
       // ADD-APPEND

@@ -1,11 +1,11 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { MockEmbeddingModelV4, MockLanguageModelV4, Experimental_EvaluationMockModelV4 } from "ai/test";
 import { simulateReadableStream } from "ai";
-import { EMBEDDING_DIMENSIONS, dynimos, memories, persons } from "@animus/db/schema";
+import { EMBEDDING_DIMENSIONS, dynimos, memories } from "@animus/db/schema";
 import { eq } from "drizzle-orm";
 import { EMOTIONS } from "../src/emotion.js";
 import { createBrain } from "../src/index.js";
-import { createTestDb, truncateAll } from "./db.js";
+import { createTestDb, ensureOwner, truncateAll } from "./db.js";
 
 const db = createTestDb();
 const bornAt = new Date("2026-01-01T12:00:00.000Z");
@@ -78,15 +78,9 @@ async function insertDynimo() {
 
 // #94: de Spontane herinnering gaat enkel over aanwezigen (default de eigenaar); zonder eigen personId hoort een
 // Herinnering hier bij de eigenaar, zodat deze tests (die geen aanwezig-signalen geven) blijven werken zoals voorheen.
-async function ensureOwner(): Promise<number> {
-  const [existing] = await db.select({ id: persons.id }).from(persons).where(eq(persons.owner, true));
-  if (existing) return existing.id;
-  const [row] = await db.insert(persons).values({ name: "eigenaar", owner: true }).returning({ id: persons.id });
-  return row!.id;
-}
-
+// "personId" in over (i.p.v. over.personId ?? ...) zodat een expliciet meegegeven `null` ook echt null blijft.
 async function insertMemory(dynimoId: number, over: Partial<typeof memories.$inferInsert> = {}) {
-  const personId = over.personId ?? (await ensureOwner());
+  const personId = "personId" in over ? over.personId : await ensureOwner(db);
   const [row] = await db
     .insert(memories)
     .values({ dynimoId, personId, text: "Gesprekspartner: ik ben ziek", embedding: new Array<number>(EMBEDDING_DIMENSIONS).fill(0), createdAt: new Date(now.getTime() - 7 * DAY), impression: 0.9, ...over })

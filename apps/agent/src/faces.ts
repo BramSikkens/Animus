@@ -31,10 +31,14 @@ export function createFaces() {
   let unknownStreakStart: number | undefined;
   let lastUnknownAt: number | undefined;
   let unknownStreakReported = false;
+  // #94 reviewfix: is er deze sessie ooit een gezicht-Waarneming binnengekomen (camera actief)? Blijft true ook als
+  // entries() intussen door ouderdom leegloopt — dat betekent enkel "niemand nu in beeld", niet "geen camera".
+  let everRecorded = false;
 
   return {
     /** Registreert het herkenningsresultaat van één gezicht-Waarneming (personId, of null = onbekend). */
     record(personId: number | null, at: number, aantal: number): void {
+      everRecorded = true;
       entries.push({ personId, at, aantal });
       while (entries.length && at - entries[0]!.at > IN_VIEW_MAX_AGE_MS) entries.shift();
       // Een bekend gezicht raakt de onbekende-periode niet aan: het naast elkaar zien van eigenaar én bezoeker is
@@ -73,12 +77,17 @@ export function createFaces() {
       unknownStreakReported = true;
       return true;
     },
+    /** True zodra deze sessie minstens één gezicht-Waarneming binnenkwam (camera actief), ongeacht of iemand nu nog in beeld is. */
+    seenAny(): boolean {
+      return everRecorded;
+    },
     /** Bij wissel/slapen (samen met perception.reset()). */
     reset(): void {
       entries.length = 0;
       unknownStreakStart = undefined;
       lastUnknownAt = undefined;
       unknownStreakReported = false;
+      everRecorded = false;
     },
   };
 }

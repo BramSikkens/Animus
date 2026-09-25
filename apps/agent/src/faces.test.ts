@@ -51,6 +51,28 @@ describe("createFaces: inView / present", () => {
   });
 });
 
+describe("createFaces: seenAny", () => {
+  it("false zonder enige Waarneming", () => {
+    const faces = createFaces();
+    expect(faces.seenAny()).toBe(false);
+  });
+
+  it("true na een Waarneming, ook als die intussen te oud is voor inView", () => {
+    const faces = createFaces();
+    faces.record(7, 0, 1);
+    expect(faces.seenAny()).toBe(true);
+    expect(faces.inView(7000)).toEqual([]); // verlopen
+    expect(faces.seenAny()).toBe(true); // camera was wel actief
+  });
+
+  it("reset() zet seenAny weer op false", () => {
+    const faces = createFaces();
+    faces.record(7, 0, 1);
+    faces.reset();
+    expect(faces.seenAny()).toBe(false);
+  });
+});
+
 describe("createFaces: unknownStableSince", () => {
   it("false zolang er nog geen onbekende Waarneming was", () => {
     const faces = createFaces();

@@ -205,6 +205,37 @@ describe("Spontane herinnering enkel over aanwezigen (#94)", () => {
   });
 });
 
+describe("privacy-reviewfix: geen impliciete eigenaar-fallback bij een expliciet signaal (#94)", () => {
+  const OLD = new Date(now.getTime() - SPONTANEOUS_MIN_AGE_MS - DAY);
+
+  it("een onbekende Gesprekspartner zonder aanwezig-optie krijgt geen Spontane herinnering van de eigenaar", async () => {
+    const vero = await insertDynimo();
+    await drain(brainWith(type2().model).hear("Hoi")); // creëert de eigenaar-rij
+    const owner = (await db.select().from(persons).where(eq(persons.owner, true)))[0]!;
+    await insertMemory(vero.id, { personId: owner.id, text: "eigenaar-geheim", impression: 0.9, createdAt: OLD });
+    const t2 = type2();
+    const brain = brainWith(t2.model, () => 0); // rng 0: de kansworp voor de Spontane herinnering slaagt altijd
+
+    await drain(brain.hear("Hoi", { gesprekspartner: null }));
+
+    // recall() zelf kent geen muur (eigenaar-geheim mag via een gewone Herinnering nog ophaalbaar zijn); enkel de
+    // Spontane herinnering (die wél op aanwezigen filtert) mag hem niet aanhalen.
+    expect(t2.prompts[0]).not.toContain("Spontane herinnering");
+  });
+
+  it("considerInitiative met aanwezig: [] kiest geen Spontane herinnering van de eigenaar", async () => {
+    const vero = await insertDynimo();
+    await drain(brainWith(type2().model).hear("Hoi")); // creëert de eigenaar-rij
+    const owner = (await db.select().from(persons).where(eq(persons.owner, true)))[0]!;
+    await insertMemory(vero.id, { personId: owner.id, text: "eigenaar-geheim", impression: 0.9, createdAt: OLD });
+    const brain = brainWith(type2().model, () => 0);
+
+    const instruction = await brain.considerInitiative(undefined, { aanwezig: [] });
+
+    expect(instruction).not.toContain("eigenaar-geheim");
+  });
+});
+
 describe("Reflectie-daling enkel voor afwezigen (#94)", () => {
   const reflectionResult = {
     evolvedCharacter: "Rustig.",

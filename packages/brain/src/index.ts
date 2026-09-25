@@ -997,16 +997,18 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     return { role: "system", content: `Leeftijd: ${formatAge(now().getTime() - being.bornAt.getTime())}` };
   }
 
-  // "Aanwezig" (#94): de aanwezig-optie van de beurt plus de Gesprekspartner (als die bekend is); zonder beide
-  // (geen camera/stem) de eigenaar, zodat het gedrag zonder signalen ongewijzigd blijft. Enkel een bestaande
-  // eigenaar-rij lezen (geen insert): een onbekende Gesprekspartner mag er niet zelf één laten ontstaan.
-  async function presentPersonIds(gesprekspartnerId: number | null, aanwezig: number[] | undefined): Promise<number[]> {
-    const ids = new Set(aanwezig ?? []);
-    if (gesprekspartnerId !== null) ids.add(gesprekspartnerId);
-    if (ids.size === 0) {
+  // "Aanwezig" (#94, privacy-reviewfix): zijn `aanwezig` én de Gesprekspartner allebei weggelaten (undefined), dan
+  // is er geen enkel signaal en telt de eigenaar als aanwezig (huidig gedrag). Is minstens één van beide wél
+  // meegegeven — ook een lege aanwezig-lijst of een expliciet onbekende (`null`) Gesprekspartner — dan telt enkel
+  // wie er echt is: een niet-herkende vreemde mag nooit de eigenaar als aanwezig krijgen (en dus diens Spontane
+  // herinnering aanhalen). Enkel een bestaande eigenaar-rij lezen (geen insert).
+  async function presentPersonIds(gesprekspartnerOption: number | null | undefined, aanwezigOption: number[] | undefined): Promise<number[]> {
+    if (gesprekspartnerOption === undefined && aanwezigOption === undefined) {
       const [owner] = await deps.db.select({ id: persons.id }).from(persons).where(eq(persons.owner, true));
-      if (owner) ids.add(owner.id);
+      return owner ? [owner.id] : [];
     }
+    const ids = new Set(aanwezigOption ?? []);
+    if (typeof gesprekspartnerOption === "number") ids.add(gesprekspartnerOption);
     return [...ids];
   }
 
@@ -1092,10 +1094,11 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
   }
 
   // Anders dan remember() géén sessionMemoryIds: een handmatig toegevoegde Herinnering moet meteen vindbaar zijn.
+  // Reviewfix #94: een dashboard-Herinnering komt altijd van de eigenaar (er is geen Gesprekspartner om aan te koppelen).
   async function addMemory(id: number, text: string): Promise<boolean> {
     const [being] = await deps.db.select({ id: dynimos.id }).from(dynimos).where(eq(dynimos.id, id));
     if (!being) return false;
-    await insertMemory(text, id, 0.5);
+    await insertMemory(text, id, 0.5, await getOwnerId());
     return true;
   }
 
@@ -1527,9 +1530,10 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
       ? await deps.db.select({ name: persons.name, owner: persons.owner }).from(persons).where(inArray(persons.id, options.aanwezig))
       : [];
 
-    // "Aanwezig" (#94): aanwezig-optie + Gesprekspartner (bekend); zonder beide de eigenaar. Stuurt de recall-bonus
-    // en de Spontane herinnering.
-    const presentIds = await presentPersonIds(personId, options.aanwezig);
+    // "Aanwezig" (#94): de ruwe opties (niet de al op de eigenaar teruggevallen `personId`) — een expliciet
+    // onbekende Gesprekspartner (`null`) mag zelf geen eigenaar-fallback triggeren. Stuurt de recall-bonus en de
+    // Spontane herinnering.
+    const presentIds = await presentPersonIds(options.gesprekspartner, options.aanwezig);
 
     // ponytail: sequentieel na de emotie; parallel met Type1 als de latency ooit telt.
     const recalled = await recall(text, being.id, presentIds);
@@ -1762,8 +1766,9 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
         }`;
       }
       const axes = rowAxes(awake);
-      // #94: considerInitiative kent geen Gesprekspartner, enkel de aanwezig-optie (default eigenaar).
-      const presentIds = await presentPersonIds(null, options.aanwezig);
+      // #94: considerInitiative kent geen Gesprekspartner-optie (dus altijd "weggelaten"); enkel zonder aanwezig
+      // (ook weggelaten) valt dit terug op de eigenaar.
+      const presentIds = await presentPersonIds(undefined, options.aanwezig);
       const spontaneous = axes ? await pickSpontaneous(awake.id, axes, SPONTANEOUS_INITIATIVE_CHANCE, presentIds) : null;
       pendingSpontaneousId = spontaneous?.id;
       pendingDreamId = undefined;

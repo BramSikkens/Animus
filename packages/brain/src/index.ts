@@ -220,7 +220,7 @@ Wees niet allemaal in het midden: kies een eigen, uitgesproken positie.
 Kies ook je Drijfveren: per soort 1 of 2 items, passend bij de Seed én bij de persoonlijkheid die je koos:
 ${DRIVE_DESCRIPTIONS}
 Doelen starten actief.
-${BASE_EMOTION_DESCRIPTION} Kies ze passend bij je persoonlijkheid en de Seed.
+${BASE_EMOTION_DESCRIPTION} Leid ze af uit de Seed: welk temperament past bij dat beeld? Niet uit het feit dat je net ontwaakt — pas geboren zijn maakt je niet vanzelf nieuwsgierig.
 Beschrijf ook je stem in het veld "voiceDescription": een korte Nederlandse stembeschrijving (bv. "oude man, hees, langzaam" of "robotachtig, metaalachtig"). Geef in "voiceSearchTerms" 3 tot 6 Engelse zoektermen voor die stem (bv. "old man", "raspy", "robotic", "alien").
 Antwoord in het Nederlands.`;
 

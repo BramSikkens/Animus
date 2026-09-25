@@ -93,6 +93,10 @@ _Avoid_: karakter (dat is de vrije tekst), Big Five
 Een getal van 0 tot 1 per Dynimo (start op 0.2) voor hoe vertrouwd de relatie met de Gesprekspartner is. Het stijgt langzaam en asymptotisch bij elke beurt en extra bij positieve emoties (blij-delta), en daalt bij een genegeerde beurt en bij een Reflectie na lange stilte (nooit onder 0.05); de Persoonlijkheid (T↔F en expressiviteit) schaalt de groeisnelheid. Vier banden (afstandelijk, vriendelijk, vertrouwd, intiem) geven Type2 een toonregel: van beleefd en formeel ('u' mag, afhankelijk van archetype en karakter) tot bijnamen en plagen. Instelbaar in het dashboard. Zie [ADR-0016](docs/adr/0016-vertrouwdheid-als-aparte-schaal.md).
 _Avoid_: vertrouwen, band, zevende as
 
+**Verstand**:
+Een getal van 0 tot 1 per Dynimo voor hoeveel hij weet, hoe goed hij redeneert en hoe wereldwijs hij is — los van *hoe* hij praat (dat bepalen Archetype en Persoonlijkheid): een Dromer met hoog Verstand klinkt zweverig maar zegt kloppende, doordachte dingen. Bij genesis gezet vanuit een richtwaarde van het Archetype met een brede willekeurige spreiding, zodat wezentjes de norm blijven maar er af en toe een denker ontwaakt. Laag Verstand is naïef maar eerlijk (verwondert zich, verzint geen feiten); hoog Verstand geeft volledige, onderbouwde antwoorden in de eigen stijl. Groeit traag via Reflecties en daalt nooit. Instelbaar in het dashboard. Zie [ADR-0021](docs/adr/0021-verstand-tempert-de-gedragsregels.md).
+_Avoid_: intelligentie, IQ, slimheid, zevende as
+
 **Drijfveer**:
 Iets wat een Dynimo wil of niet wil, van één van vier soorten: Wens, Doel (kan bereikt of opgegeven worden), Toekomstdroom of Ergernis (zonder waarde of sterkte). Kleurt welke Emotie een uiting oproept.
 _Avoid_: voorkeur, interesse; een Toekomstdroom is geen Droom (de nachtelijke droomtekst)

@@ -1,6 +1,6 @@
 import { ReadableStream } from "node:stream/web";
 import { fileURLToPath } from "node:url";
-import { createBrain, type Brain } from "@animus/brain";
+import { createBrain, defaultVoiceDeps, type Brain } from "@animus/brain";
 import { DISPLAY_TOPIC, type DisplayMessage, type DisplayState } from "@animus/brain/display";
 import { COMMAND_TOPIC, GALLERY_TOPIC, type GalleryMessage } from "@animus/brain/gallery";
 import { SOUND_TOPIC, type SoundMessage } from "@animus/brain/sound";
@@ -29,7 +29,7 @@ import * as elevenlabs from "@livekit/agents-plugin-elevenlabs";
 import * as livekit from "@livekit/agents-plugin-livekit";
 import * as openai from "@livekit/agents-plugin-openai";
 import * as silero from "@livekit/agents-plugin-silero";
-import { RoomEvent } from "@livekit/rtc-node";
+import { RoomEvent, TrackSource, type RemoteParticipant } from "@livekit/rtc-node";
 import { readState, watchDynimos } from "./dynimo-watch.js";
 import { createStateRepublisher, emotionMessageFor } from "./state-republish.js";
 import { createCommandHandler, galleryMessageFor, MAX_GRAVES } from "./gallery-commands.js";
@@ -172,7 +172,8 @@ export default defineAgent<AgentUserData>({
     await migrate(db);
 
     // In-process (spec: geen aparte brein-API); elke job krijgt zijn eigen brein-instantie.
-    const brain = createBrain({ db, type1: TYPE1_MODEL, type2: loadType2Config(), embedder: EMBEDDING_MODEL });
+    // voices: een geboorte vanuit de Galerij kiest net als in het dashboard een stem.
+    const brain = createBrain({ db, type1: TYPE1_MODEL, type2: loadType2Config(), embedder: EMBEDDING_MODEL, voices: defaultVoiceDeps(process.env) });
 
     ctx.addShutdownCallback(async () => {
       await db.$client.end();
@@ -252,7 +253,7 @@ export default defineAgent<AgentUserData>({
         console.error("Galerij publiceren faalde:", error instanceof Error ? error.message : error);
       }
     };
-    // Commando's van het gezichtje (dev-only, geen auth): wake/sleep; handler valideert zelf.
+    // Commando's van het gezichtje (dev-only, geen auth): birth/wake/sleep/kill; handler valideert zelf.
     const handleCommand = createCommandHandler({
       brain,
       publishGallery: () => void publishGallery(),
@@ -326,6 +327,22 @@ export default defineAgent<AgentUserData>({
     // voor een andere tab blijft bestaan; LiveKit dispatcht enkel bij room-creatie, dus die tab zag dan geen agent.
     // De job eindigt nu pas met de room; alle timers/watchers ruimen op via de shutdown-callbacks.
     await session.start({ agent: animusAgent, room: ctx.room, inputOptions: { closeOnDisconnect: false } });
+
+    // De sessie luistert naar één deelnemer (de eerste face) en blijft die trouw, ook als die tab al weg is; elke
+    // reload is een nieuwe identiteit. Wij luisteren naar wie zijn microfoon aanzet: de face met een gekozen Dynimo.
+    // ponytail: `_roomIO` is private API van @livekit/agents 1.9; bij een upgrade nakijken (RoomIO.setParticipant).
+    const listenTo = (participant: RemoteParticipant): void => session._roomIO?.setParticipant(participant.identity);
+    const hasMic = (participant: RemoteParticipant): boolean =>
+      [...participant.trackPublications.values()].some((t) => t.source === TrackSource.SOURCE_MICROPHONE && !t.muted);
+    const speaker = [...ctx.room.remoteParticipants.values()].find(hasMic);
+    if (speaker) listenTo(speaker);
+    ctx.room.on(RoomEvent.TrackPublished, (publication, participant) => {
+      if (publication.source === TrackSource.SOURCE_MICROPHONE) listenTo(participant);
+    });
+    // Uitzetten muted enkel; weer aanzetten is dan een unmute, geen nieuwe publicatie.
+    ctx.room.on(RoomEvent.TrackUnmuted, (publication, participant) => {
+      if (participant !== ctx.room.localParticipant && publication.source === TrackSource.SOURCE_MICROPHONE) listenTo(participant as RemoteParticipant);
+    });
 
     // Volgt de wakkere Dynimo (dashboard-acties komen binnen via Postgres NOTIFY): een wissel breekt het
     // lopende antwoord af (zoals barge-in; de brain-stream sluit via textStream) en zet het gezichtje om.

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseCommand, parseGalleryMessage, screenFor, selectionLost } from "../src/gallery.js";
+import { justWoken, parseCommand, parseGalleryMessage, screenFor, selectionLost } from "../src/gallery.js";
 
 describe("parseCommand", () => {
   it("accepteert wake en sleep met een integer id", () => {
@@ -16,8 +16,8 @@ describe("parseCommand", () => {
 });
 
 describe("screenFor", () => {
-  const a = { id: 1, name: "Anna", awake: false };
-  const b = { id: 2, name: "Bo", awake: true };
+  const a = { id: 1, name: "Anna", awake: false, bornAt: "2026-01-01T00:00:00.000Z" };
+  const b = { id: 2, name: "Bo", awake: true, bornAt: "2026-01-01T00:00:00.000Z" };
 
   it("toont laden zolang er geen verbinding of lijst is", () => {
     expect(screenFor({ connected: false, beings: [a], selectedId: null })).toEqual({ screen: "laden" });
@@ -40,8 +40,8 @@ describe("screenFor", () => {
 });
 
 describe("selectionLost", () => {
-  const asleep = { id: 1, name: "Anna", awake: false };
-  const awake = { id: 1, name: "Anna", awake: true };
+  const asleep = { id: 1, name: "Anna", awake: false, bornAt: "2026-01-01T00:00:00.000Z" };
+  const awake = { id: 1, name: "Anna", awake: true, bornAt: "2026-01-01T00:00:00.000Z" };
 
   it("is waar als de gekozen Dynimo wakker was en nu slaapt of verdwenen is", () => {
     expect(selectionLost({ selectedId: 1, beings: [asleep], sawAwake: true })).toBe(true);
@@ -56,7 +56,7 @@ describe("selectionLost", () => {
 });
 
 describe("parseGalleryMessage", () => {
-  const beings = [{ id: 1, name: "Anna", awake: false }];
+  const beings = [{ id: 1, name: "Anna", awake: false, bornAt: "2026-01-01T00:00:00.000Z" }];
   const grave = { id: 4, name: "Bo", bornAt: "2026-01-01T00:00:00.000Z", deletedAt: "2026-02-01T00:00:00.000Z", farewell: "Dag." };
 
   it("leest beings en graves", () => {
@@ -73,7 +73,7 @@ describe("parseGalleryMessage", () => {
   });
 
   it("geeft null bij ongeldige beings of rommel", () => {
-    for (const bad of [null, 3, {}, { beings: "x" }, { beings: [{ id: "1" }] }]) expect(parseGalleryMessage(bad)).toBeNull();
+    for (const bad of [null, 3, {}, { beings: "x" }, { beings: [{ id: "1" }] }, { beings: [{ id: 1, name: "Anna", awake: false }] }]) expect(parseGalleryMessage(bad)).toBeNull();
   });
 });
 
@@ -82,5 +82,21 @@ describe("screenFor met graven", () => {
   it("geeft de graven mee aan de galerij, standaard leeg", () => {
     expect(screenFor({ connected: true, beings: [], graves: [grave], selectedId: null })).toEqual({ screen: "galerij", beings: [], graves: [grave] });
     expect(screenFor({ connected: true, beings: [], selectedId: null })).toEqual({ screen: "galerij", beings: [], graves: [] });
+  });
+});
+
+describe("justWoken", () => {
+  const born = "2026-01-01T00:00:00.000Z";
+  const anna = (awake: boolean) => ({ id: 1, name: "Anna", awake, bornAt: born });
+
+  it("geeft de id van een bestaande Dynimo die van slapend naar wakker ging", () => {
+    expect(justWoken({ before: [anna(false)], after: [anna(true)] })).toBe(1);
+  });
+
+  it("geeft null zonder vorige lijst, als niemand wakker werd, of voor een pasgeborene", () => {
+    expect(justWoken({ before: null, after: [anna(true)] })).toBeNull();
+    expect(justWoken({ before: [anna(true)], after: [anna(true)] })).toBeNull();
+    expect(justWoken({ before: [anna(true)], after: [anna(false)] })).toBeNull();
+    expect(justWoken({ before: [], after: [anna(true)] })).toBeNull();
   });
 });

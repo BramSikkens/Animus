@@ -1,7 +1,7 @@
 // Browser-veilig: geen node-imports. De agent én de gezichtje-app delen dit contract.
 
-/** Eén levende Dynimo in de Galerij. */
-export type GalleryBeing = { id: number; name: string; awake: boolean };
+/** Eén levende Dynimo in de Galerij; `bornAt` als ISO-string (voor de leeftijd). */
+export type GalleryBeing = { id: number; name: string; awake: boolean; bornAt: string };
 
 /** Eén gestorvene (Grafschrift) in de Galerij; datums als ISO-string, `farewell` is de Afscheidsreflectie. */
 export type GalleryGrave = { id: number; name: string; bornAt: string; deletedAt: string; farewell: string };
@@ -19,22 +19,26 @@ const isGrave = (g: unknown): g is GalleryGrave => {
 export function parseGalleryMessage(value: unknown): GalleryMessage | null {
   if (value === null || typeof value !== "object") return null;
   const { beings, graves } = value as Record<string, unknown>;
-  if (!Array.isArray(beings) || !beings.every((b) => b && typeof b.id === "number" && typeof b.name === "string" && typeof b.awake === "boolean")) return null;
+  if (!Array.isArray(beings) || !beings.every((b) => b && typeof b.id === "number" && typeof b.name === "string" && typeof b.awake === "boolean" && typeof b.bornAt === "string")) return null;
   return {
-    beings: beings.map((b) => ({ id: b.id, name: b.name, awake: b.awake })),
+    beings: beings.map((b) => ({ id: b.id, name: b.name, awake: b.awake, bornAt: b.bornAt })),
     graves: Array.isArray(graves) ? graves.filter(isGrave).map((g) => ({ id: g.id, name: g.name, bornAt: g.bornAt, deletedAt: g.deletedAt, farewell: g.farewell })) : [],
   };
 }
 
 /** Commando van gezichtje naar agent. Dev-only, zonder auth: de agent valideert met `parseCommand`. */
-export type GalleryCommand = { type: "wake" | "sleep"; id: number };
+export type GalleryCommand = { type: "wake" | "sleep"; id: number } | { type: "kill"; id: number; name: string } | { type: "birth" };
 export const COMMAND_TOPIC = "command";
 
 /** Geeft een geldig commando terug, of null bij alles wat er niet exact zo uitziet. */
 export function parseCommand(value: unknown): GalleryCommand | null {
   if (value === null || typeof value !== "object") return null;
-  const { type, id } = value as Record<string, unknown>;
-  if ((type !== "wake" && type !== "sleep") || typeof id !== "number" || !Number.isInteger(id)) return null;
+  const { type, id, name } = value as Record<string, unknown>;
+  if (type === "birth") return { type };
+  if (typeof id !== "number" || !Number.isInteger(id)) return null;
+  // kill vraagt de bevestigde naam mee; het brein vergelijkt die zelf met de database.
+  if (type === "kill") return typeof name === "string" ? { type, id, name } : null;
+  if (type !== "wake" && type !== "sleep") return null;
   return { type, id };
 }
 
@@ -56,4 +60,10 @@ export function screenFor({ connected, beings, graves = [], selectedId }: { conn
 export function selectionLost({ selectedId, beings, sawAwake }: { selectedId: number | null; beings: GalleryBeing[]; sawAwake: boolean }): boolean {
   if (selectedId === null || !sawAwake) return false;
   return !beings.find((b) => b.id === selectedId)?.awake;
+}
+
+/** Een bestaande Dynimo die net (ergens) gewekt is: de face opent dan zijn gezicht. Pasgeborenen niet, die openen na hun animatie. */
+export function justWoken({ before, after }: { before: GalleryBeing[] | null; after: GalleryBeing[] }): number | null {
+  if (!before) return null;
+  return after.find((b) => b.awake && before.some((p) => p.id === b.id && !p.awake))?.id ?? null;
 }

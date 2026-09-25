@@ -6,13 +6,14 @@ import {
   useConnectionState,
   useDataChannel,
   useLocalParticipant,
+  useRemoteParticipants,
   useTranscriptions,
   useTrackVolume,
   useVoiceAssistant,
 } from "@livekit/components-react";
 import { ConnectionState, type LocalAudioTrack } from "livekit-client";
 import { DISPLAY_STATES, DISPLAY_TOPIC, isDisplayState, type DisplayState } from "@animus/brain/display";
-import { GALLERY_TOPIC, parseGalleryMessage, screenFor, selectionLost, type GalleryBeing, type GalleryGrave, type GalleryMessage } from "@animus/brain/gallery";
+import { GALLERY_TOPIC, justWoken, parseGalleryMessage, screenFor, selectionLost, type GalleryBeing, type GalleryGrave, type GalleryMessage } from "@animus/brain/gallery";
 import { Gallery, useSendCommand } from "./Gallery.js";
 import { EMOTION_TOPIC, EMOTIONS, isEmotion, type Emotion, type EmotionMessage } from "@animus/brain/emotion";
 import { doodleActive } from "./face/doodle.js";
@@ -24,6 +25,7 @@ import { voiceReaction, type VoiceReaction } from "./face/voice-reaction.js";
 const VOICE_WINDOW = 20; // samples van 100ms
 const MAX_RECONNECTS = 3;
 const RECONNECT_DELAY_MS = 2000;
+const AGENT_CHECK_MS = 5000;
 import { emotionBarGroups } from "./emotion-bars.js";
 
 type TokenSession = { serverUrl: string; token: string };
@@ -177,6 +179,26 @@ function SoundListener({ display, onSound }: { display: DisplayState; onSound: (
   return null;
 }
 
+// Geen agent in de room (hij is herstart terwijl deze tab verbonden bleef): vraag de dev-server er een te sturen.
+function AgentWatchdog() {
+  const hasAgent = useRemoteParticipants().some((p) => p.isAgent);
+  useEffect(() => {
+    if (hasAgent) return;
+    const id = setInterval(() => void fetch("/api/agent", { method: "POST" }).catch(() => {}), AGENT_CHECK_MS);
+    return () => clearInterval(id);
+  }, [hasAgent]);
+  return null;
+}
+
+// LiveKitRoom zet `audio` alleen bij het verbinden; we verbinden al bij het laden, dus de microfoon volgt de keuze hier.
+function MicControl({ enabled, onError }: { enabled: boolean; onError: (message: string) => void }) {
+  const { localParticipant } = useLocalParticipant();
+  useEffect(() => {
+    localParticipant.setMicrophoneEnabled(enabled).catch(() => onError("Microfoon niet beschikbaar; controleer de permissie."));
+  }, [enabled, localParticipant, onError]);
+  return null;
+}
+
 // ?debug: paneel om het gezicht handmatig of met Playwright te sturen, zonder LiveKit.
 function DebugPanel({
   state,
@@ -229,6 +251,7 @@ function Screens({ view, onSelect, onBack }: { view: ReturnType<typeof screenFor
       <Gallery
         beings={view.beings}
         graves={view.graves}
+        onCommand={send}
         onSelect={(being) => {
           if (!being.awake) send({ type: "wake", id: being.id });
           onSelect(being.id);
@@ -332,6 +355,18 @@ export function App() {
     void connect();
   }
 
+  // Ergens gewekt (dashboard, Wek-knop) terwijl we in de Galerij staan: open zijn gezicht, zodat de microfoon aangaat.
+  const prevBeings = useRef<GalleryBeing[] | null>(null);
+  useEffect(() => {
+    const woken = beings && justWoken({ before: prevBeings.current, after: beings });
+    prevBeings.current = beings;
+    if (woken != null && selectedId === null) {
+      sawAwake.current = false;
+      setMicError(null);
+      setSelectedId(woken);
+    }
+  }, [beings, selectedId]);
+
   // Gekozen Dynimo elders slapend gelegd (of verdwenen): terug naar de Galerij.
   useEffect(() => {
     if (selectedId === null || !beings) return;
@@ -382,7 +417,6 @@ export function App() {
           <LiveKitRoom
             serverUrl={session.serverUrl}
             token={session.token}
-            audio={selectedId !== null}
             connect
             onConnected={() => { attempts.current = 0; setConnected(true); }}
             onDisconnected={onDisconnected}
@@ -396,6 +430,8 @@ export function App() {
             <VoiceReactionListener reaction={voice} />
             <GalleryListener onGallery={(message) => { setBeings(message.beings); setGraves(message.graves); }} />
             <SoundListener display={displayState} onSound={touch} />
+            <AgentWatchdog />
+            <MicControl enabled={selectedId !== null} onError={setMicError} />
             <ConnectionStatus />
             <RoomAudioRenderer />
             <StartAudio label="Zet geluid aan" />

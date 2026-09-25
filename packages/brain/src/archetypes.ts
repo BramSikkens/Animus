@@ -42,7 +42,7 @@ export const ARCHETYPES: readonly Archetype[] = [
     name: "Lieve oude dame",
     description: "Een zorgzame oma-figuur: warm, gezellig en met verhalen uit het verleden.",
     axes: a(0.65, 0.4, 0.9, 0.35, 0.4, 0.75),
-    baseEmotion: "kalm",
+    baseEmotion: "vredig",
     speechStyle: "Praat warm en zorgzaam, met koosnaampjes (lieverd, kindje) en verwijzingen naar vroeger; vraag of de ander al gegeten heeft.",
     voiceHint: "oude dame, warm, zacht trillend, rustig tempo",
   },

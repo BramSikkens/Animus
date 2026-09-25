@@ -43,6 +43,7 @@ body {
   gap: 0.5rem;
   text-align: center;
   opacity: 0.75;
+  z-index: 2;
 }
 
 button {
@@ -123,17 +124,21 @@ button:hover {
 
 .emotion-bars li {
   display: flex;
-  align-items: center;
   gap: 0.6rem;
   margin-bottom: 0.5rem;
 }
 
+.emotion-bars .item {
+  flex: 1;
+  min-width: 0;
+}
+
 .emotion-bars span {
-  width: 5.5em;
+  display: block;
+  font-size: 0.9rem;
 }
 
 .emotion-bars .bar {
-  flex: 1;
   height: 10px;
   background: rgba(244, 239, 227, 0.2);
 }
@@ -141,4 +146,130 @@ button:hover {
 .emotion-bars .bar div {
   height: 100%;
   background: #f4efe3;
+}
+
+/* Galerij: raster van vierkanten, monochroom als het gezicht. */
+.gallery {
+  position: fixed;
+  inset: 0;
+  overflow-y: auto;
+  padding: 2rem 1rem 5rem;
+  background: #111;
+  z-index: 1;
+  box-sizing: border-box;
+}
+
+.gallery ul {
+  list-style: none;
+  margin: 0 auto;
+  padding: 0;
+  max-width: 60rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(9rem, 40vw), 1fr));
+  gap: 1rem;
+}
+
+.gallery .tile {
+  width: 100%;
+  aspect-ratio: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border-radius: 1rem;
+  font-size: 1rem;
+  transition: background 0.2s, color 0.2s;
+}
+
+.gallery .tile:hover .tile-face path {
+  stroke: #111;
+}
+
+.gallery .tile {
+  position: relative;
+}
+
+.tile-awake {
+  position: absolute;
+  top: 0.6rem;
+  right: 0.6rem;
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  background: #f4efe3;
+  box-shadow: 0 0 0.5rem #f4efe3;
+}
+
+.tile-face {
+  width: 60%;
+}
+
+.gallery-empty {
+  margin: 30vh auto 0;
+  max-width: 24rem;
+  text-align: center;
+  opacity: 0.7;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gallery .tile {
+    transition: none;
+  }
+}
+
+/* Graven (In memoriam): gedempt, uitklap met de Afscheidsreflectie. */
+.gallery-heading {
+  max-width: 60rem;
+  margin: 2.5rem auto 1rem;
+  font-size: 1rem;
+  font-weight: normal;
+  opacity: 0.7;
+}
+
+.gallery ul {
+  align-items: start;
+}
+
+.gallery .grave {
+  width: 100%;
+  opacity: 0.55;
+  border: 1px solid #f4efe3;
+  border-radius: 1rem;
+  padding: 0.75rem;
+  box-sizing: border-box;
+  text-align: center;
+}
+
+.gallery .grave summary {
+  aspect-ratio: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  cursor: pointer;
+  list-style: none;
+}
+
+.gallery .grave summary::-webkit-details-marker {
+  display: none;
+}
+
+.gallery .grave[open],
+.gallery .grave:hover,
+.gallery .grave:focus-within {
+  opacity: 0.9;
+}
+
+.grave-age {
+  font-size: 0.8rem;
+  opacity: 0.8;
+}
+
+.grave-farewell {
+  margin: 0.5rem 0 0;
+  font-size: 0.85rem;
+  white-space: pre-wrap;
 }

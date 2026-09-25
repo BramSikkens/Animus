@@ -11,7 +11,7 @@ import {
   type ModelMessage,
   type SystemModelMessage,
 } from "ai";
-import { and, asc, cosineDistance, desc, eq, gt, isNotNull, isNull, notInArray, sql } from "drizzle-orm";
+import { and, asc, cosineDistance, desc, eq, gt, gte, isNotNull, isNull, lte, notInArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { Db } from "@animus/db";
 import { dreams, drives, dynimos, epitaphs, memories } from "@animus/db/schema";
@@ -19,12 +19,20 @@ import { formatAge } from "./age.js";
 import { archetypeOfferText, getArchetype, pickOffer } from "./archetypes.js";
 import { DRIVE_DESCRIPTIONS, DRIVE_KINDS, drivesPromptBlock, isActiveDrive, type DriveRow } from "./drives.js";
 import { decideBehavior, type Behavior } from "./behavior.js";
+import { decideOpinion, matchDrives, opinionPrompt, OPINION_BOOS_DELTA } from "./opinion.js";
+import { pickSpeechSound } from "./speech-sounds.js";
+import { createPacer, pacingFor } from "./speech-pacing.js";
+import { pickDreamToTell, DREAM_MAX_AGE_MS } from "./dream-tell.js";
+import { pickSpontaneousMemory, spontaneousChance, SPONTANEOUS_INITIATIVE_CHANCE, SPONTANEOUS_MIN_AGE_MS, SPONTANEOUS_MIN_IMPRESSION, SPONTANEOUS_TURN_CHANCE, type SpontaneousCandidate } from "./recall-spontaneous.js";
 import { applyDeltas, baseEmotionOf, currentMood, moodOfRow, singleEmotionValues, storedMoodOf, type Mood, type MoodDeltas, type MoodValues, type StoredMood } from "./mood.js";
 import { isVisibleMoodChange, soundKindFor, type SoundKind } from "./sound.js";
+import { FAMILIARITY_POSITIVE_DELTA, familiarityStyle, updateFamiliarity } from "./familiarity.js";
 import { AXIS_DESCRIPTIONS, type Axes, axisGuidelines, mbtiType, rowAxes } from "./personality.js";
-import { EMOTIONS, type Emotion } from "./emotion.js";
+import { EMOTIONS, oppositeOf, type Emotion } from "./emotion.js";
 import { SEEDS } from "./seeds.js";
 import { createTools } from "./tools.js";
+import { chooseGenesisVoice, type GenesisVoiceDeps } from "./genesis-voice.js";
+export { defaultVoiceDeps } from "./genesis-voice.js";
 
 export { EMOTIONS, type Emotion };
 export { formatAge };
@@ -78,6 +86,8 @@ export type Brain = {
   setAxes(id: number, axes: Axes): Promise<boolean>;
   /** Dashboard: zet de TTS-stem (null = default van de agent); de agent past die direct toe. False bij een onbekende id. */
   setVoiceProfile(id: number, profile: { voice: string | null; description: string | null }): Promise<boolean>;
+  /** Dashboard-override: zet de Vertrouwdheid (0–1). False bij een onbekende id. */
+  setFamiliarity(id: number, familiarity: number): Promise<boolean>;
   /** Dashboard-override: kiest een archetype en zet zijn zes assen en Basisemotie als startpunt (geen pinning). False bij een onbekende id of een onbekend archetype. */
   setArchetype(id: number, archetypeId: string): Promise<boolean>;
   /**
@@ -146,6 +156,8 @@ export const genesisSchema = z.object({
   drives: drivesSchema,
   baseEmotion: z.enum(EMOTIONS),
   archetype: z.string().nullable(),
+  voiceDescription: z.string(),
+  voiceSearchTerms: z.array(z.string()),
 });
 
 const BASE_EMOTION_DESCRIPTION = `De Basisemotie is het temperament van het wezen: de emotie waar zijn stemming naartoe uitdooft als er niets gebeurt. Kies er één uit: ${EMOTIONS.join(", ")}.`;
@@ -209,6 +221,7 @@ Kies ook je Drijfveren: per soort 1 of 2 items, passend bij de Seed én bij de p
 ${DRIVE_DESCRIPTIONS}
 Doelen starten actief.
 ${BASE_EMOTION_DESCRIPTION} Kies ze passend bij je persoonlijkheid en de Seed.
+Beschrijf ook je stem in het veld "voiceDescription": een korte Nederlandse stembeschrijving (bv. "oude man, hees, langzaam" of "robotachtig, metaalachtig"). Geef in "voiceSearchTerms" 3 tot 6 Engelse zoektermen voor die stem (bv. "old man", "raspy", "robotic", "alien").
 Antwoord in het Nederlands.`;
 
 function genesisArchetypeInstructions(offer: string): string {
@@ -261,6 +274,15 @@ function recallPrompt(recalled: string[]): SystemModelMessage {
   };
 }
 
+const SPONTANEOUS_CANDIDATE_LIMIT = 200;
+const DREAM_HOW = "Vertel hem kort, associatief en in het Nederlands, in je eigen stijl, beginnend met 'Ik droomde…'.";
+const SPONTANEOUS_HOW = "Kom er natuurlijk op terug, kort, in het Nederlands, met één vraag (bv. 'Je zei vorige week dat …, ben je …?').";
+
+// Na het cachepunt: alleen aanwezig op de beurten waarop de kans meezit; het onderwerp is optioneel.
+function spontaneousPrompt(memory: string): SystemModelMessage {
+  return { role: "system", content: `Spontane herinnering (alleen als het past bij het gesprek): iets uit een eerder gesprek waar je op terug kunt komen: "${memory}". ${SPONTANEOUS_HOW}` };
+}
+
 // Na het cachepunt: alleen aanwezig op de beurten waarop de kans meezit.
 function dreamPrompt(dream: string): SystemModelMessage {
   return {
@@ -294,6 +316,17 @@ function moodMessage(mood: Mood): SystemModelMessage {
   };
 }
 
+// Na het cachepunt: Vertrouwdheid verschuift per beurt, dus niet in de gecachete stabiele prompt.
+function familiarityMessage(familiarity: number): SystemModelMessage {
+  return { role: "system", content: `Vertrouwdheid met de Gesprekspartner: ${familiarityStyle(familiarity).instruction}` };
+}
+
+// De tegenpool remt vanzelf af (ADR-0015); Type1 hoeft die niet ook nog omlaag te scoren.
+const pairHint = (emotion: Emotion) => {
+  const opposite = oppositeOf(emotion);
+  return opposite ? ` De tegenpool "${opposite}" zakt vanzelf mee als deze stijgt; scoor die niet apart omlaag.` : "";
+};
+
 // Eén Type1-call per beurt: per emotie de verandering (delta) die de uiting bij de Dynimo zelf teweegbrengt (reactie,
 // niet de emotie van de uiting) + intent-routering. De context (persoonlijkheid, Drijfveren, Stemming) zit in de state naast de uiting.
 async function classify(type1: Experimental_EvaluationModel, text: string, context: string): Promise<Type1Result> {
@@ -306,7 +339,7 @@ async function classify(type1: Experimental_EvaluationModel, text: string, conte
           `delta_${emotion}`,
           {
             type: "score" as const,
-            instructions: `Hoeveel verandert de emotie "${emotion}" van de Dynimo zelf door deze uiting, gegeven zijn persoonlijkheid, Drijfveren en huidige stemming? Het middelste niveau is geen verandering; hoger is meer, lager is minder (de emotie zakt). De meeste emoties veranderen niet; gebruik uitersten alleen voor echt sterke reacties.`,
+            instructions: `Hoeveel verandert de emotie "${emotion}" van de Dynimo zelf door deze uiting, gegeven zijn persoonlijkheid, Drijfveren en huidige stemming? Het middelste niveau is geen verandering; hoger is meer, lager is minder (de emotie zakt). De meeste emoties veranderen niet; gebruik uitersten alleen voor echt sterke reacties.${pairHint(emotion)}`,
             criteria: DELTA_TABLE.map((delta) => (delta === 0 ? "geen verandering" : `${delta > 0 ? "+" : ""}${delta}`)),
           },
         ]),
@@ -348,17 +381,27 @@ export function createBrain(deps: {
   embedder: EmbeddingModel;
   now?: () => Date;
   random?: () => number;
+  /** Stemkeuze bij genesis; default: geen (geen netwerk). Aanroepers geven defaultVoiceDeps(process.env) mee. */
+  voices?: GenesisVoiceDeps;
 }): Brain {
   const now = deps.now ?? (() => new Date());
   const random = deps.random ?? Math.random;
+  const voices = deps.voices;
   let lastIgnored = false; // vorige beurt genegeerd? Voorkomt twee keer achter elkaar negeren.
+  let turnCount = 0; // beurten (zonder initiatief) van deze brain-instantie, voor de cooldown van het Standpunt.
+  let lastOpinionTurn: number | undefined;
+  let lastSpeechSound: string | undefined; // Spraakgeluid van de vorige beurt: nooit twee keer hetzelfde.
   let current: Dynimo | undefined;
   const tools = createTools({ now, remember });
   const workingMemory: ModelMessage[] = [];
   // Herinneringen uit deze sessie staan al in het werkgeheugen; niet dubbel ophalen.
   const sessionMemoryIds: number[] = [];
+  // Spontane herinnering die considerInitiative koos: pas na de initiatief-beurt als aangehaald gemarkeerd.
+  let pendingSpontaneousId: number | undefined;
+  // Idem voor een Droom die considerInitiative koos (verteld = told_at).
+  let pendingDreamId: number | undefined;
 
-  async function genesis(): Promise<{ dynimo: typeof dynimos.$inferInsert; drives: DrivesOutput }> {
+  async function genesis(): Promise<{ dynimo: typeof dynimos.$inferInsert; drives: DrivesOutput; voice: { voice: string; description: string } | null }> {
     const seed = pickSeed(random);
     const offer = pickOffer(random);
     const result = await generateText({
@@ -387,6 +430,14 @@ export function createBrain(deps: {
         bornAt: now(),
       },
       drives: result.output.drives,
+      voice: voices
+        ? await chooseGenesisVoice(voices, {
+            description: result.output.voiceDescription,
+            searchTerms: result.output.voiceSearchTerms,
+            hint: archetype?.voiceHint ?? "",
+            name: result.output.name,
+          })
+        : null,
     };
   }
 
@@ -521,6 +572,8 @@ ${fresh.map((memory) => `- (indruk ${memory.impression}) ${memory.text}`).join("
             ...wakeMood,
           }),
           lastReflectedAt: processedUntil,
+          // Reflectie bij stilte (niet bij slapen): de relatie koelt een beetje af.
+          ...(!sleeping && { familiarity: updateFamiliarity({ current: locked.familiarity, event: "langeStilte", axes: { tf: 0.5, expressiveness: 0.5 } }) }),
         })
         .where(eq(dynimos.id, id));
 
@@ -579,11 +632,21 @@ ${fresh.map((memory) => `- (indruk ${memory.impression}) ${memory.text}`).join("
     }
   }
 
+  // Per-Dynimo sessiestaat: mag niet doorsijpelen naar een ander (of nieuw) wezen.
+  function resetSession(): void {
+    lastSpeechSound = undefined;
+    workingMemory.length = 0;
+    sessionMemoryIds.length = 0;
+    turnCount = 0;
+    lastOpinionTurn = undefined;
+    pendingSpontaneousId = undefined;
+    pendingDreamId = undefined;
+  }
+
   // Een andere Wakker-generatie (andere Dynimo of nieuwe awake_since) is een nieuwe sessie.
   function adopt(row: Dynimo): Dynimo {
     if (current?.id !== row.id || current.awakeSince?.getTime() !== row.awakeSince?.getTime()) {
-      workingMemory.length = 0;
-      sessionMemoryIds.length = 0;
+      resetSession();
       current = row;
     }
     return current;
@@ -596,7 +659,7 @@ ${fresh.map((memory) => `- (indruk ${memory.impression}) ${memory.text}`).join("
       slept = await sleepAll(tx);
       const [inserted] = await tx
         .insert(dynimos)
-        .values({ ...born.dynimo, awakeSince: now() })
+        .values({ ...born.dynimo, voice: born.voice?.voice ?? null, voiceDescription: born.voice?.description ?? null, awakeSince: now() })
         .returning();
       await tx.insert(drives).values(driveRowsFor(inserted!.id, born.drives, now()));
       await notifyStateChange(tx, String(inserted!.id));
@@ -775,6 +838,24 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     }
   }
 
+  // Kiest (pure kiezer) een Spontane herinnering uit de oude, vormende Herinneringen; faalt stil naar null.
+  // De kansworp gaat vóór de query: bij een gewone beurt (~3%) zit er zo meestal geen database-ronde op het kritieke pad.
+  async function pickSpontaneous(dynimoId: number, axes: Axes, baseChance: number): Promise<SpontaneousCandidate | null> {
+    if (random() >= spontaneousChance(axes, baseChance)) return null;
+    try {
+      const candidates = await deps.db
+        .select({ id: memories.id, createdAt: memories.createdAt, impression: memories.impression, lastRecalledAt: memories.lastRecalledAt, text: memories.text })
+        .from(memories)
+        .where(and(eq(memories.dynimoId, dynimoId), gte(memories.impression, SPONTANEOUS_MIN_IMPRESSION), lte(memories.createdAt, new Date(now().getTime() - SPONTANEOUS_MIN_AGE_MS))))
+        .orderBy(desc(memories.impression), desc(memories.createdAt))
+        .limit(SPONTANEOUS_CANDIDATE_LIMIT);
+      return pickSpontaneousMemory({ memories: candidates, now: now(), axes, rng: random, baseChance, chanceRolled: true });
+    } catch (error) {
+      console.warn("Spontane herinnering kiezen faalde:", error instanceof Error ? error.message : error);
+      return null;
+    }
+  }
+
   async function insertMemory(memoryText: string, dynimoId: number, impression: number): Promise<number> {
     const { embedding } = await embed({ model: deps.embedder, value: memoryText });
     const [row] = await deps.db
@@ -836,6 +917,11 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
       .set({ axisIe: axes.ie, axisSn: axes.sn, axisTf: axes.tf, axisJp: axes.jp, axisReactivity: axes.reactivity, axisExpressiveness: axes.expressiveness })
       .where(eq(dynimos.id, id))
       .returning({ id: dynimos.id });
+    return updated.length > 0;
+  }
+
+  async function setFamiliarity(id: number, familiarity: number): Promise<boolean> {
+    const updated = await deps.db.update(dynimos).set({ familiarity }).where(eq(dynimos.id, id)).returning({ id: dynimos.id });
     return updated.length > 0;
   }
 
@@ -904,7 +990,24 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
       .join("\n");
     // Type1 is een reflex: faalt hij, dan antwoordt Type2 toch. Zonder delta's blijft de Stemming ongemoeid (het
     // mood-event toont dan de bestaande Stemming of Basisemotie).
-    const { deltas, indruk, intent } = await (options.initiatief
+    const axes = rowAxes(awake);
+    // Standpunt (opinion.ts): een Drijfveer die duidelijk raakt aan de uiting; een Ergernis raakt ook boos, via dezelfde delta's.
+    let opinionMessage: SystemModelMessage[] = [];
+    let opinionBoos = 0;
+    if (!options.initiatief) {
+      turnCount++;
+      const opinion = axes
+        ? decideOpinion({ drives: driveRows, utteranceMatches: matchDrives(text, driveRows), axes, rng: random, lastOpinionTurnsAgo: lastOpinionTurn === undefined ? undefined : turnCount - lastOpinionTurn })
+        : { kind: "geen" as const };
+      const drive = driveRows.find((row) => row.id === opinion.driveId);
+      const prompt = drive && opinionPrompt(opinion.kind, drive);
+      if (drive && prompt) {
+        lastOpinionTurn = turnCount;
+        opinionMessage = [{ role: "system", content: prompt }];
+        if (drive.kind === "ergernis") opinionBoos = OPINION_BOOS_DELTA;
+      }
+    }
+    const { deltas: type1Deltas, indruk, intent } = await (options.initiatief
       ? Promise.resolve<Type1Result>({ deltas: {}, indruk: 0.2, intent: "simpel" })
       : classify(deps.type1, text, context)
     ).catch((error: unknown): Type1Result => {
@@ -912,15 +1015,31 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
       return { deltas: {}, indruk: 0, intent: "simpel" };
     });
 
+    const deltas: MoodDeltas = opinionBoos ? { ...type1Deltas, boos: (type1Deltas.boos ?? 0) + opinionBoos } : type1Deltas;
     const { mood, next } = applyDeltas(boosted, baseEmotion, deltas, now(), awake.axisReactivity);
     // ponytail: last-writer-wins zonder guard; volstaat bij één wakkere Dynimo. Guard op mood_at zodra er ooit
     // meerdere schrijvers tegelijk zijn.
     const birthdayBoost = birthdayBoostDue(awake);
-    if ((next !== stored && next) || birthdayBoost) {
+    // Emotie stuurt gedrag (behavior.ts). Een spontane uiting (initiatief) wordt nooit genegeerd of ingekort.
+    // Vóór de UPDATE, zodat de Vertrouwdheid (genegeerd of beurt) in dezelfde schrijfactie meegaat.
+    const behavior = options.initiatief || !axes ? "normaal" : decideBehavior({ values: mood.values, axes, rng: random, vorigeGenegeerd: lastIgnored });
+    if (!options.initiatief) lastIgnored = behavior === "negeren";
+    // Vertrouwdheid (familiarity.ts): een beurt telt, een positieve beurt extra; een genegeerde beurt telt niet als beurt.
+    const familiarityAxes = axes ?? { tf: 0.5, expressiveness: 0.5 };
+    let familiarity = awake.familiarity;
+    if (!options.initiatief) {
+      if (behavior === "negeren") familiarity = updateFamiliarity({ current: familiarity, event: "genegeerd", axes: familiarityAxes });
+      else {
+        familiarity = updateFamiliarity({ current: familiarity, event: "beurt", axes: familiarityAxes });
+        if ((type1Deltas.blij ?? 0) >= FAMILIARITY_POSITIVE_DELTA) familiarity = updateFamiliarity({ current: familiarity, event: "positief", axes: familiarityAxes });
+      }
+    }
+    if ((next !== stored && next) || birthdayBoost || familiarity !== awake.familiarity) {
       const updated = await deps.db
         .update(dynimos)
         .set({
           ...(next && { moodValues: next.values, moodAt: next.at }),
+          ...(familiarity !== awake.familiarity && { familiarity }),
           ...(birthdayBoost && { lastBirthdayBoostOn: dayOf(now()) }),
         })
         .where(eq(dynimos.id, being.id))
@@ -940,10 +1059,6 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
       yield { type: "sound", kind: soundKind };
     }
 
-    // Emotie stuurt gedrag (behavior.ts). Een spontane uiting (initiatief) wordt nooit genegeerd of ingekort.
-    const axes = rowAxes(awake);
-    const behavior = options.initiatief || !axes ? "normaal" : decideBehavior({ values: mood.values, axes, rng: random, vorigeGenegeerd: lastIgnored });
-    if (!options.initiatief) lastIgnored = behavior === "negeren";
     const userMessage: ModelMessage = { role: "user", content: text };
     if (behavior === "negeren") {
       // Zichtbaar op het gezichtje via de (boze) Stemming plus een non-verbaal geluid; geen antwoord en geen TTS.
@@ -955,6 +1070,19 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
 
     // ponytail: sequentieel na de emotie; parallel met Type1 als de latency ooit telt.
     const recalled = await recall(text, being.id);
+    // Spontane herinnering: bij initiatief die van considerInitiative (al in `text`), anders heel zelden een aanleiding.
+    let spontaneousId = options.initiatief ? pendingSpontaneousId : undefined;
+    if (options.initiatief) pendingSpontaneousId = undefined;
+    const dreamToMark = options.initiatief ? pendingDreamId : undefined;
+    if (options.initiatief) pendingDreamId = undefined;
+    let spontaneousPromptMessage: SystemModelMessage[] = [];
+    if (!options.initiatief && axes) {
+      const picked = await pickSpontaneous(being.id, axes, SPONTANEOUS_TURN_CHANCE);
+      if (picked) {
+        spontaneousId = picked.id;
+        spontaneousPromptMessage = [spontaneousPrompt(picked.text)];
+      }
+    }
     const [dream] = random() < DREAM_RECALL_CHANCE
       ? await deps.db.select({ text: dreams.text }).from(dreams).where(eq(dreams.dynimoId, being.id)).orderBy(desc(dreams.createdAt), desc(dreams.id)).limit(1)
       : [];
@@ -969,7 +1097,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     const result = streamText({
       abortSignal: abort.signal,
       model: intent === "complex" ? deps.type2.heavy : deps.type2.light,
-      instructions: [stable, ageMessage(being), ...birthdayMessages(awake), moodMessage(mood), ...(BEHAVIOR_PROMPTS[behavior] ? [BEHAVIOR_PROMPTS[behavior]] : []), recallPrompt(recalled), ...(dream ? [dreamPrompt(dream.text)] : [])],
+      instructions: [stable, ageMessage(being), ...birthdayMessages(awake), moodMessage(mood), familiarityMessage(familiarity), ...(BEHAVIOR_PROMPTS[behavior] ? [BEHAVIOR_PROMPTS[behavior]] : []), ...opinionMessage, recallPrompt(recalled), ...spontaneousPromptMessage, ...(dream ? [dreamPrompt(dream.text)] : [])],
       messages: [...workingMemory, userMessage],
       tools,
       // Genoeg stappen om een tool te gebruiken en daarna het resultaat te verwoorden.
@@ -977,6 +1105,28 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     });
 
     let full = "";
+    // Spraakgeluid: vooraf gekozen en als directe eerste mini-chunk verstuurd (geen wachten op tekstlengte);
+    // `full` (Herinnering/Werkgeheugen) blijft de schone tekst.
+    let soundDecided = false;
+    // Pauzes (interpunctie) per zin vanaf de tweede zin; de eerste zin gaat ongebufferd door.
+    const pacing = axes ? pacingFor({ values: mood.values, expressiveness: axes.expressiveness }) : null;
+    const pacer = createPacer(pacing?.pauseLevel ?? 0, pacing?.halting);
+    function* emitText(delta: string): Generator<BrainEvent> {
+      const paced = pacer.push(delta);
+      if (paced) yield { type: "text", delta: paced };
+    }
+    function* soundFirst(): Generator<BrainEvent> {
+      if (soundDecided) return;
+      soundDecided = true;
+      const sound = axes ? pickSpeechSound({ values: mood.values, axes, rng: random, isShort: behavior === "kort", previous: lastSpeechSound }) : null;
+      if (!sound) return;
+      lastSpeechSound = sound;
+      yield { type: "text", delta: `${sound} ` };
+    }
+    function* flushPacer(): Generator<BrainEvent> {
+      const rest = pacer.flush();
+      if (rest) yield { type: "text", delta: rest };
+    }
     // "interrupted" tot het tegendeel bewezen is: stopt de consument vroegtijdig (barge-in), dan
     // draait enkel de finally hieronder.
     let outcome: "completed" | "failed" | "interrupted" = "interrupted";
@@ -986,15 +1136,20 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
         if (part.type === "error") throw part.error;
         if (part.type === "text-delta") {
           full += part.text;
-          yield { type: "text", delta: part.text };
+          yield* soundFirst();
+          yield* emitText(part.text);
         }
-        if (part.type === "tool-call") yield { type: "tool-call", toolName: part.toolName, input: part.input };
+        if (part.type === "tool-call") {
+          yield* flushPacer();
+          yield { type: "tool-call", toolName: part.toolName, input: part.input };
+        }
         if (part.type === "tool-result") yield { type: "tool-result", toolName: part.toolName, output: part.output };
         if (part.type === "tool-error") {
           const message = part.error instanceof Error ? part.error.message : String(part.error);
           yield { type: "tool-result", toolName: part.toolName, output: { error: message } };
         }
       }
+      yield* flushPacer();
       outcome = "completed";
     } catch (error) {
       outcome = "failed";
@@ -1008,6 +1163,12 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
       } else if (outcome === "interrupted" && full) {
         workingMemory.push(userMessage, { role: "assistant", content: full });
       }
+      if (outcome === "completed" && spontaneousId !== undefined) {
+        await deps.db.update(memories).set({ lastRecalledAt: now() }).where(eq(memories.id, spontaneousId));
+      }
+      if (outcome === "completed" && dreamToMark !== undefined) {
+        await deps.db.update(dreams).set({ toldAt: now() }).where(eq(dreams.id, dreamToMark));
+      }
       if (outcome !== "failed" && full.trim()) {
         await remember(options.initiatief ? `${being.name}: ${full}` : `Gesprekspartner: ${text}\n${being.name}: ${full}`, being.id, indruk);
       }
@@ -1018,8 +1179,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
   function forgetBeing(): void {
     current = undefined;
     lastIgnored = false;
-    workingMemory.length = 0;
-    sessionMemoryIds.length = 0;
+    resetSession();
   }
 
   async function kill(id: number, confirmedName: string): Promise<Epitaph | null> {
@@ -1060,6 +1220,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     if (reflecting > 0) return null;
     const [awake] = await deps.db.select().from(dynimos).where(isNotNull(dynimos.awakeSince));
     if (!awake) return null;
+    adopt(awake); // wisselen wist de pending-ids van de vorige Dynimo vóór we die van deze zetten
     try {
       const driveRows = await loadDrives(awake.id);
       const mood = moodOfRow(awake, now());
@@ -1092,6 +1253,23 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
         },
       });
       if (answers.spreken.choice !== "ja") return null;
+      const axes = rowAxes(awake);
+      const spontaneous = axes ? await pickSpontaneous(awake.id, axes, SPONTANEOUS_INITIATIVE_CHANCE) : null;
+      pendingSpontaneousId = spontaneous?.id;
+      pendingDreamId = undefined;
+      if (spontaneous) return `Je begint uit jezelf een gesprek en komt spontaan terug op iets uit een eerder gesprek: "${spontaneous.text}". ${SPONTANEOUS_HOW}`;
+      // Herinnering gaat voor Droom: nooit beide in één initiatief-moment. Initiatief gebeurt in rust, dus displayState 'wakker'.
+      const told = pickDreamToTell({
+        dreams: await deps.db.select().from(dreams).where(and(eq(dreams.dynimoId, awake.id), isNull(dreams.toldAt), gt(dreams.createdAt, new Date(now().getTime() - DREAM_MAX_AGE_MS)))),
+        values: mood.values,
+        displayState: "wakker",
+        rng: random,
+        now: now(),
+      });
+      if (told) {
+        pendingDreamId = told.id;
+        return `Je begint uit jezelf een gesprek en vertelt over een droom die je recent had: "${told.text}". ${DREAM_HOW}`;
+      }
       return answers.onderwerp.choice === "doel" && hasGoal
         ? "Je begint uit jezelf een gesprek, want je wilt praten over een van je actieve Doelen."
         : "Je begint uit jezelf een gesprek over iets wat je bezighoudt of waar je nieuwsgierig naar bent.";
@@ -1101,5 +1279,5 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     }
   }
 
-  return { bringToLife, wake, sleep, kill, list, backfill, reflect, considerInitiative, hear, forceMood, setMood, setAxes, setVoiceProfile, setArchetype, addMemory, removeMemory };
+  return { bringToLife, wake, sleep, kill, list, backfill, reflect, considerInitiative, hear, forceMood, setMood, setAxes, setFamiliarity, setVoiceProfile, setArchetype, addMemory, removeMemory };
 }

@@ -36,6 +36,8 @@ export const dynimos = pgTable(
     // Reactiviteit (#59): hoe hard emoties bewegen en hoe traag ze uitdoven. Expressiviteit: hoeveel emotie doorschemert.
     axisReactivity: real("axis_reactivity").notNull().default(0.5),
     axisExpressiveness: real("axis_expressiveness").notNull().default(0.5),
+    // Vertrouwdheid (#75): 0–1, hoe vertrouwd de relatie met de Gesprekspartner is; stuurt de toon (zie familiarity.ts).
+    familiarity: real("familiarity").notNull().default(0.2),
     // TTS-stem (model/stemnaam van de actieve spraakprovider). NULL = default van de agent.
     voice: text("voice"),
     // Vrije stembeschrijving (#62), input voor Voice Design (#64). NULL = geen.
@@ -47,12 +49,12 @@ export const dynimos = pgTable(
   (table) => [
     check(
       "dynimos_base_emotion_check",
-      sql`${table.baseEmotion} in ('blij', 'boos', 'verrast', 'kalm', 'verveeld', 'nieuwsgierig', 'bang', 'neutraal')`,
+      sql`${table.baseEmotion} in ('blij', 'boos', 'verrast', 'kalm', 'verveeld', 'nieuwsgierig', 'bang', 'neutraal', 'droevig', 'vredig', 'druk')`,
     ),
     check("dynimos_mood_all_or_none", sql`(${table.moodValues} is null) = (${table.moodAt} is null)`),
     check(
       "dynimos_wake_mood_emotion_check",
-      sql`${table.wakeMoodEmotion} in ('blij', 'boos', 'verrast', 'kalm', 'verveeld', 'nieuwsgierig', 'bang', 'neutraal')`,
+      sql`${table.wakeMoodEmotion} in ('blij', 'boos', 'verrast', 'kalm', 'verveeld', 'nieuwsgierig', 'bang', 'neutraal', 'droevig', 'vredig', 'druk')`,
     ),
     check("dynimos_wake_mood_intensity_range", sql`${table.wakeMoodIntensity} between 0 and 1`),
     check(
@@ -65,6 +67,7 @@ export const dynimos = pgTable(
     check("dynimos_axis_jp_range", sql`${table.axisJp} between 0 and 1`),
     check("dynimos_axis_reactivity_range", sql`${table.axisReactivity} between 0 and 1`),
     check("dynimos_axis_expressiveness_range", sql`${table.axisExpressiveness} between 0 and 1`),
+    check("dynimos_familiarity_range", sql`${table.familiarity} between 0 and 1`),
     uniqueIndex("dynimos_single_awake_idx").on(sql`(true)`).where(sql`${table.awakeSince} is not null`),
   ],
 );
@@ -86,6 +89,8 @@ export const memories = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
     // Hoe vormend de uiting was (Type1, 0..1); zware Indruk weegt zwaar in de Reflectie. Default = neutraal.
     impression: real("impression").notNull().default(0.5),
+    // Laatst spontaan aangehaald (Spontane herinnering, cooldown); null = nog nooit.
+    lastRecalledAt: timestamp("last_recalled_at", { withTimezone: true }),
   },
   (table) => [
     index("memories_embedding_idx").using("hnsw", table.embedding.op("vector_cosine_ops")),
@@ -131,12 +136,13 @@ export const dreams = pgTable(
     emotion: text("emotion").notNull(),
     intensity: real("intensity").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    toldAt: timestamp("told_at", { withTimezone: true }),
   },
   (table) => [
     index("dreams_dynimo_id_idx").on(table.dynimoId),
     check(
       "dreams_emotion_check",
-      sql`${table.emotion} in ('blij', 'boos', 'verrast', 'kalm', 'verveeld', 'nieuwsgierig', 'bang', 'neutraal')`,
+      sql`${table.emotion} in ('blij', 'boos', 'verrast', 'kalm', 'verveeld', 'nieuwsgierig', 'bang', 'neutraal', 'droevig', 'vredig', 'druk')`,
     ),
     check("dreams_intensity_range", sql`${table.intensity} between 0 and 1`),
   ],

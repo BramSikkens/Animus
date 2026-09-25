@@ -1,0 +1,1 @@
+ALTER TABLE "memories" ADD COLUMN "last_recalled_at" timestamp with time zone;

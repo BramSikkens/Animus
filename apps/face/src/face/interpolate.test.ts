@@ -44,6 +44,23 @@ describe("frameFor", () => {
     expect(frameFor("kalm", 1).brow).toEqual({ angle: 0, raise: 0 });
   });
 
+  it("droevig, vredig en druk hebben een eigen keyframe en tweenen naar het doel", () => {
+    for (const emotion of ["droevig", "vredig", "druk"] as const) {
+      expect(KEYFRAMES[emotion].background).toMatch(/^#[0-9a-f]{6}$/);
+      expect(KEYFRAMES[emotion].background).not.toBe(NEUTRAL.background);
+      const frame = frameFor(emotion, 1);
+      expect(frame.background).toBe(KEYFRAMES[emotion].background);
+      expect(frame.mouth).toEqual(KEYFRAMES[emotion].mouth);
+    }
+  });
+
+  it("droevig: mondhoeken omlaag; vredig: zachte lach, halfdichte ogen; druk: wijd open ogen", () => {
+    expect(KEYFRAMES.droevig.mouth.curve).toBeLessThan(0);
+    expect(KEYFRAMES.vredig.mouth.curve).toBeGreaterThan(0);
+    expect(KEYFRAMES.vredig.eyes.left.open).toBeLessThan(1);
+    expect(KEYFRAMES.druk.eyes.left.open).toBe(1);
+  });
+
   it("intensiteiten buiten [0,1] worden geclampt", () => {
     expect(frameFor("boos", -5)).toEqual(frameFor("boos", 0));
     expect(frameFor("boos", 5)).toEqual(frameFor("boos", 1));

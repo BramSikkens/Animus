@@ -1,9 +1,10 @@
 import { desc, eq, isNull } from "drizzle-orm";
-import { EMOTIONS } from "@animus/brain/emotion";
+import { EMOTIONS, EMOTION_GROUPS } from "@animus/brain/emotion";
 import { formatAge } from "@animus/brain/age";
 import { moodOfRow } from "@animus/brain/mood";
 import { DRIVE_KINDS, DRIVE_LABELS, type DriveKind } from "@animus/brain/drives";
 import { ARCHETYPES, getArchetype } from "@animus/brain/archetypes";
+import { familiarityStyle } from "@animus/brain/familiarity";
 import { AXES, AXIS_LABELS, AXIS_LETTERS, MBTI_AXES, mbtiType, rowAxes } from "@animus/brain/personality";
 import { speechProvider, voicesFor } from "@animus/brain/voice";
 import { dreams, drives, dynimos, epitaphs, memories } from "@animus/db/schema";
@@ -12,7 +13,7 @@ import { ActionForm } from "./action-form";
 import { VoiceCatalog } from "./voice-catalog";
 import { VoiceDesign } from "./voice-design";
 import { getCatalog, getTier } from "../lib/voice-catalog";
-import { addMemory, bringToLife, forceMood, kill, removeMemory, setArchetype, setAxes, setMood, setVoice, sleep, wake } from "./actions";
+import { addMemory, bringToLife, forceMood, kill, removeMemory, setArchetype, setAxes, setFamiliarity, setMood, setVoice, sleep, wake } from "./actions";
 import { formatDate, formatDateTime } from "../lib/format";
 
 export const dynamic = "force-dynamic";
@@ -116,6 +117,9 @@ export default async function DashboardPage() {
                   )}
                   <p>Archetype: {getArchetype(dynimo.archetype)?.name ?? "geen"}</p>
                   <p>Basisemotie: {dynimo.baseEmotion ?? "nog niet bepaald"}</p>
+                  <p>
+                    Vertrouwdheid: {familiarityStyle(dynimo.familiarity).band} ({dynimo.familiarity.toFixed(2)})
+                  </p>
                   {axes ? (
                     <div className="personality">
                       <p>
@@ -177,11 +181,15 @@ export default async function DashboardPage() {
                     <input name="intensity" type="number" min={0} max={1} step={0.05} defaultValue={0.8} aria-label="Intensiteit (0 tot 1)" required />
                   </ActionForm>
                   <ActionForm action={setMood} label="Stemming zetten" pendingLabel="Zet…" id={dynimo.id}>
-                    {EMOTIONS.map((emotion) => (
-                      <label key={emotion} className="slider">
-                        {emotion}
-                        <input name={`mood_${emotion}`} type="range" min={0} max={100} step={1} defaultValue={Math.round(moodOfRow(dynimo, new Date()).values[emotion])} />
-                      </label>
+                    {EMOTION_GROUPS.map((group) => (
+                      <div key={group[0]} className="slider-group">
+                        {group.map((emotion) => (
+                          <label key={emotion} className="slider">
+                            {emotion}
+                            <input name={`mood_${emotion}`} type="range" min={0} max={100} step={1} defaultValue={Math.round(moodOfRow(dynimo, new Date()).values[emotion])} />
+                          </label>
+                        ))}
+                      </div>
                     ))}
                   </ActionForm>
                   <ActionForm action={setAxes} label="Persoonlijkheid zetten" pendingLabel="Zet…" id={dynimo.id}>
@@ -191,6 +199,12 @@ export default async function DashboardPage() {
                         <input name={`axis_${axis}`} type="range" min={0} max={1} step={0.01} defaultValue={axes?.[axis] ?? 0.5} />
                       </label>
                     ))}
+                  </ActionForm>
+                  <ActionForm action={setFamiliarity} label="Vertrouwdheid zetten" pendingLabel="Zet…" id={dynimo.id}>
+                    <label className="slider">
+                      Vertrouwdheid
+                      <input name="familiarity" type="range" min={0} max={1} step={0.01} defaultValue={dynimo.familiarity} />
+                    </label>
                   </ActionForm>
                   <ActionForm action={setArchetype} label="Archetype toepassen (zet assen en basisemotie)" pendingLabel="Zet…" id={dynimo.id}>
                     <select name="archetype" aria-label="Archetype" defaultValue={getArchetype(dynimo.archetype)?.id ?? ARCHETYPES[0]!.id}>

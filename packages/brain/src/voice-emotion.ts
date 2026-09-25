@@ -13,6 +13,9 @@ const PROFILES: Partial<Record<Emotion, { stability: number; style: number; spee
   bang: { stability: -0.25, style: 0.2, speed: 0.12 },
   verveeld: { stability: 0.3, style: 0, speed: -0.15 },
   kalm: { stability: 0.25, style: 0, speed: -0.08 },
+  droevig: { stability: 0.2, style: 0, speed: -0.12 },
+  vredig: { stability: 0.3, style: 0, speed: -0.1 },
+  druk: { stability: -0.2, style: 0.1, speed: 0.1 },
   verrast: { stability: -0.05, style: 0.3, speed: 0.05 },
   nieuwsgierig: { stability: 0, style: 0.2, speed: 0.03 },
 };

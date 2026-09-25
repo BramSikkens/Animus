@@ -1,4 +1,4 @@
-import { createBrain, type Brain } from "@animus/brain";
+import { createBrain, defaultVoiceDeps, type Brain } from "@animus/brain";
 import { EMBEDDING_MODEL, loadType2Config, TYPE1_MODEL } from "@animus/brain/config";
 import { db } from "./db";
 
@@ -11,5 +11,6 @@ export function getBrain(): Brain {
     type1: TYPE1_MODEL,
     type2: loadType2Config(),
     embedder: EMBEDDING_MODEL,
+    voices: defaultVoiceDeps(process.env),
   }));
 }

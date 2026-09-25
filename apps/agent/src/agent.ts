@@ -2,6 +2,7 @@ import { ReadableStream } from "node:stream/web";
 import { fileURLToPath } from "node:url";
 import { createBrain, type Brain } from "@animus/brain";
 import { DISPLAY_TOPIC, type DisplayMessage, type DisplayState } from "@animus/brain/display";
+import { COMMAND_TOPIC, GALLERY_TOPIC, type GalleryMessage } from "@animus/brain/gallery";
 import { SOUND_TOPIC, type SoundMessage } from "@animus/brain/sound";
 import { EMOTION_TOPIC, type EmotionMessage } from "@animus/brain/emotion";
 import { initiativeFactor } from "@animus/brain/behavior";
@@ -31,10 +32,12 @@ import * as silero from "@livekit/agents-plugin-silero";
 import { RoomEvent } from "@livekit/rtc-node";
 import { readState, watchDynimos } from "./dynimo-watch.js";
 import { createStateRepublisher, emotionMessageFor } from "./state-republish.js";
+import { createCommandHandler, galleryMessageFor, MAX_GRAVES } from "./gallery-commands.js";
 import { createInitiativeTimer, initiativeIntervalMs, parseInitiativeMinutes } from "./initiative-timer.js";
 import { createReflectionDisplay } from "./reflection-display.js";
 import { createSilenceTimer, parseSilenceMinutes } from "./silence-timer.js";
 import { voiceSettingsFor } from "@animus/brain/voice-emotion";
+import { pacingFor, withPacingSpeed } from "@animus/brain/speech-pacing";
 import { applyTtsEmotion, applyTtsVoice } from "./tts-voice.js";
 import { textStream } from "./text-stream.js";
 import { resolveDisplay, voiceDisplay } from "./voice-display.js";
@@ -198,7 +201,7 @@ export default defineAgent<AgentUserData>({
       },
     });
 
-    const publish = (topic: string, message: DisplayMessage | ReturnType<typeof emotionMessageFor>): void => {
+    const publish = (topic: string, message: DisplayMessage | GalleryMessage | ReturnType<typeof emotionMessageFor>): void => {
       const participant = ctx.room.localParticipant;
       if (!participant) return;
       participant
@@ -239,6 +242,33 @@ export default defineAgent<AgentUserData>({
       }
     };
 
+    // Galerij: alle levende Dynimo's (naam, wakker) voor het startscherm van het gezichtje.
+    const publishGallery = async (): Promise<void> => {
+      try {
+        // Grafschriften lees ik hier rechtstreeks (ADR-0003: het brein leest die tabel nooit).
+        const graves = await db.query.epitaphs.findMany({ orderBy: (e, { desc }) => desc(e.deletedAt), limit: MAX_GRAVES });
+        publish(GALLERY_TOPIC, galleryMessageFor(await brain.list(), graves));
+      } catch (error) {
+        console.error("Galerij publiceren faalde:", error instanceof Error ? error.message : error);
+      }
+    };
+    // Commando's van het gezichtje (dev-only, geen auth): wake/sleep; handler valideert zelf.
+    const handleCommand = createCommandHandler({
+      brain,
+      publishGallery: () => void publishGallery(),
+      onError: (error) => console.error("Commando uitvoeren faalde:", error instanceof Error ? error.message : error),
+    });
+    ctx.room.on(RoomEvent.DataReceived, (payload, _participant, _kind, topic) => {
+      if (topic !== COMMAND_TOPIC) return;
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(new TextDecoder().decode(payload));
+      } catch {
+        return;
+      }
+      void handleCommand(parsed);
+    });
+
     // Reflectie bij stilte: na REFLECT_SILENCE_MINUTES zonder uiting reflecteert de wakkere Dynimo (hij blijft
     // wakker). Het gezichtje toont dan "reflecterend"; een uiting zet het meteen terug en de Reflectie loopt door.
     const silenceConfig = parseSilenceMinutes(process.env.REFLECT_SILENCE_MINUTES);
@@ -273,7 +303,9 @@ export default defineAgent<AgentUserData>({
       reflectionDisplay.onUtterance();
     }, (values) => {
       // Expressiviteit uit de gecachete assen (refresh bij start, wissel en initiatief-check).
-      applyTtsEmotion(speechProvider(process.env), tts, voiceSettingsFor({ values, expressiveness: initiativeAxes?.expressiveness ?? 0.5 }));
+      const expressiveness = initiativeAxes?.expressiveness ?? 0.5;
+      // Tempo per Emotie (#70) via speed; de afronding in applyTtsEmotion voorkomt extra websocket-herstarts.
+      applyTtsEmotion(speechProvider(process.env), tts, withPacingSpeed(voiceSettingsFor({ values, expressiveness }), pacingFor({ values, expressiveness }).speedFactor));
     });
     const initiative = createInitiativeTimer({
       intervalMs: () => initiativeIntervalMs(initiativeAxes, initiativeBaseMs.ms, initiativeMoodFactor),
@@ -290,7 +322,10 @@ export default defineAgent<AgentUserData>({
     });
     ctx.addShutdownCallback(async () => initiative.dispose());
 
-    await session.start({ agent: animusAgent, room: ctx.room });
+    // closeOnDisconnect uit: anders sluit de sessie (en stopt de job) zodra de eerste face disconnect, terwijl de room
+    // voor een andere tab blijft bestaan; LiveKit dispatcht enkel bij room-creatie, dus die tab zag dan geen agent.
+    // De job eindigt nu pas met de room; alle timers/watchers ruimen op via de shutdown-callbacks.
+    await session.start({ agent: animusAgent, room: ctx.room, inputOptions: { closeOnDisconnect: false } });
 
     // Volgt de wakkere Dynimo (dashboard-acties komen binnen via Postgres NOTIFY): een wissel breekt het
     // lopende antwoord af (zoals barge-in; de brain-stream sluit via textStream) en zet het gezichtje om.
@@ -298,6 +333,7 @@ export default defineAgent<AgentUserData>({
       databaseUrl,
       brain,
       onMood: () => void publishState(),
+      onNotify: () => void publishGallery(),
       onVoice: () => void readState(brain).then((state) => applyVoice(state.voice)).catch(() => {}),
       onChange: (state) => {
         applyVoice(state.voice);
@@ -319,6 +355,7 @@ export default defineAgent<AgentUserData>({
     ctx.addShutdownCallback(() => watcher.close());
     applyVoice(watcher.current().voice);
     void publishState();
+    void publishGallery();
     // De Stemming dooft uit met de tijd: periodiek opnieuw publiceren laat de balken meelopen (enkel bij wakker + face).
     const republisher = createStateRepublisher({
       intervalMs: 5000,
@@ -326,6 +363,13 @@ export default defineAgent<AgentUserData>({
       publish: () => void publishState(),
     });
     republisher.start();
+    const galleryRepublisher = createStateRepublisher({
+      intervalMs: 5000,
+      isActive: () => ctx.room.remoteParticipants.size > 0,
+      publish: () => void publishGallery(),
+    });
+    galleryRepublisher.start();
+    ctx.addShutdownCallback(async () => galleryRepublisher.dispose());
     ctx.addShutdownCallback(async () => republisher.dispose());
     silence.arm();
     void refreshInitiativeAxes().catch(() => {});
@@ -337,9 +381,11 @@ export default defineAgent<AgentUserData>({
     const retryTimers = new Set<NodeJS.Timeout>();
     ctx.room.on(RoomEvent.ParticipantConnected, () => {
       void publishState();
+      void publishGallery();
       const timer = setTimeout(() => {
         retryTimers.delete(timer);
         void publishState();
+        void publishGallery();
       }, 2000);
       retryTimers.add(timer);
     });

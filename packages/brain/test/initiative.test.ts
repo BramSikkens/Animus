@@ -241,8 +241,8 @@ describe("hear(..., { initiatief: true })", () => {
     const events = await collect(brain.hear("Je begint uit jezelf een gesprek.", { initiatief: true }));
 
     expect(type1.calls).toHaveLength(0);
-    expect(events.filter((event) => event.type === "text").map((event) => (event as { delta: string }).delta).join("")).toBe(
-      "Zeg, ik dacht net aan de zee.",
+    expect(events.filter((event) => event.type === "text").map((event) => (event as { delta: string }).delta).join("")).toContain(
+      "Zeg, ik dacht net aan de zee.", // een Spraakgeluid ervoor is toegestaan
     );
     expect(events[0]).toMatchObject({ type: "mood", emotion: "blij" });
     const [row] = await db.select().from(dynimos).where(eq(dynimos.id, dynimo.id));

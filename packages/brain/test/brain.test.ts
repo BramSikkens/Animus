@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { MockEmbeddingModelV4, MockLanguageModelV4, Experimental_EvaluationMockModelV4 } from "ai/test";
 import { simulateReadableStream } from "ai";
 import { eq, isNotNull } from "drizzle-orm";
@@ -8,6 +8,7 @@ import { EMOTIONS } from "../src/emotion.js";
 import { moodOfRow, singleEmotionValues, type MoodValues } from "../src/mood.js";
 import { ARCHETYPES, getArchetype } from "../src/archetypes.js";
 import { createBrain, DELTA_TABLE, STATE_CHANNEL, type BrainEvent } from "../src/index.js";
+import type { CatalogVoice } from "../src/voice-catalog.js";
 import { createTestDb, databaseUrl, TEST_DB_NAME, truncateAll } from "./db.js";
 
 const db = createTestDb();
@@ -44,10 +45,12 @@ function genesisModel(result: {
   drives?: typeof MID_DRIVES;
   baseEmotion?: string;
   archetype?: string | null;
+  voiceDescription?: string;
+  voiceSearchTerms?: string[];
 }) {
   return new MockLanguageModelV4({
     doGenerate: async () => ({
-      content: [{ type: "text" as const, text: JSON.stringify({ axes: MID_AXES, drives: MID_DRIVES, baseEmotion: "kalm", archetype: null, ...result }) }],
+      content: [{ type: "text" as const, text: JSON.stringify({ axes: MID_AXES, drives: MID_DRIVES, baseEmotion: "kalm", archetype: null, voiceDescription: "", voiceSearchTerms: [], ...result }) }],
       finishReason: STOP,
       usage: NULL_USAGE,
       warnings: [],
@@ -63,7 +66,7 @@ function generateResult(text: string) {
 function lifecycleModel(name: string, farewell: string) {
   return new MockLanguageModelV4({
     doGenerate: [
-      generateResult(JSON.stringify({ name, coreCharacter: "Speels.", birthStory: "Geboren uit ochtendnevel.", axes: MID_AXES, drives: MID_DRIVES, baseEmotion: "kalm", archetype: null })),
+      generateResult(JSON.stringify({ name, coreCharacter: "Speels.", birthStory: "Geboren uit ochtendnevel.", axes: MID_AXES, drives: MID_DRIVES, baseEmotion: "kalm", archetype: null, voiceDescription: "", voiceSearchTerms: [] })),
       generateResult(farewell),
     ],
   });
@@ -219,6 +222,77 @@ describe("createBrain", () => {
     expect(rows[0]?.seed).toBe(result.seed);
     expect(result.awakeSince).toEqual(bornAt);
     expect(rows[0]?.awakeSince).toEqual(bornAt);
+  });
+
+  describe("genesis-stemkeuze", () => {
+    const bornAt = new Date("2026-01-01T00:00:00.000Z");
+    const voice = (id: string, description: string): CatalogVoice => ({
+      id, name: id, gender: "", age: "", accent: "", description, useCase: "", language: "nl", previewUrl: "", category: "premade", usableOnFree: true,
+    });
+    const born = async (
+      result: Parameters<typeof genesisModel>[0],
+      voices?: NonNullable<Parameters<typeof createBrain>[0]["voices"]>,
+    ) => {
+      const heavy = genesisModel(result);
+      const brain = createBrain({ db, embedder: embedModel(), type1: type1Model(), type2: { light: unusedModel(), heavy }, now: () => bornAt, random: () => 0, voices });
+      return brain.bringToLife();
+    };
+    const base = { name: "Nova", coreCharacter: "x", birthStory: "y" };
+    const loader = (catalog: CatalogVoice[], tier = "starter") => ({ loadCatalog: async () => ({ catalog, tier }) });
+
+    it("is hermetisch: zonder voices doet createBrain geen netwerk, ook als ELEVENLABS_API_KEY in de omgeving staat", async () => {
+      const fetchSpy = vi.fn(async () => { throw new Error("netwerk!"); });
+      vi.stubGlobal("fetch", fetchSpy);
+      vi.stubEnv("ELEVENLABS_API_KEY", "k");
+      try {
+        const row = await born({ ...base, voiceDescription: "oude man" });
+        expect(row.voice).toBeNull();
+        expect(fetchSpy).not.toHaveBeenCalled();
+      } finally {
+        vi.unstubAllGlobals();
+        vi.unstubAllEnvs();
+      }
+    });
+
+    it("kiest een stem uit de catalogus op voiceDescription en zoektermen en bewaart het profiel", async () => {
+      const row = await born({ ...base, voiceDescription: "oude man, hees", voiceSearchTerms: ["old man"] }, loader([voice("opa", "old man raspy"), voice("kind", "child")]));
+      expect(row.voice).toBe("opa");
+      expect(row.voiceDescription).toBe("oude man, hees");
+      expect((await db.select().from(dynimos))[0]?.voice).toBe("opa");
+    });
+
+    it("gebruikt de voiceHint van het gekozen archetype als aanvulling", async () => {
+      const row = await born({ ...base, archetype: "robot" }, loader([voice("bot", "robotic voice"), voice("kind", "child")]));
+      expect(row.voice).toBe("bot");
+    });
+
+    it("blijft op de default-stem zonder match, bij lege catalogus en op free", async () => {
+      expect((await born({ ...base, voiceDescription: "alien" }, loader([voice("kind", "child")]))).voice).toBeNull();
+      expect((await born({ ...base, voiceDescription: "alien" }, loader([]))).voice).toBeNull();
+      expect((await born({ ...base, voiceDescription: "child" }, loader([voice("kind", "child")], "free"))).voice).toBeNull();
+    });
+
+    it("faalt nooit door de stemstap", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const row = await born({ ...base, voiceDescription: "child" }, { loadCatalog: async () => { throw new Error("API stuk"); } });
+      expect(row.name).toBe("Nova");
+      expect(row.voice).toBeNull();
+      expect(warn).toHaveBeenCalled();
+      warn.mockRestore();
+    });
+
+    it("ontwerpt een stem alleen zonder match en met design-functie; mislukt design blijft default", async () => {
+      const design = vi.fn(async () => "gen1");
+      const withDesign = { ...loader([voice("kind", "child")]), design };
+      expect((await born({ ...base, voiceDescription: "child" }, withDesign)).voice).toBe("kind");
+      expect(design).not.toHaveBeenCalled();
+      expect((await born({ ...base, name: "Nova2", voiceDescription: "alien" }, withDesign)).voice).toBe("gen1");
+      expect(design).toHaveBeenCalledWith("alien", "Nova2");
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const failing = { ...loader([]), design: async () => { throw new Error("geen tegoed"); } };
+      expect((await born({ ...base, voiceDescription: "alien" }, failing)).voice).toBeNull();
+      warn.mockRestore();
+    });
   });
 
   describe("genesis met archetypes", () => {
@@ -848,9 +922,9 @@ describe("createBrain", () => {
     const bornAt = new Date("2026-01-01T12:00:00.000Z");
     const heavy = new MockLanguageModelV4({
       doGenerate: [
-        generateResult(JSON.stringify({ name: "Nova", coreCharacter: "Speels.", birthStory: "Ochtendnevel.", axes: MID_AXES, drives: MID_DRIVES, baseEmotion: "kalm", archetype: null })),
+        generateResult(JSON.stringify({ name: "Nova", coreCharacter: "Speels.", birthStory: "Ochtendnevel.", axes: MID_AXES, drives: MID_DRIVES, baseEmotion: "kalm", archetype: null, voiceDescription: "", voiceSearchTerms: [] })),
         generateResult("Vaarwel, lieve Mimi-kenner."),
-        generateResult(JSON.stringify({ name: "Lumen", coreCharacter: "Rustig.", birthStory: "Maanlicht.", axes: MID_AXES, drives: MID_DRIVES, baseEmotion: "kalm", archetype: null })),
+        generateResult(JSON.stringify({ name: "Lumen", coreCharacter: "Rustig.", birthStory: "Maanlicht.", axes: MID_AXES, drives: MID_DRIVES, baseEmotion: "kalm", archetype: null, voiceDescription: "", voiceSearchTerms: [] })),
       ],
     });
     const light = new MockLanguageModelV4({ doStream: [textStream("Hoi."), textStream("Hallo, ik ben Lumen.")] });
@@ -966,9 +1040,9 @@ describe("createBrain", () => {
     const bornAt = new Date("2026-01-01T12:00:00.000Z");
     const heavy = new MockLanguageModelV4({
       doGenerate: [
-        generateResult(JSON.stringify({ name: "Nova", coreCharacter: "x", birthStory: "y", axes: MID_AXES, drives: MID_DRIVES, baseEmotion: "kalm", archetype: null })),
+        generateResult(JSON.stringify({ name: "Nova", coreCharacter: "x", birthStory: "y", axes: MID_AXES, drives: MID_DRIVES, baseEmotion: "kalm", archetype: null, voiceDescription: "", voiceSearchTerms: [] })),
         generateResult("Vaarwel."),
-        generateResult(JSON.stringify({ name: "Lumen", coreCharacter: "Rustig.", birthStory: "Maanlicht.", axes: MID_AXES, drives: MID_DRIVES, baseEmotion: "kalm", archetype: null })),
+        generateResult(JSON.stringify({ name: "Lumen", coreCharacter: "Rustig.", birthStory: "Maanlicht.", axes: MID_AXES, drives: MID_DRIVES, baseEmotion: "kalm", archetype: null, voiceDescription: "", voiceSearchTerms: [] })),
       ],
     });
     const deleter = createBrain({
@@ -1046,8 +1120,8 @@ describe("createBrain", () => {
     function genesisTwice(first: string, second: string) {
       return new MockLanguageModelV4({
         doGenerate: [
-          generateResult(JSON.stringify({ name: first, coreCharacter: "x", birthStory: "y", axes: MID_AXES, drives: MID_DRIVES, baseEmotion: "kalm", archetype: null })),
-          generateResult(JSON.stringify({ name: second, coreCharacter: "x", birthStory: "y", axes: MID_AXES, drives: MID_DRIVES, baseEmotion: "kalm", archetype: null })),
+          generateResult(JSON.stringify({ name: first, coreCharacter: "x", birthStory: "y", axes: MID_AXES, drives: MID_DRIVES, baseEmotion: "kalm", archetype: null, voiceDescription: "", voiceSearchTerms: [] })),
+          generateResult(JSON.stringify({ name: second, coreCharacter: "x", birthStory: "y", axes: MID_AXES, drives: MID_DRIVES, baseEmotion: "kalm", archetype: null, voiceDescription: "", voiceSearchTerms: [] })),
         ],
       });
     }
@@ -1255,8 +1329,8 @@ describe("createBrain", () => {
     function twoDynimosBrain() {
       const heavy = new MockLanguageModelV4({
         doGenerate: [
-          generateResult(JSON.stringify({ name: "Nova", coreCharacter: "x", birthStory: "y", axes: MID_AXES, drives: MID_DRIVES, baseEmotion: "kalm", archetype: null })),
-          generateResult(JSON.stringify({ name: "Lumen", coreCharacter: "x", birthStory: "y", axes: MID_AXES, drives: MID_DRIVES, baseEmotion: "kalm", archetype: null })),
+          generateResult(JSON.stringify({ name: "Nova", coreCharacter: "x", birthStory: "y", axes: MID_AXES, drives: MID_DRIVES, baseEmotion: "kalm", archetype: null, voiceDescription: "", voiceSearchTerms: [] })),
+          generateResult(JSON.stringify({ name: "Lumen", coreCharacter: "x", birthStory: "y", axes: MID_AXES, drives: MID_DRIVES, baseEmotion: "kalm", archetype: null, voiceDescription: "", voiceSearchTerms: [] })),
           generateResult("Vaarwel."),
         ],
       });
@@ -1383,7 +1457,7 @@ describe("createBrain", () => {
           light: unusedModel(),
           heavy: new MockLanguageModelV4({
             doGenerate: [
-              generateResult(JSON.stringify({ name: "Nova", coreCharacter: "x", birthStory: "y", axes: MID_AXES, drives: MID_DRIVES, baseEmotion: "kalm", archetype: null })),
+              generateResult(JSON.stringify({ name: "Nova", coreCharacter: "x", birthStory: "y", axes: MID_AXES, drives: MID_DRIVES, baseEmotion: "kalm", archetype: null, voiceDescription: "", voiceSearchTerms: [] })),
               generateResult("Vaarwel."),
             ],
           }),
@@ -1767,7 +1841,7 @@ describe("createBrain", () => {
       const brain = brainWith(
         new MockLanguageModelV4({
           doGenerate: [
-            generateResult(JSON.stringify({ name: "Nova", coreCharacter: "x", birthStory: "y", axes: MID_AXES, baseEmotion: "kalm", archetype: null, ...DRIVES_RESULT })),
+            generateResult(JSON.stringify({ name: "Nova", coreCharacter: "x", birthStory: "y", axes: MID_AXES, baseEmotion: "kalm", archetype: null, voiceDescription: "", voiceSearchTerms: [], ...DRIVES_RESULT })),
           ],
         }),
       );
@@ -2013,11 +2087,11 @@ describe("createBrain", () => {
 
     // Type1 met een reeks antwoorden (één per beurt); registreert wat hij ontving.
     function type1Sequence(answers: { deltas: Partial<Record<string, number>>; indruk?: number }[]) {
-      const calls: { state: string; questions: Record<string, { type?: string; criteria: string[] }> }[] = [];
+      const calls: { state: string; questions: Record<string, { type?: string; instructions?: string; criteria: string[] }> }[] = [];
       const model = new Experimental_EvaluationMockModelV4({
         doEvaluate: async (options) => {
           const answer = answers[calls.length] ?? answers.at(-1)!;
-          calls.push({ state: String((options as { state: unknown }).state), questions: (options as unknown as { questions: Record<string, { type?: string; criteria: string[] }> }).questions });
+          calls.push({ state: String((options as { state: unknown }).state), questions: (options as unknown as { questions: Record<string, { type?: string; instructions?: string; criteria: string[] }> }).questions });
           return {
             answers: {
               ...deltaAnswers(answer.deltas),
@@ -2124,6 +2198,29 @@ describe("createBrain", () => {
       expect(criteria[4]).toBe("geen verandering");
       expect(criteria[5]).toBe("+8");
       expect(criteria[8]).toBe("+100");
+    });
+
+    it("stelt Type1 ook delta-vragen voor droevig, vredig en druk, en vertelt dat tegenpolen vanzelf meebewegen", async () => {
+      await insertDynimo();
+      const { model, calls } = type1Sequence([{ deltas: {} }]);
+
+      await collectText(brainWith({ type1: model, light: textModel(["Hoi."]) }).hear("Hoi"));
+
+      for (const emotion of ["droevig", "vredig", "druk"]) expect(calls[0]!.questions[`delta_${emotion}`]).toBeDefined();
+      expect(calls[0]!.questions.delta_blij!.instructions).toContain("tegenpool");
+    });
+
+    it("laat een blij-delta de opgeslagen droevig-waarde afremmen (emotieparen)", async () => {
+      await insertDynimo({ moodValues: singleEmotionValues("droevig", 0.6), moodAt: bornAt });
+      const { model } = type1Sequence([{ deltas: { blij: 50 } }]);
+      const moods: { values: Record<string, number> }[] = [];
+
+      for await (const event of brainWith({ type1: model, light: textModel(["Hoi."]) }).hear("Goed nieuws!")) {
+        if (event.type === "mood") moods.push(event);
+      }
+
+      expect(moods[0]!.values.blij).toBeCloseTo(50);
+      expect(moods[0]!.values.droevig).toBeCloseTo(35); // 60 - 0.5 * 50
     });
 
     it("stelt Type1 alleen Score-vragen met hoogstens 10 niveaus (limiet van de typesafe-Score)", async () => {
@@ -2981,7 +3078,7 @@ describe("createBrain", () => {
       await addMemory(vero.id, "iets", 1);
       const heavy = new MockLanguageModelV4({
         doGenerate: [
-          generateResult(JSON.stringify({ name: "Nova", coreCharacter: "x", birthStory: "y", axes: MID_AXES, drives: MID_DRIVES, baseEmotion: "kalm", archetype: null })),
+          generateResult(JSON.stringify({ name: "Nova", coreCharacter: "x", birthStory: "y", axes: MID_AXES, drives: MID_DRIVES, baseEmotion: "kalm", archetype: null, voiceDescription: "", voiceSearchTerms: [] })),
           generateResult(JSON.stringify(reflection())),
         ],
       });
@@ -3100,6 +3197,16 @@ describe("createBrain", () => {
         const rows = await dreamsOf(vero.id);
         expect(rows.map((row) => [row.text, row.emotion, row.intensity])).toEqual([["Ik vloog boven een zee van klokken.", "bang", expect.closeTo(0.9)]]);
         expect(rows[0]!.createdAt).toEqual(bornAt);
+      });
+
+      it("accepteert de nieuwe emoties (droevig, vredig, druk) in de check-constraints van dynimos en dreams", async () => {
+        const [row] = await db
+          .insert(dynimos)
+          .values({ name: "Vero", coreCharacter: "x", birthStory: "y", seed: "z", bornAt, baseEmotion: "vredig", wakeMoodEmotion: "druk", wakeMoodIntensity: 0.5 })
+          .returning();
+        await db.insert(dreams).values({ dynimoId: row!.id, text: "Regen.", emotion: "droevig", intensity: 0.4, createdAt: bornAt });
+        expect((await dreamsOf(row!.id))[0]?.emotion).toBe("droevig");
+        expect(row).toMatchObject({ baseEmotion: "vredig", wakeMoodEmotion: "druk" });
       });
 
       it("bewaart geen Droom als het model er geen levert", async () => {
@@ -3259,6 +3366,20 @@ describe("createBrain", () => {
         expect(row.axisIe).toBeCloseTo(0.52, 5);
         expect(row.awakeSince).toEqual(bornAt);
         expect([row.wakeMoodEmotion, row.wakeMoodIntensity]).toEqual([null, null]); // blijft wakker: geen Ontwaakstemming
+      });
+
+      it("laat Vertrouwdheid dalen (Reflectie na lange stilte), maar niet bij slapen", async () => {
+        const vero = await insertDynimo({ familiarity: 0.5 });
+        await addMemory(vero.id, "iets", 1);
+
+        expect(await brainWith(heavyReturning(reflection())).reflect()).toBe(true);
+        const afterSilence = (await rowOf(vero.id)).familiarity;
+        expect(afterSilence).toBeLessThan(0.5);
+        expect(afterSilence).toBeGreaterThanOrEqual(0.05);
+
+        await addMemory(vero.id, "nog iets", 1);
+        await brainWith(heavyReturning(reflection())).sleep();
+        expect((await rowOf(vero.id)).familiarity).toBe(afterSilence);
       });
 
       it("geeft false zonder throw en schrijft niets bij een falende call of ongeldige output", async () => {
@@ -3526,6 +3647,19 @@ describe("createBrain", () => {
       it("geeft false bij een onbekende Dynimo", async () => {
         const vero = await insertDynimo();
         expect(await brainWith().setAxes(vero.id + 999, { ie: 0.1, sn: 0.9, tf: 0.3, jp: 0.7, reactivity: 0.5, expressiveness: 0.5 })).toBe(false);
+      });
+    });
+
+    describe("setFamiliarity", () => {
+      it("overschrijft de Vertrouwdheid", async () => {
+        const vero = await insertDynimo();
+        expect(await brainWith().setFamiliarity(vero.id, 0.85)).toBe(true);
+        expect((await rowOf(vero.id)).familiarity).toBe(0.85);
+      });
+
+      it("geeft false bij een onbekende Dynimo", async () => {
+        const vero = await insertDynimo();
+        expect(await brainWith().setFamiliarity(vero.id + 999, 0.5)).toBe(false);
       });
     });
 

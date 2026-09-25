@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { parseArchetypeId } from "@animus/brain/archetypes";
 import { isEmotion } from "@animus/brain/emotion";
 import { parseMoodValues } from "@animus/brain/mood";
+import { parseFamiliarity } from "@animus/brain/familiarity";
 import { parseAxes } from "@animus/brain/personality";
 import { cloneVoice, designVoice, saveDesignedVoice, type DesignPreview } from "@animus/brain/voice-design";
 import { parseVoice, speechProvider, voiceInputError } from "@animus/brain/voice";
@@ -91,6 +92,16 @@ export async function setAxes(_prev: ActionState, formData: FormData): Promise<A
     const axes = parseAxes((name) => formData.get(name));
     if (!axes) return "Ongeldige persoonlijkheidsassen.";
     if (!(await getBrain().setAxes(id, axes))) return DYNIMO_GONE;
+  });
+}
+
+export async function setFamiliarity(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  return run(async () => {
+    const id = parseId(formData);
+    if (id === null) return INVALID_ID;
+    const familiarity = parseFamiliarity((name) => formData.get(name));
+    if (familiarity === null) return "Ongeldige vertrouwdheid.";
+    if (!(await getBrain().setFamiliarity(id, familiarity))) return DYNIMO_GONE;
   });
 }
 

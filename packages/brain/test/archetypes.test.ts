@@ -24,6 +24,12 @@ describe("ARCHETYPES", () => {
   });
 });
 
+describe("Basisemotie van archetypes", () => {
+  it("de lieve oude dame rust op vredig", () => {
+    expect(getArchetype("lieve-oude-dame")?.baseEmotion).toBe("vredig");
+  });
+});
+
 describe("getArchetype / parseArchetypeId", () => {
   it("zoekt op id; onbekend of null geeft null", () => {
     expect(getArchetype("robot")?.name).toBeTruthy();

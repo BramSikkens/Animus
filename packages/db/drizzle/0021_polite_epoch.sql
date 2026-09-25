@@ -1,0 +1,1 @@
+ALTER TABLE "dreams" ADD COLUMN "told_at" timestamp with time zone;

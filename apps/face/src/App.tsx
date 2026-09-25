@@ -12,7 +12,7 @@ import {
 } from "@livekit/components-react";
 import { ConnectionState, type LocalAudioTrack } from "livekit-client";
 import { DISPLAY_STATES, DISPLAY_TOPIC, isDisplayState, type DisplayState } from "@animus/brain/display";
-import { GALLERY_TOPIC, screenFor, selectionLost, type GalleryBeing } from "@animus/brain/gallery";
+import { GALLERY_TOPIC, parseGalleryMessage, screenFor, selectionLost, type GalleryBeing, type GalleryGrave, type GalleryMessage } from "@animus/brain/gallery";
 import { Gallery, useSendCommand } from "./Gallery.js";
 import { EMOTION_TOPIC, EMOTIONS, isEmotion, type Emotion, type EmotionMessage } from "@animus/brain/emotion";
 import { doodleActive } from "./face/doodle.js";
@@ -106,21 +106,14 @@ function DisplayListener({ onDisplay, onName }: { onDisplay: (state: DisplayStat
   return null;
 }
 
-// Decodeert Galerij-berichten van de agent (GalleryMessage op GALLERY_TOPIC): id, naam en wakker per Dynimo.
-function GalleryListener({ onGallery }: { onGallery: (beings: GalleryBeing[]) => void }) {
+// Decodeert Galerij-berichten van de agent (GalleryMessage op GALLERY_TOPIC); oudere berichten zonder `graves` blijven geldig.
+function GalleryListener({ onGallery }: { onGallery: (message: GalleryMessage) => void }) {
   useDataChannel(GALLERY_TOPIC, (msg) => {
     if (!msg.from?.isAgent) return;
     try {
-      const payload: unknown = JSON.parse(new TextDecoder().decode(msg.payload));
-      const beings = payload !== null && typeof payload === "object" && "beings" in payload ? payload.beings : undefined;
-      if (
-        Array.isArray(beings) &&
-        beings.every((b) => b && typeof b.id === "number" && typeof b.name === "string" && typeof b.awake === "boolean")
-      ) {
-        onGallery(beings.map((b) => ({ id: b.id, name: b.name, awake: b.awake })));
-      } else {
-        console.error("Galerij-event heeft onverwachte vorm:", payload);
-      }
+      const message = parseGalleryMessage(JSON.parse(new TextDecoder().decode(msg.payload)));
+      if (message) onGallery(message);
+      else console.error("Galerij-event heeft onverwachte vorm");
     } catch (error) {
       console.error("Galerij-event kon niet verwerkt worden:", error instanceof Error ? error.message : error);
     }
@@ -235,6 +228,7 @@ function Screens({ view, onSelect, onBack }: { view: ReturnType<typeof screenFor
     return (
       <Gallery
         beings={view.beings}
+        graves={view.graves}
         onSelect={(being) => {
           if (!being.awake) send({ type: "wake", id: being.id });
           onSelect(being.id);
@@ -260,6 +254,7 @@ export function App() {
   const [displayState, setDisplayState] = useState<DisplayState>(DEFAULT_DISPLAY);
   const [name, setName] = useState<string | null>(null);
   const [beings, setBeings] = useState<GalleryBeing[] | null>(null);
+  const [graves, setGraves] = useState<GalleryGrave[]>([]);
   const [connected, setConnected] = useState(false);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [micError, setMicError] = useState<string | null>(null);
@@ -320,6 +315,7 @@ export function App() {
     setDisplayState(DEFAULT_DISPLAY);
     setName(null);
     setBeings(null);
+    setGraves([]);
     setMouthVolume(0);
     setUserText(undefined);
   }
@@ -344,7 +340,7 @@ export function App() {
     if (selectionLost({ selectedId, beings, sawAwake: sawAwake.current })) setSelectedId(null);
   }, [beings, selectedId]);
 
-  const view = screenFor({ connected, beings, selectedId });
+  const view = screenFor({ connected, beings, graves, selectedId });
 
   return (
     <>
@@ -398,7 +394,7 @@ export function App() {
             <UserTextListener onText={setUserText} />
             <MouthVolumeListener onVolume={setMouthVolume} />
             <VoiceReactionListener reaction={voice} />
-            <GalleryListener onGallery={setBeings} />
+            <GalleryListener onGallery={(message) => { setBeings(message.beings); setGraves(message.graves); }} />
             <SoundListener display={displayState} onSound={touch} />
             <ConnectionStatus />
             <RoomAudioRenderer />

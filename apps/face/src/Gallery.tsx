@@ -1,6 +1,7 @@
 import { createPortal } from "react-dom";
 import { useLocalParticipant } from "@livekit/components-react";
-import { COMMAND_TOPIC, type GalleryBeing, type GalleryCommand } from "@animus/brain/gallery";
+import { ageLabel } from "@animus/brain/age";
+import { COMMAND_TOPIC, type GalleryBeing, type GalleryCommand, type GalleryGrave } from "@animus/brain/gallery";
 
 // Dev-only, geen auth: de agent valideert het commando zelf.
 export function useSendCommand(): (command: GalleryCommand) => void {
@@ -21,14 +22,24 @@ function SleepingFace() {
   );
 }
 
-export function Gallery({ beings, onSelect }: { beings: GalleryBeing[]; onSelect: (being: GalleryBeing) => void }) {
+// Kaarsje i.p.v. een gezicht.
+function CandleIcon() {
+  return (
+    <svg viewBox="0 0 200 200" aria-hidden="true" className="tile-face">
+      <path d="M 100 44 Q 120 70 100 84 Q 80 70 100 44 Z M 100 84 V 92 M 84 92 H 116 V 156 H 84 Z" fill="none" stroke="#f4efe3" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+export function Gallery({ beings, graves, onSelect }: { beings: GalleryBeing[]; graves: GalleryGrave[]; onSelect: (being: GalleryBeing) => void }) {
   // Portal: .screen heeft een transform, waardoor position:fixed daarbinnen niet meer het viewport volgt.
   return createPortal(
     <section className="gallery" aria-label="Dynimo's">
-      {beings.length === 0 ? (
+      {beings.length === 0 && graves.length === 0 ? (
         <p className="gallery-empty">Nog geen Dynimo's. Laat er een geboren worden in het dashboard.</p>
       ) : (
-        <ul>
+        <>
+        {beings.length > 0 && <ul>
           {beings.map((being) => (
             <li key={being.id}>
               <button type="button" className="tile" onClick={() => onSelect(being)}>
@@ -38,7 +49,27 @@ export function Gallery({ beings, onSelect }: { beings: GalleryBeing[]; onSelect
               </button>
             </li>
           ))}
-        </ul>
+        </ul>}
+        {graves.length > 0 && (
+          <>
+            <h2 className="gallery-heading">In memoriam</h2>
+            <ul>
+              {graves.map((grave) => (
+                <li key={grave.id}>
+                  <details className="grave">
+                    <summary>
+                      <CandleIcon />
+                      <span>{grave.name}</span>
+                      <span className="grave-age">{ageLabel(grave.bornAt, grave.deletedAt)}</span>
+                    </summary>
+                    <p className="grave-farewell">{grave.farewell}</p>
+                  </details>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+        </>
       )}
     </section>,
     document.body,

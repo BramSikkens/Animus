@@ -15,12 +15,27 @@ function setup(list = rows) {
 
 describe("galleryMessageFor", () => {
   it("geeft id, naam en of de Dynimo wakker is", () => {
-    expect(galleryMessageFor(rows)).toEqual({
+    expect(galleryMessageFor(rows, [])).toEqual({
       beings: [
         { id: 1, name: "Anna", awake: false },
         { id: 2, name: "Bo", awake: true },
       ],
+      graves: [],
     });
+  });
+
+  it("zet Grafschriften om naar graven met ISO-datums en de Afscheidsreflectie als farewell", () => {
+    const epitaph = { id: 7, name: "Cor", bornAt: new Date("2026-01-01T00:00:00.000Z"), deletedAt: new Date("2026-03-01T00:00:00.000Z"), farewellReflection: "Tot ziens." };
+    expect(galleryMessageFor([], [epitaph]).graves).toEqual([
+      { id: 7, name: "Cor", bornAt: "2026-01-01T00:00:00.000Z", deletedAt: "2026-03-01T00:00:00.000Z", farewell: "Tot ziens." },
+    ]);
+  });
+
+  it("houdt hooguit de eerste 50 graven (invoer is nieuwste eerst)", () => {
+    const many = Array.from({ length: 60 }, (_, i) => ({ id: i, name: "x", bornAt: new Date(0), deletedAt: new Date(0), farewellReflection: "" }));
+    const graves = galleryMessageFor([], many).graves;
+    expect(graves).toHaveLength(50);
+    expect(graves[0]!.id).toBe(0);
   });
 });
 

@@ -1,7 +1,21 @@
 import { parseCommand, type GalleryMessage } from "@animus/brain/gallery";
 
-export function galleryMessageFor(dynimos: { id: number; name: string; awakeSince: Date | null }[]): GalleryMessage {
-  return { beings: dynimos.map((d) => ({ id: d.id, name: d.name, awake: d.awakeSince !== null })) };
+export const MAX_GRAVES = 50;
+
+type EpitaphRow = { id: number; name: string; bornAt: Date; deletedAt: Date; farewellReflection: string };
+
+/** `epitaphs` komt nieuwste eerst binnen; de Galerij toont hooguit de laatste MAX_GRAVES. */
+export function galleryMessageFor(dynimos: { id: number; name: string; awakeSince: Date | null }[], epitaphs: EpitaphRow[]): GalleryMessage {
+  return {
+    beings: dynimos.map((d) => ({ id: d.id, name: d.name, awake: d.awakeSince !== null })),
+    graves: epitaphs.slice(0, MAX_GRAVES).map((e) => ({
+      id: e.id,
+      name: e.name,
+      bornAt: e.bornAt.toISOString(),
+      deletedAt: e.deletedAt.toISOString(),
+      farewell: e.farewellReflection,
+    })),
+  };
 }
 
 /**

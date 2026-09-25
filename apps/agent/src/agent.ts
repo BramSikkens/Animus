@@ -32,7 +32,7 @@ import * as silero from "@livekit/agents-plugin-silero";
 import { RoomEvent } from "@livekit/rtc-node";
 import { readState, watchDynimos } from "./dynimo-watch.js";
 import { createStateRepublisher, emotionMessageFor } from "./state-republish.js";
-import { createCommandHandler, galleryMessageFor } from "./gallery-commands.js";
+import { createCommandHandler, galleryMessageFor, MAX_GRAVES } from "./gallery-commands.js";
 import { createInitiativeTimer, initiativeIntervalMs, parseInitiativeMinutes } from "./initiative-timer.js";
 import { createReflectionDisplay } from "./reflection-display.js";
 import { createSilenceTimer, parseSilenceMinutes } from "./silence-timer.js";
@@ -245,7 +245,9 @@ export default defineAgent<AgentUserData>({
     // Galerij: alle levende Dynimo's (naam, wakker) voor het startscherm van het gezichtje.
     const publishGallery = async (): Promise<void> => {
       try {
-        publish(GALLERY_TOPIC, galleryMessageFor(await brain.list()));
+        // Grafschriften lees ik hier rechtstreeks (ADR-0003: het brein leest die tabel nooit).
+        const graves = await db.query.epitaphs.findMany({ orderBy: (e, { desc }) => desc(e.deletedAt), limit: MAX_GRAVES });
+        publish(GALLERY_TOPIC, galleryMessageFor(await brain.list(), graves));
       } catch (error) {
         console.error("Galerij publiceren faalde:", error instanceof Error ? error.message : error);
       }

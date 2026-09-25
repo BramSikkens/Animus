@@ -218,3 +218,58 @@ button:hover {
     transition: none;
   }
 }
+
+/* Graven (In memoriam): gedempt, uitklap met de Afscheidsreflectie. */
+.gallery-heading {
+  max-width: 60rem;
+  margin: 2.5rem auto 1rem;
+  font-size: 1rem;
+  font-weight: normal;
+  opacity: 0.7;
+}
+
+.gallery ul {
+  align-items: start;
+}
+
+.gallery .grave {
+  width: 100%;
+  opacity: 0.55;
+  border: 1px solid #f4efe3;
+  border-radius: 1rem;
+  padding: 0.75rem;
+  box-sizing: border-box;
+  text-align: center;
+}
+
+.gallery .grave summary {
+  aspect-ratio: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  cursor: pointer;
+  list-style: none;
+}
+
+.gallery .grave summary::-webkit-details-marker {
+  display: none;
+}
+
+.gallery .grave[open],
+.gallery .grave:hover,
+.gallery .grave:focus-within {
+  opacity: 0.9;
+}
+
+.grave-age {
+  font-size: 0.8rem;
+  opacity: 0.8;
+}
+
+.grave-farewell {
+  margin: 0.5rem 0 0;
+  font-size: 0.85rem;
+  white-space: pre-wrap;
+}

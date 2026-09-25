@@ -3,7 +3,7 @@ import { motion, useAnimationFrame, useMotionValue, useReducedMotion, type Motio
 import type { DisplayState } from "@animus/brain/display";
 import type { Emotion } from "@animus/brain/emotion";
 import { doodlePath } from "./doodle.js";
-import { gazeOffset } from "./gaze.js";
+import { facePointer, gazeOffset } from "./gaze.js";
 import { idleOffsets } from "./idle.js";
 import { frameForDisplay } from "./interpolate.js";
 import type { Keyframe } from "./keyframes.js";
@@ -144,10 +144,12 @@ export type FaceProps = {
   lastUserText?: string;
   /** Stemreactie op de microfoon van de Gesprekspartner; ref zodat updates geen re-render kosten. */
   voice?: { current: VoiceReaction };
+  /** Genormaliseerd (0..1) gezichtsmidden uit de camera; stuurt de blikrichting i.p.v. de muis. Ref zodat updates geen re-render kosten. */
+  facePosition?: { current: { x: number; y: number } | null };
 };
 
 /** Het gezichtje: achtergrond + ogen + mond + wenkbrauwen, getweend tussen emoties en de slaapstand (~300-500ms). */
-export function Face({ doodle = false, display, emotion, intensity, mouthVolume = 0, values, lastUserText, voice }: FaceProps) {
+export function Face({ doodle = false, display, emotion, intensity, mouthVolume = 0, values, lastUserText, voice, facePosition }: FaceProps) {
   const reduced = useReducedMotion();
   const [recentText, setRecentText] = useState<string>();
   useEffect(() => {
@@ -182,10 +184,13 @@ export function Face({ doodle = false, display, emotion, intensity, mouthVolume 
   useAnimationFrame((timeMs) => {
     const o = idleOffsets(timeMs / 1000);
     blink.set(Math.max(o.blink, 0.05));
+    const aanwijzer = facePosition?.current
+      ? facePointer({ face: facePosition.current, viewport: { w: window.innerWidth, h: window.innerHeight } })
+      : pointer.current;
     const target =
       reduced || display === "slapend"
         ? { dx: 0, dy: 0 }
-        : gazeOffset({ pointer: pointer.current, viewport: { w: window.innerWidth, h: window.innerHeight }, faceCenter: { x: window.innerWidth / 2, y: window.innerHeight / 2 }, max: GAZE_MAX });
+        : gazeOffset({ pointer: aanwijzer, viewport: { w: window.innerWidth, h: window.innerHeight }, faceCenter: { x: window.innerWidth / 2, y: window.innerHeight / 2 }, max: GAZE_MAX });
     gaze.current.dx += (target.dx - gaze.current.dx) * GAZE_SMOOTHING;
     gaze.current.dy += (target.dy - gaze.current.dy) * GAZE_SMOOTHING;
     pupilX.set(o.pupilX + gaze.current.dx);

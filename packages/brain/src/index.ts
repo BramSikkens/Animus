@@ -4,12 +4,14 @@ import {
   generateText,
   isStepCount,
   streamText,
+  tool,
   Output,
   type EmbeddingModel,
   type Experimental_EvaluationModel,
   type LanguageModel,
   type ModelMessage,
   type SystemModelMessage,
+  type ToolSet,
 } from "ai";
 import { and, asc, cosineDistance, desc, eq, gt, gte, isNotNull, isNull, lte, notInArray, sql } from "drizzle-orm";
 import { z } from "zod";
@@ -32,6 +34,7 @@ import { EMOTIONS, oppositeOf, type Emotion } from "./emotion.js";
 import { SEEDS } from "./seeds.js";
 import { createTools } from "./tools.js";
 import { chooseGenesisVoice, type GenesisVoiceDeps } from "./genesis-voice.js";
+import type { Aanleiding } from "./perception.js";
 export { defaultVoiceDeps } from "./genesis-voice.js";
 
 export { EMOTIONS, type Emotion };
@@ -42,9 +45,14 @@ export type BrainEvent =
   | { type: "mood"; emotion: Emotion; intensity: number; values: Record<Emotion, number> }
   /** De Stemming is zichtbaar veranderd: een kort geluidje van deze soort; komt direct na het mood-event. */
   | { type: "sound"; kind: SoundKind }
+  /** Er ging deze beurt echt een camerabeeld naar Type2 (Type1-/initiatief-pad of de kijk-tool). */
+  | { type: "kijk" }
   | { type: "text"; delta: string }
   | { type: "tool-call"; toolName: string; input: unknown }
   | { type: "tool-result"; toolName: string; output: unknown };
+
+/** Eén camerabeeld: JPEG-data (max 768px lange zijde), zoals door lookFrame() geleverd. */
+export type Frame = { data: Uint8Array; mediaType: "image/jpeg" };
 
 export type Dynimo = typeof dynimos.$inferSelect;
 
@@ -101,8 +109,12 @@ export type Brain = {
    * Initiatief-check (Type1): wil de wakkere Dynimo nu uit zichzelf iets zeggen? Geeft een instructie voor het
    * spontane openingswoord (te voeden aan `hear(..., { initiatief: true })`), of null. Niemand wakker of een
    * lopende Reflectie: altijd null. Gooit nooit; wijzigt nooit de status van een Doel.
+   * Met `aanleiding` (een Waarneming, ADR-0018) krijgt Type1 die als extra context; bij "ja" gaat de aanleiding
+   * vóór Spontane herinnering en Droom (die worden dan niet gekozen) en verwerkt de instructie de aanleiding.
+   * Bij aanleiding "nieuw-object" en "ja" wordt de eerstvolgende `hear(..., { initiatief: true })` een Kijk-beurt
+   * (het beeld gaat mee, ADR-0019).
    */
-  considerInitiative(): Promise<string | null>;
+  considerInitiative(aanleiding?: Aanleiding): Promise<string | null>;
   /**
    * Praat met de Wakker Dynimo (elke beurt uit de database gelezen). Niemand wakker: geen events.
    * Met `initiatief` is `text` de instructie uit `considerInitiative()` i.p.v. een uiting van de Gesprekspartner:
@@ -286,7 +298,7 @@ function dreamPrompt(dream: string): SystemModelMessage {
   };
 }
 
-type Type1Result = { deltas: MoodDeltas; indruk: number; intent: "simpel" | "complex" };
+type Type1Result = { deltas: MoodDeltas; indruk: number; intent: "simpel" | "complex"; kijken: boolean };
 
 // Type1 scoort per emotie een verandering op een schaal van 9 niveaus (de typesafe-Score ondersteunt er max 10): niveau 4
 // is "geen verandering"; de tabel is niet-lineair zodat zowel kleine als grote delta's (0–100-schaal van de Stemming) kunnen.
@@ -332,7 +344,7 @@ const pairHint = (emotion: Emotion) => {
 
 // Eén Type1-call per beurt: per emotie de verandering (delta) die de uiting bij de Dynimo zelf teweegbrengt (reactie,
 // niet de emotie van de uiting) + intent-routering. De context (persoonlijkheid, Drijfveren, Stemming) zit in de state naast de uiting.
-async function classify(type1: Experimental_EvaluationModel, text: string, context: string): Promise<Type1Result> {
+async function classify(type1: Experimental_EvaluationModel, text: string, context: string, canLook: boolean): Promise<Type1Result> {
   const { answers } = await experimental_evaluate({
     model: type1,
     state: `${context}\n\nUiting: ${text}`,
@@ -361,6 +373,14 @@ async function classify(type1: Experimental_EvaluationModel, text: string, conte
           complex: "vraagt uitleg, redenering, planning of een oordeel",
         },
       },
+      ...(canLook && {
+        kijken: {
+          type: "choice" as const,
+          instructions:
+            "Vraagt de Gesprekspartner de Dynimo om te kijken naar wat er voor de camera is (bv. 'wat zie je?', 'kijk eens', iets tonen)? Los van of het antwoord simpel of complex is.",
+          criteria: { ja: "hij moet kijken om te kunnen antwoorden", nee: "kijken is niet nodig" },
+        },
+      }),
     },
   });
 
@@ -371,8 +391,26 @@ async function classify(type1: Experimental_EvaluationModel, text: string, conte
   }
   const indruk = Math.min(1, Math.max(0, answers.indruk.score));
   const intent = answers.intent.choice === "complex" ? "complex" : "simpel";
+  // Zonder canLook is de vraag niet gesteld (undefined): dan geen kijken.
+  const kijken = (answers as Record<string, { choice?: string } | undefined>).kijken?.choice === "ja";
 
-  return { deltas, indruk, intent };
+  return { deltas, indruk, intent, kijken };
+}
+
+const NIETS_ZIEN = "Je kunt nu niets zien: er is geen camerabeeld. Zeg dat eerlijk en verzin niet wat je ziet.";
+
+// Werkgeheugen bewaart geen beelden (ADR-0019): een kijk-tool-resultaat met content (tekst + beeld) wordt herschreven
+// naar enkel tekst, zodat een beeld nooit méé blijft slepen naar volgende beurten.
+function stripBeelden(messages: ModelMessage[]): ModelMessage[] {
+  return messages.map((message): ModelMessage => {
+    if (message.role !== "tool") return message;
+    const content = message.content.map((part) => {
+      if (part.type !== "tool-result" || part.output.type !== "content") return part;
+      const text = part.output.value.filter((v) => v.type === "text").map((v) => v.text).join(" ");
+      return { ...part, output: { type: "text" as const, value: `${text} (beeld niet bewaard)` } };
+    });
+    return { ...message, content };
+  });
 }
 
 type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
@@ -386,6 +424,8 @@ export function createBrain(deps: {
   random?: () => number;
   /** Stemkeuze bij genesis; default: geen (geen netwerk). Aanroepers geven defaultVoiceDeps(process.env) mee. */
   voices?: GenesisVoiceDeps;
+  /** Levert het laatste camerabeeld, of null zonder beeld. Ontbreekt deze: blind, brain gedraagt zich als nu. */
+  lookFrame?: () => Promise<Frame | null>;
 }): Brain {
   const now = deps.now ?? (() => new Date());
   const random = deps.random ?? Math.random;
@@ -403,6 +443,9 @@ export function createBrain(deps: {
   let pendingSpontaneousId: number | undefined;
   // Idem voor een Droom die considerInitiative koos (verteld = told_at).
   let pendingDreamId: number | undefined;
+  // considerInitiative(nieuw-object) + "ja" zet dit; de eerstvolgende hear(..., { initiatief: true }) verbruikt
+  // het als `kijken` (ADR-0019): zo gaat het beeld mee in precies die ene initiatiefbeurt.
+  let pendingLook = false;
 
   async function genesis(): Promise<{ dynimo: typeof dynimos.$inferInsert; drives: DrivesOutput; voice: { voice: string; description: string } | null }> {
     const seed = pickSeed(random);
@@ -644,6 +687,7 @@ ${fresh.map((memory) => `- (indruk ${memory.impression}) ${memory.text}`).join("
     lastOpinionTurn = undefined;
     pendingSpontaneousId = undefined;
     pendingDreamId = undefined;
+    pendingLook = false;
   }
 
   // Een andere Wakker-generatie (andere Dynimo of nieuwe awake_since) is een nieuwe sessie.
@@ -1012,12 +1056,17 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
         if (drive.kind === "ergernis") opinionBoos = OPINION_BOOS_DELTA;
       }
     }
-    const { deltas: type1Deltas, indruk, intent } = await (options.initiatief
-      ? Promise.resolve<Type1Result>({ deltas: {}, indruk: 0.2, intent: "simpel" })
-      : classify(deps.type1, text, context)
+    const canLook = deps.lookFrame !== undefined;
+    // Een initiatiefbeurt verbruikt pendingLook meteen (ADR-0019: hoogstens één Kijk per aanleiding); zonder
+    // lookFrame-dep nooit kijken, ook al stond de vlag klaar (considerInitiative weet niets van canLook).
+    const initiatiefKijken = canLook && pendingLook;
+    if (options.initiatief) pendingLook = false;
+    const { deltas: type1Deltas, indruk, intent, kijken } = await (options.initiatief
+      ? Promise.resolve<Type1Result>({ deltas: {}, indruk: 0.2, intent: "simpel", kijken: initiatiefKijken })
+      : classify(deps.type1, text, context, canLook)
     ).catch((error: unknown): Type1Result => {
       console.warn("Type1 faalde, val terug op geen delta/simpel:", error instanceof Error ? error.message : error);
-      return { deltas: {}, indruk: 0, intent: "simpel" };
+      return { deltas: {}, indruk: 0, intent: "simpel", kijken: false };
     });
 
     const deltas: MoodDeltas = opinionBoos ? { ...type1Deltas, boos: (type1Deltas.boos ?? 0) + opinionBoos } : type1Deltas;
@@ -1073,6 +1122,52 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
       return;
     }
 
+    // Kijken (ADR-0019): Type1 besliste al; een fout bij het ophalen telt als geen beeld en breekt de beurt nooit.
+    const haalFrame = (): Promise<Frame | null> =>
+      (deps.lookFrame?.() ?? Promise.resolve(null)).catch((error: unknown) => {
+        console.warn("Frame ophalen faalde:", error instanceof Error ? error.message : error);
+        return null;
+      });
+    const frame = kijken ? await haalFrame() : null;
+    if (frame) yield { type: "kijk" };
+    const promptMessage: ModelMessage = frame
+      ? { role: "user", content: [{ type: "text", text }, { type: "file", data: frame.data, mediaType: frame.mediaType }] }
+      : userMessage;
+    const noFrameMessage: SystemModelMessage[] = kijken && !frame ? [{ role: "system", content: NIETS_ZIEN }] : [];
+
+    // Kijk-tool (ADR-0019, vangnet): enkel aangeboden als Type1 zelf geen beeld meestuurde (canLook && !kijken); zei
+    // Type1 al ja (ook met een null-frame), dan wordt nooit een tweede keer gekeken. Guard binnen deze beurt: een
+    // tweede aanroep (multi-step) roept lookFrame niet nog eens aan.
+    let kijkGebruikt = false;
+    const kijkTools: ToolSet = canLook && !kijken
+      ? {
+          kijk: tool({
+            description:
+              "Kijkt door je camera en geeft het huidige beeld. Gebruik dit als de Gesprekspartner je iets toont of vraagt wat je ergens van vindt en je daarvoor moet zien.",
+            inputSchema: z.object({}),
+            execute: async (): Promise<{ frame: Frame | null; alGekeken?: boolean }> => {
+              if (kijkGebruikt) return { frame: null, alGekeken: true };
+              kijkGebruikt = true;
+              return {
+                frame: await haalFrame(),
+              };
+            },
+            toModelOutput: ({ output }) =>
+              output.alGekeken
+                ? { type: "text", value: "Je hebt deze beurt al gekeken." }
+                : output.frame
+                  ? {
+                      type: "content",
+                      value: [
+                        { type: "text", text: "Dit zie je nu door je camera." },
+                        { type: "file", data: { type: "data", data: output.frame.data }, mediaType: output.frame.mediaType },
+                      ],
+                    }
+                  : { type: "text", value: NIETS_ZIEN },
+          }),
+        }
+      : {};
+
     // ponytail: sequentieel na de emotie; parallel met Type1 als de latency ooit telt.
     const recalled = await recall(text, being.id);
     // Spontane herinnering: bij initiatief die van considerInitiative (al in `text`), anders heel zelden een aanleiding.
@@ -1102,9 +1197,9 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     const result = streamText({
       abortSignal: abort.signal,
       model: intent === "complex" ? deps.type2.heavy : deps.type2.light,
-      instructions: [stable, ageMessage(being), ...birthdayMessages(awake), moodMessage(mood, axes?.expressiveness ?? 0.5), familiarityMessage(familiarity), ...(BEHAVIOR_PROMPTS[behavior] ? [BEHAVIOR_PROMPTS[behavior]] : []), ...opinionMessage, recallPrompt(recalled), ...spontaneousPromptMessage, ...(dream ? [dreamPrompt(dream.text)] : [])],
-      messages: [...workingMemory, userMessage],
-      tools,
+      instructions: [stable, ageMessage(being), ...birthdayMessages(awake), moodMessage(mood, axes?.expressiveness ?? 0.5), familiarityMessage(familiarity), ...(BEHAVIOR_PROMPTS[behavior] ? [BEHAVIOR_PROMPTS[behavior]] : []), ...opinionMessage, recallPrompt(recalled), ...spontaneousPromptMessage, ...(dream ? [dreamPrompt(dream.text)] : []), ...noFrameMessage],
+      messages: [...workingMemory, promptMessage],
+      tools: { ...tools, ...kijkTools },
       // Genoeg stappen om een tool te gebruiken en daarna het resultaat te verwoorden.
       stopWhen: isStepCount(5),
     });
@@ -1148,7 +1243,13 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
           yield* flushPacer();
           yield { type: "tool-call", toolName: part.toolName, input: part.input };
         }
-        if (part.type === "tool-result") yield { type: "tool-result", toolName: part.toolName, output: part.output };
+        if (part.type === "tool-result") {
+          // Kijk-tool: nooit de camerabytes naar de consument lekken via het BrainEvent.
+          const kijkFrame = part.toolName === "kijk" ? (part.output as { frame: Frame | null }).frame : null;
+          if (kijkFrame) yield { type: "kijk" };
+          const output = part.toolName === "kijk" ? { gezien: kijkFrame !== null } : part.output;
+          yield { type: "tool-result", toolName: part.toolName, output };
+        }
         if (part.type === "tool-error") {
           const message = part.error instanceof Error ? part.error.message : String(part.error);
           yield { type: "tool-result", toolName: part.toolName, output: { error: message } };
@@ -1164,7 +1265,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
       if (outcome !== "completed") abort.abort();
       // Een mislukte beurt komt nergens in; een onderbroken beurt wel, met wat al gezegd was.
       if (outcome === "completed") {
-        workingMemory.push(userMessage, ...(await result.responseMessages));
+        workingMemory.push(userMessage, ...stripBeelden(await result.responseMessages));
       } else if (outcome === "interrupted" && full) {
         workingMemory.push(userMessage, { role: "assistant", content: full });
       }
@@ -1221,12 +1322,19 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     return epitaph;
   }
 
-  async function considerInitiative(): Promise<string | null> {
+  function aanleidingText(aanleiding: Aanleiding): string {
+    return aanleiding.soort === "terug"
+      ? "de Gesprekspartner is net terug in beeld na een tijd weg te zijn geweest"
+      : `er verscheen net iets nieuws in beeld: ${aanleiding.object}`;
+  }
+
+  async function considerInitiative(aanleiding?: Aanleiding): Promise<string | null> {
     if (reflecting > 0) return null;
     const [awake] = await deps.db.select().from(dynimos).where(isNotNull(dynimos.awakeSince));
     if (!awake) return null;
     adopt(awake); // wisselen wist de pending-ids van de vorige Dynimo vóór we die van deze zetten
     try {
+      pendingLook = false; // enkel "ja" + nieuw-object hieronder zet hem weer aan
       const driveRows = await loadDrives(awake.id);
       const mood = moodOfRow(awake, now());
       const hasGoal = driveRows.some((drive) => drive.kind === "doel" && isActiveDrive(drive));
@@ -1234,6 +1342,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
         personalityText(awake),
         drivesPromptBlock(driveRows),
         `Huidige stemming: ${mood.emotion} (intensiteit ${mood.intensity.toFixed(2)})`,
+        aanleiding && `Aanleiding: ${aanleidingText(aanleiding)}.`,
       ]
         .filter(Boolean)
         .join("\n");
@@ -1258,6 +1367,16 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
         },
       });
       if (answers.spreken.choice !== "ja") return null;
+      // Een aanleiding (Waarneming) gaat vóór Spontane herinnering en Droom: die worden dan niet gekozen.
+      if (aanleiding) {
+        pendingSpontaneousId = undefined;
+        pendingDreamId = undefined;
+        // Een nieuw object wordt de eerstvolgende initiatiefbeurt een Kijk-beurt (ADR-0019); "terug" niet.
+        pendingLook = aanleiding.soort === "nieuw-object";
+        return `Je begint uit jezelf een gesprek: ${aanleidingText(aanleiding)}. ${
+          aanleiding.soort === "terug" ? "Begroet de Gesprekspartner kort, op je eigen manier." : "Reageer daar kort en nieuwsgierig op, op je eigen manier."
+        }`;
+      }
       const axes = rowAxes(awake);
       const spontaneous = axes ? await pickSpontaneous(awake.id, axes, SPONTANEOUS_INITIATIVE_CHANCE) : null;
       pendingSpontaneousId = spontaneous?.id;

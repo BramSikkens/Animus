@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { createBrain, defaultVoiceDeps, type Brain } from "@animus/brain";
 import { DISPLAY_TOPIC, type DisplayMessage, type DisplayState } from "@animus/brain/display";
 import { COMMAND_TOPIC, GALLERY_TOPIC, type GalleryMessage } from "@animus/brain/gallery";
+import { isWaarneming, LOOK_TOPIC, PERCEPTION_TOPIC, type Aanleiding } from "@animus/brain/perception";
 import { SOUND_TOPIC, type SoundMessage } from "@animus/brain/sound";
 import { EMOTION_TOPIC, type EmotionMessage } from "@animus/brain/emotion";
 import { initiativeFactor } from "@animus/brain/behavior";
@@ -33,7 +34,9 @@ import { RoomEvent, TrackSource, type RemoteParticipant } from "@livekit/rtc-nod
 import { readState, watchDynimos } from "./dynimo-watch.js";
 import { createStateRepublisher, emotionMessageFor, withFaceExpressiveness } from "./state-republish.js";
 import { createCommandHandler, galleryMessageFor, MAX_GRAVES } from "./gallery-commands.js";
+import { createFrameSource } from "./frame-source.js";
 import { createInitiativeTimer, initiativeIntervalMs, parseInitiativeMinutes } from "./initiative-timer.js";
+import { createPerception, parseLookCooldownMinutes, parseReturnAfterMinutes } from "./perception.js";
 import { createReflectionDisplay } from "./reflection-display.js";
 import { createSilenceTimer, parseSilenceMinutes } from "./silence-timer.js";
 import { voiceSettingsFor } from "@animus/brain/voice-emotion";
@@ -159,6 +162,15 @@ class AnimusAgent extends voice.Agent {
             console.error("Geluid publiceren faalde:", error instanceof Error ? error.message : error);
           });
       },
+      onLook: () => {
+        const participant = this.#room.localParticipant;
+        if (!participant) return;
+        participant
+          .publishData(new TextEncoder().encode(JSON.stringify({})), { reliable: true, topic: LOOK_TOPIC })
+          .catch((error: unknown) => {
+            console.error("Kijk-event publiceren faalde:", error instanceof Error ? error.message : error);
+          });
+      },
     });
   }
 }
@@ -173,10 +185,13 @@ export default defineAgent<AgentUserData>({
     const db = createDb(databaseUrl);
     await migrate(db);
 
+    // Kijken (ADR-0018/0019): het laatste camerabeeld van de room, vóór createBrain zodat lookFrame meteen mee kan.
+    const frames = createFrameSource(ctx.room);
     // In-process (spec: geen aparte brein-API); elke job krijgt zijn eigen brein-instantie.
     // voices: een geboorte vanuit de Galerij kiest net als in het dashboard een stem.
-    const brain = createBrain({ db, type1: TYPE1_MODEL, type2: loadType2Config(), embedder: EMBEDDING_MODEL, voices: defaultVoiceDeps(process.env) });
+    const brain = createBrain({ db, type1: TYPE1_MODEL, type2: loadType2Config(), embedder: EMBEDDING_MODEL, voices: defaultVoiceDeps(process.env), lookFrame: () => frames.latest() });
 
+    ctx.addShutdownCallback(async () => frames.dispose());
     ctx.addShutdownCallback(async () => {
       await db.$client.end();
     });
@@ -292,6 +307,14 @@ export default defineAgent<AgentUserData>({
     // volgt de N/P-kant van de Persoonlijkheid.
     const initiativeBaseMs = parseInitiativeMinutes(process.env.INITIATIVE_CHECK_MINUTES);
     if (initiativeBaseMs.warning) console.warn(initiativeBaseMs.warning);
+    // Aanwezigheid (ADR-0018): zonder iemand in beeld slaat de periodieke check over; een terugkomst na een lange
+    // afwezigheid lokt de check meteen uit met de aanleiding "terug".
+    const returnAfterConfig = parseReturnAfterMinutes(process.env.RETURN_AFTER_MINUTES);
+    if (returnAfterConfig.warning) console.warn(returnAfterConfig.warning);
+    // Spontaan Kijken (#87): een nieuw object lokt de initiatiefcheck uit, begrensd door deze cooldown.
+    const lookCooldownConfig = parseLookCooldownMinutes(process.env.SPONTANEOUS_LOOK_COOLDOWN_MINUTES);
+    if (lookCooldownConfig.warning) console.warn(lookCooldownConfig.warning);
+    const perception = createPerception({ now: Date.now, returnAfterMs: returnAfterConfig.ms, lookCooldownMs: lookCooldownConfig.ms });
     let initiativeAxes: ReturnType<typeof rowAxes> = null;
     let initiativeMoodFactor = 1;
     const refreshInitiativeAxes = async (): Promise<void> => {
@@ -310,20 +333,53 @@ export default defineAgent<AgentUserData>({
       // Tempo per Emotie (#70) via speed; de afronding in applyTtsEmotion voorkomt extra websocket-herstarts.
       applyTtsEmotion(speechProvider(process.env), tts, withPacingSpeed(voiceSettingsFor({ values, expressiveness }), pacingFor({ values, expressiveness }).speedFactor));
     }, () => initiativeAxes?.expressiveness ?? 0.5);
+    const isQuiet = (): boolean =>
+      (session.agentState === "idle" || session.agentState === "listening") && session.userState !== "speaking" && perception.isPresent();
+    // Gedeeld door de timer-tick en een Waarneming (aanleiding "terug"): een in-flight-guard voorkomt dat ze
+    // tegelijk een initiatief klaarzetten.
+    // ponytail: een aanleiding die binnenkomt terwijl het niet stil is (of er al een check loopt) vervalt; een nieuw
+    // object is dan ook als gezien gemarkeerd en de cooldown loopt. Een wachtrij pas als dat in de praktijk stoort.
+    let initiativeInFlight = false;
+    const runInitiative = async (aanleiding?: Aanleiding): Promise<void> => {
+      if (initiativeInFlight || !isQuiet()) return;
+      initiativeInFlight = true;
+      try {
+        await refreshInitiativeAxes();
+        const instruction = await brain.considerInitiative(aanleiding);
+        // Opnieuw controleren: de check duurde even, misschien is er intussen iemand gaan praten.
+        if (!instruction || !isQuiet()) return;
+        animusAgent.queueInitiative(instruction);
+        session.generateReply();
+      } finally {
+        initiativeInFlight = false;
+      }
+    };
     const initiative = createInitiativeTimer({
       intervalMs: () => initiativeIntervalMs(initiativeAxes, initiativeBaseMs.ms, initiativeMoodFactor),
       random: Math.random,
-      isQuiet: () => (session.agentState === "idle" || session.agentState === "listening") && session.userState !== "speaking",
-      onCheck: async () => {
-        await refreshInitiativeAxes();
-        const instruction = await brain.considerInitiative();
-        // Opnieuw controleren: de check duurde even, misschien is er intussen iemand gaan praten.
-        if (!instruction || session.agentState === "speaking" || session.agentState === "thinking" || session.userState === "speaking") return;
-        animusAgent.queueInitiative(instruction);
-        session.generateReply();
-      },
+      isQuiet,
+      onCheck: () => runInitiative(),
     });
     ctx.addShutdownCallback(async () => initiative.dispose());
+
+    // Waarnemingen van de face-app (ADR-0018): aanwezig/afwezig over PERCEPTION_TOPIC; enkel van een remote
+    // participant (niet van de agent zelf).
+    // ponytail: elke remote deelnemer mag Waarnemingen sturen (dev-only, zoals COMMAND_TOPIC); twee face-tabs kunnen
+    // elkaar dan overschrijven.
+    ctx.room.on(RoomEvent.DataReceived, (payload, participant, _kind, topic) => {
+      if (topic !== PERCEPTION_TOPIC || !participant) return;
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(new TextDecoder().decode(payload));
+      } catch {
+        return;
+      }
+      if (!isWaarneming(parsed)) return;
+      const aanleiding = perception.onWaarneming(parsed);
+      if (aanleiding) runInitiative(aanleiding).catch((error: unknown) => console.warn("Initiatief-check faalde:", error instanceof Error ? error.message : error));
+    });
+    // Vertrekt de face-app terwijl niemand in beeld was, dan mag "afwezig" het initiatief niet voorgoed stilleggen.
+    ctx.room.on(RoomEvent.ParticipantDisconnected, () => perception.reset());
 
     // closeOnDisconnect uit: anders sluit de sessie (en stopt de job) zodra de eerste face disconnect, terwijl de room
     // voor een andere tab blijft bestaan; LiveKit dispatcht enkel bij room-creatie, dus die tab zag dan geen agent.
@@ -361,6 +417,7 @@ export default defineAgent<AgentUserData>({
         reflectionDisplay.onSwitch();
         silence.reset();
         initiative.reset();
+        perception.reset();
         void refreshInitiativeAxes().catch(() => {});
         // interrupt gooit/weigert als er niets te onderbreken valt; dat is geen fout.
         try {

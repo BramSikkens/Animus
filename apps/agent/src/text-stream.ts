@@ -8,6 +8,8 @@ export type TextStreamOptions = {
   onSound?: (kind: SoundKind) => void;
   /** Aangeroepen zodra een `mood`-event (de Stemming) voorbijkomt, vóór er tekst in de stream komt. */
   onMood?: (mood: EmotionMessage) => void;
+  /** Aangeroepen zodra een `kijk`-event voorbijkomt: er ging deze beurt een camerabeeld naar Type2. */
+  onLook?: () => void;
 };
 
 /**
@@ -47,6 +49,10 @@ export function textStream(events: AsyncIterable<BrainEvent>, options?: TextStre
         }
         if (result.value.type === "sound") {
           options?.onSound?.(result.value.kind);
+          continue;
+        }
+        if (result.value.type === "kijk") {
+          options?.onLook?.();
           continue;
         }
         // tool-* event: overslaan, volgende event proberen.

@@ -21,6 +21,8 @@ import { isSoundKind, SOUND_TOPIC } from "@animus/brain/sound";
 import { clipUrl } from "./sound.js";
 import { Face } from "./face/Face.js";
 import { voiceReaction, type VoiceReaction } from "./face/voice-reaction.js";
+import { useWaarnemingen, type VisionSnapshot } from "./perception/useWaarnemingen.js";
+import { KijkSnapshot } from "./perception/KijkSnapshot.js";
 
 const VOICE_WINDOW = 20; // samples van 100ms
 const MAX_RECONNECTS = 3;
@@ -200,6 +202,30 @@ function MicControl({ enabled, onError }: { enabled: boolean; onError: (message:
   return null;
 }
 
+// Camera enkel aan als een Dynimo wakker is en zijn gezicht toont (ADR-0018); geen videobeeld in deze UI, enkel
+// de publicatie voor de agent.
+function CameraControl({ enabled, onError }: { enabled: boolean; onError: (message: string) => void }) {
+  const { localParticipant } = useLocalParticipant();
+  useEffect(() => {
+    localParticipant.setCameraEnabled(enabled).catch(() => onError("Camera niet beschikbaar; controleer de permissie."));
+  }, [enabled, localParticipant, onError]);
+  return null;
+}
+
+// Aanwezigheidsdetectie op de al gepubliceerde cameratrack (ADR-0018), enkel actief zolang de camera aan is.
+function Perception({
+  enabled,
+  facePosition,
+  vision,
+}: {
+  enabled: boolean;
+  facePosition: { current: { x: number; y: number } | null };
+  vision: { current: VisionSnapshot | null };
+}) {
+  useWaarnemingen({ enabled, facePosition, vision });
+  return null;
+}
+
 // ?debug: paneel om het gezicht handmatig of met Playwright te sturen, zonder LiveKit.
 function DebugPanel({
   state,
@@ -289,6 +315,10 @@ export function App() {
   const [doodle, setDoodle] = useState(false);
   const [userText, setUserText] = useState<string>();
   const voice = useRef<VoiceReaction>({ startle: 0, lean: 0, alert: 0 });
+  // Genormaliseerd gezichtsmidden uit Perception; ref zodat updates geen re-render kosten.
+  const facePosition = useRef<{ x: number; y: number } | null>(null);
+  // Laatste detecties + video uit Perception, voor de KijkSnapshot; ref zodat updates geen re-render kosten.
+  const vision = useRef<VisionSnapshot | null>(null);
   const lastActivity = useRef(Date.now());
   const thresholdMs = useMemo(doodleThresholdMs, []);
   const debug = useMemo(() => new URLSearchParams(window.location.search).has("debug"), []);
@@ -381,7 +411,7 @@ export function App() {
   return (
     <>
       {(debug || view.screen === "gezicht") && <>
-      <Face doodle={doodle} display={displayState} emotion={emotionState.emotion} intensity={emotionState.intensity} mouthVolume={mouthVolume} values={emotionState.values} lastUserText={userText} voice={voice} />
+      <Face doodle={doodle} display={displayState} emotion={emotionState.emotion} intensity={emotionState.intensity} mouthVolume={mouthVolume} values={emotionState.values} lastUserText={userText} voice={voice} facePosition={facePosition} />
 
       {name && <p className="dynimo-name">{name}</p>}
       {emotionState.values && (
@@ -433,6 +463,9 @@ export function App() {
             <SoundListener display={displayState} onSound={touch} />
             <AgentWatchdog />
             <MicControl enabled={selectedId !== null} onError={setMicError} />
+            <CameraControl enabled={view.screen === "gezicht" && displayState !== "slapend"} onError={setMicError} />
+            <Perception enabled={view.screen === "gezicht" && displayState !== "slapend"} facePosition={facePosition} vision={vision} />
+            <KijkSnapshot vision={vision} />
             <ConnectionStatus />
             <RoomAudioRenderer />
             <StartAudio label="Zet geluid aan" />

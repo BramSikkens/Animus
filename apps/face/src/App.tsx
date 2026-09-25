@@ -212,8 +212,8 @@ function CameraControl({ enabled, onError }: { enabled: boolean; onError: (messa
 }
 
 // Aanwezigheidsdetectie op de al gepubliceerde cameratrack (ADR-0018), enkel actief zolang de camera aan is.
-function Perception({ enabled }: { enabled: boolean }) {
-  useWaarnemingen({ enabled });
+function Perception({ enabled, facePosition }: { enabled: boolean; facePosition: { current: { x: number; y: number } | null } }) {
+  useWaarnemingen({ enabled, facePosition });
   return null;
 }
 
@@ -306,6 +306,8 @@ export function App() {
   const [doodle, setDoodle] = useState(false);
   const [userText, setUserText] = useState<string>();
   const voice = useRef<VoiceReaction>({ startle: 0, lean: 0, alert: 0 });
+  // Genormaliseerd gezichtsmidden uit Perception; ref zodat updates geen re-render kosten.
+  const facePosition = useRef<{ x: number; y: number } | null>(null);
   const lastActivity = useRef(Date.now());
   const thresholdMs = useMemo(doodleThresholdMs, []);
   const debug = useMemo(() => new URLSearchParams(window.location.search).has("debug"), []);
@@ -398,7 +400,7 @@ export function App() {
   return (
     <>
       {(debug || view.screen === "gezicht") && <>
-      <Face doodle={doodle} display={displayState} emotion={emotionState.emotion} intensity={emotionState.intensity} mouthVolume={mouthVolume} values={emotionState.values} lastUserText={userText} voice={voice} />
+      <Face doodle={doodle} display={displayState} emotion={emotionState.emotion} intensity={emotionState.intensity} mouthVolume={mouthVolume} values={emotionState.values} lastUserText={userText} voice={voice} facePosition={facePosition} />
 
       {name && <p className="dynimo-name">{name}</p>}
       {emotionState.values && (
@@ -451,7 +453,7 @@ export function App() {
             <AgentWatchdog />
             <MicControl enabled={selectedId !== null} onError={setMicError} />
             <CameraControl enabled={view.screen === "gezicht" && displayState !== "slapend"} onError={setMicError} />
-            <Perception enabled={view.screen === "gezicht" && displayState !== "slapend"} />
+            <Perception enabled={view.screen === "gezicht" && displayState !== "slapend"} facePosition={facePosition} />
             <ConnectionStatus />
             <RoomAudioRenderer />
             <StartAudio label="Zet geluid aan" />

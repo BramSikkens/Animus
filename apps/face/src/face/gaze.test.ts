@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { gazeOffset } from "./gaze.js";
+import { facePointer, gazeOffset } from "./gaze.js";
 
 const base = { viewport: { w: 1000, h: 800 }, faceCenter: { x: 500, y: 400 }, max: 3 };
 
@@ -23,5 +23,24 @@ describe("gazeOffset", () => {
 
   it("aanwijzer op het gezicht geeft {0,0}", () => {
     expect(gazeOffset({ ...base, pointer: { x: 500, y: 400 } })).toEqual({ dx: 0, dy: 0 });
+  });
+});
+
+describe("facePointer", () => {
+  const viewport = { w: 1000, h: 800 };
+
+  it("gezicht links in beeld geeft een aanwijzer rechts van het midden (gespiegeld)", () => {
+    const { x } = facePointer({ face: { x: 0.2, y: 0.5 }, viewport });
+    expect(x).toBeGreaterThan(viewport.w / 2);
+  });
+
+  it("gezicht in het midden geeft de aanwijzer in het midden van het venster", () => {
+    expect(facePointer({ face: { x: 0.5, y: 0.5 }, viewport })).toEqual({ x: 500, y: 400 });
+  });
+
+  it("gezicht links in beeld levert via gazeOffset pupillen naar rechts (dx > 0)", () => {
+    const pointer = facePointer({ face: { x: 0.2, y: 0.5 }, viewport });
+    const { dx } = gazeOffset({ pointer, viewport, faceCenter: { x: viewport.w / 2, y: viewport.h / 2 }, max: 3 });
+    expect(dx).toBeGreaterThan(0);
   });
 });

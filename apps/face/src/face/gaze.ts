@@ -13,3 +13,11 @@ export function gazeOffset({ pointer, viewport, faceCenter, max }: { pointer: Po
     dy: clamp((pointer.y - faceCenter.y) / (viewport.h / 2)) * max || 0,
   };
 }
+
+/**
+ * Aanwijzerpositie voor het venster op basis van het genormaliseerde (0..1) gezichtsmidden in het
+ * camerabeeld, horizontaal gespiegeld zodat de Dynimo je aankijkt i.p.v. je camerabeeld natekent.
+ */
+export function facePointer({ face, viewport }: { face: Point; viewport: { w: number; h: number } }): Point {
+  return { x: (1 - face.x) * viewport.w, y: face.y * viewport.h };
+}

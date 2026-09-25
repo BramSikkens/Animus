@@ -22,7 +22,14 @@ const OBJECT_WARMUP_MS = 3000;
  * (geen tweede getUserMedia, geen zichtbaar beeld) en publiceert aanwezig/afwezig/nieuw-object-Waarnemingen op
  * PERCEPTION_TOPIC. Actief enkel als `enabled` (dezelfde voorwaarde als CameraControl). Geen tests (adapter, #83/#87).
  */
-export function useWaarnemingen({ enabled }: { enabled: boolean }): null {
+export function useWaarnemingen({
+  enabled,
+  facePosition,
+}: {
+  enabled: boolean;
+  /** Genormaliseerd (0..1) midden van het gedetecteerde gezicht; ref zodat updates geen re-render kosten. */
+  facePosition?: { current: { x: number; y: number } | null };
+}): null {
   const { localParticipant, cameraTrack } = useLocalParticipant();
   const mediaStreamTrack = cameraTrack?.track?.mediaStreamTrack;
 
@@ -81,6 +88,15 @@ export function useWaarnemingen({ enabled }: { enabled: boolean }): null {
           const { detections } = detector.detectForVideo(video, t);
           const waarneming = presence.update(detections.length > 0, t);
           if (waarneming) publish({ soort: waarneming });
+          if (waarneming === "afwezig" && facePosition) facePosition.current = null;
+
+          const box = facePosition ? detections[0]?.boundingBox : undefined;
+          if (box && video.videoWidth > 0 && video.videoHeight > 0) {
+            facePosition!.current = {
+              x: (box.originX + box.width / 2) / video.videoWidth,
+              y: (box.originY + box.height / 2) / video.videoHeight,
+            };
+          }
 
           if (objectDetector) {
             const { detections: objectDetections } = objectDetector.detectForVideo(video, t);
@@ -103,8 +119,9 @@ export function useWaarnemingen({ enabled }: { enabled: boolean }): null {
       objectDetector?.close();
       video.pause();
       video.srcObject = null;
+      if (facePosition) facePosition.current = null;
     };
-  }, [enabled, mediaStreamTrack, localParticipant]);
+  }, [enabled, mediaStreamTrack, localParticipant, facePosition]);
 
   return null;
 }

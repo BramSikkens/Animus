@@ -123,6 +123,21 @@ export type Brain = {
   addMemory(id: number, text: string): Promise<boolean>;
   /** Dashboard-override: verwijdert een Herinnering hard, enkel als die van deze Dynimo is. False als er niets verwijderd is. */
   removeMemory(id: number, memoryId: number): Promise<boolean>;
+  /** Dashboard (#95): alle Personen met hun aantal gezichts-/stemprofielen en Herinneringen; eigenaar eerst, dan op aanmaakdatum. */
+  listPersons(): Promise<{ id: number; name: string; owner: boolean; createdAt: Date; faceCount: number; voiceCount: number; memoryCount: number }[]>;
+  /** Dashboard (#95): hernoemt een Persoon (zelfde naamvalidatie als leerKennen). False bij een ongeldige naam of een onbekende id; de eigenaar mag ook hernoemd worden. */
+  renamePerson(id: number, name: string): Promise<boolean>;
+  /**
+   * Dashboard (#95): voegt removeId samen in keepId. Herinneringen en embeddings (gezicht + stem) verhuizen, per
+   * soort blijven daarna hoogstens 5 over (de nieuwste). Per Dynimo blijft de hoogste Vertrouwdheid van beide
+   * Personen over op keepId. Is removeId de eigenaar, dan gaat de owner-vlag naar keepId. False bij gelijke of
+   * onbekende ids.
+   */
+  mergePersons(keepId: number, removeId: number): Promise<boolean>;
+  /** Dashboard (#95): verwijdert een Persoon; embeddings/stemprofielen cascaden weg, Herinneringen blijven zonder Persoon. False bij de eigenaar of een onbekende id. */
+  deletePerson(id: number): Promise<boolean>;
+  /** Dashboard (#95): wist gezichts-embeddings en Stemprofielen van een Persoon; de Persoon blijft. False bij een onbekende id. */
+  relearnPerson(id: number): Promise<boolean>;
   /**
    * Initiatief-check (Type1): wil de wakkere Dynimo nu uit zichzelf iets zeggen? Geeft een instructie voor het
    * spontane openingswoord (te voeden aan `hear(..., { initiatief: true })`), of null. Niemand wakker of een
@@ -307,6 +322,8 @@ const RECALL_PRESENT_BONUS = 0.05;
 // wortel) volgt: similarity > 0.5 ⇔ (0.8 − 0.05·L2)/0.6 > 0.5 ⇔ L2 < 10. Vandaar de default 10.
 const DEFAULT_FACE_MATCH_DISTANCE = 10;
 const MAX_FACE_EMBEDDINGS = 5;
+// Stemprofielen (#92), ook gebruikt door mergePersons (#95) om na het samenvoegen te trimmen.
+const MAX_VOICE_PROFILES = 5;
 // Reviewfix #93: enkel opslaan bij een écht zekere match (ruim onder de matchdrempel) — een grensgeval vlak onder
 // de drempel mag de tabel niet in vervuilen.
 const FACE_SURE_MATCH_FACTOR = 0.7;
@@ -1158,6 +1175,121 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     return created;
   }
 
+  /** Dashboard (#95): alle Personen met hun aantal gezichts-/stemprofielen en Herinneringen; eigenaar eerst, dan op aanmaakdatum. */
+  async function listPersons(): Promise<{ id: number; name: string; owner: boolean; createdAt: Date; faceCount: number; voiceCount: number; memoryCount: number }[]> {
+    const rows = await deps.db.select().from(persons).orderBy(desc(persons.owner), asc(persons.createdAt));
+    const [faceCounts, voiceCounts, memoryCounts] = await Promise.all([
+      deps.db.select({ personId: faceEmbeddings.personId, count: sql<number>`count(*)` }).from(faceEmbeddings).groupBy(faceEmbeddings.personId),
+      deps.db.select({ personId: voiceProfilesTable.personId, count: sql<number>`count(*)` }).from(voiceProfilesTable).groupBy(voiceProfilesTable.personId),
+      deps.db.select({ personId: memories.personId, count: sql<number>`count(*)` }).from(memories).where(isNotNull(memories.personId)).groupBy(memories.personId),
+    ]);
+    const toMap = (rows: { personId: number | null; count: number }[]) => new Map(rows.map((row) => [row.personId, Number(row.count)]));
+    const faceMap = toMap(faceCounts);
+    const voiceMap = toMap(voiceCounts);
+    const memoryMap = toMap(memoryCounts);
+    return rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      owner: row.owner,
+      createdAt: row.createdAt,
+      faceCount: faceMap.get(row.id) ?? 0,
+      voiceCount: voiceMap.get(row.id) ?? 0,
+      memoryCount: memoryMap.get(row.id) ?? 0,
+    }));
+  }
+
+  /** Dashboard (#95): hernoemt een Persoon (zelfde naamvalidatie als leerKennen). False bij een ongeldige naam of een onbekende id; de eigenaar mag ook hernoemd worden. */
+  async function renamePerson(id: number, name: string): Promise<boolean> {
+    const parsed = NAAM_SCHEMA.safeParse(name);
+    if (!parsed.success) return false;
+    const result = await deps.db.update(persons).set({ name: parsed.data }).where(eq(persons.id, id)).returning({ id: persons.id });
+    return result.length > 0;
+  }
+
+  // mergePersons (#95): hoogstens MAX_FACE_EMBEDDINGS/MAX_VOICE_PROFILES per Persoon; na het verhuizen van removeId's
+  // rijen naar keepId houden we enkel de nieuwste. Dezelfde trim als storeFaceEmbedding/addVoiceProfile, maar zonder
+  // hun opslagvoorwaarden (hier verhuizen we bestaande rijen, geen nieuwe match).
+  async function trimFaceEmbeddings(tx: Tx, personId: number): Promise<void> {
+    const rows = await tx.select({ id: faceEmbeddings.id }).from(faceEmbeddings).where(eq(faceEmbeddings.personId, personId)).orderBy(desc(faceEmbeddings.createdAt), desc(faceEmbeddings.id));
+    const excess = rows.slice(MAX_FACE_EMBEDDINGS);
+    if (excess.length) await tx.delete(faceEmbeddings).where(inArray(faceEmbeddings.id, excess.map((row) => row.id)));
+  }
+
+  async function trimVoiceProfiles(tx: Tx, personId: number): Promise<void> {
+    const rows = await tx
+      .select({ id: voiceProfilesTable.id })
+      .from(voiceProfilesTable)
+      .where(eq(voiceProfilesTable.personId, personId))
+      .orderBy(desc(voiceProfilesTable.createdAt), desc(voiceProfilesTable.id));
+    const excess = rows.slice(MAX_VOICE_PROFILES);
+    if (excess.length) await tx.delete(voiceProfilesTable).where(inArray(voiceProfilesTable.id, excess.map((row) => row.id)));
+  }
+
+  /**
+   * Dashboard (#95): voegt removeId samen in keepId, in één transactie. Herinneringen en embeddings (gezicht + stem)
+   * verhuizen, per soort blijven daarna hoogstens 5 over (de nieuwste). Vertrouwdheid: per Dynimo blijft de hoogste
+   * van beide Personen over op keepId. Is removeId de eigenaar, dan gaat de owner-vlag naar keepId (hoogstens één
+   * eigenaar blijft). False bij gelijke of onbekende ids.
+   */
+  async function mergePersons(keepId: number, removeId: number): Promise<boolean> {
+    if (keepId === removeId) return false;
+    return deps.db.transaction(async (tx) => {
+      const [keep] = await tx.select({ id: persons.id }).from(persons).where(eq(persons.id, keepId));
+      const [remove] = await tx.select({ id: persons.id, owner: persons.owner }).from(persons).where(eq(persons.id, removeId));
+      if (!keep || !remove) return false;
+
+      await tx.update(memories).set({ personId: keepId }).where(eq(memories.personId, removeId));
+
+      await tx.update(faceEmbeddings).set({ personId: keepId }).where(eq(faceEmbeddings.personId, removeId));
+      await trimFaceEmbeddings(tx, keepId);
+
+      await tx.update(voiceProfilesTable).set({ personId: keepId }).where(eq(voiceProfilesTable.personId, removeId));
+      await trimVoiceProfiles(tx, keepId);
+
+      const [keepFamiliarities, removeFamiliarities] = await Promise.all([
+        tx.select({ dynimoId: familiarities.dynimoId, familiarity: familiarities.familiarity }).from(familiarities).where(eq(familiarities.personId, keepId)),
+        tx.select({ dynimoId: familiarities.dynimoId, familiarity: familiarities.familiarity }).from(familiarities).where(eq(familiarities.personId, removeId)),
+      ]);
+      const highest = new Map(keepFamiliarities.map((row) => [row.dynimoId, row.familiarity]));
+      for (const row of removeFamiliarities) highest.set(row.dynimoId, Math.max(row.familiarity, highest.get(row.dynimoId) ?? 0));
+      for (const [dynimoId, familiarity] of highest) {
+        await tx
+          .insert(familiarities)
+          .values({ dynimoId, personId: keepId, familiarity })
+          .onConflictDoUpdate({ target: [familiarities.dynimoId, familiarities.personId], set: { familiarity } });
+      }
+
+      await tx.delete(persons).where(eq(persons.id, removeId));
+      if (remove.owner) await tx.update(persons).set({ owner: true }).where(eq(persons.id, keepId));
+      return true;
+    });
+  }
+
+  /** Dashboard (#95): verwijdert een Persoon; embeddings/stemprofielen cascaden weg, Herinneringen blijven zonder Persoon (set null). False bij de eigenaar of een onbekende id. */
+  async function deletePerson(id: number): Promise<boolean> {
+    const [row] = await deps.db.select({ owner: persons.owner }).from(persons).where(eq(persons.id, id));
+    if (!row || row.owner) return false;
+    const result = await deps.db.delete(persons).where(eq(persons.id, id)).returning({ id: persons.id });
+    return result.length > 0;
+  }
+
+  /**
+   * Dashboard (#95): wist gezichts-embeddings en Stemprofielen van een Persoon; de Persoon (en zijn Herinneringen,
+   * Vertrouwdheid) blijft. False bij een onbekende id.
+   * ponytail: de agent laadt Stemprofielen bij het opstarten en na een inschrijving; een al draaiende agent kan
+   * hierna tijdelijk met een verouderde lijst blijven werken. Upgradepad: een NOTIFY-kanaal zoals STATE_CHANNEL, als
+   * dat ooit echt stoort.
+   */
+  async function relearnPerson(id: number): Promise<boolean> {
+    const [row] = await deps.db.select({ id: persons.id }).from(persons).where(eq(persons.id, id));
+    if (!row) return false;
+    await deps.db.transaction(async (tx) => {
+      await tx.delete(faceEmbeddings).where(eq(faceEmbeddings.personId, id));
+      await tx.delete(voiceProfilesTable).where(eq(voiceProfilesTable.personId, id));
+    });
+    return true;
+  }
+
   // Vertrouwdheid van (dynimo, persoon), of 0.2 als die rij ontbreekt (nieuwe Dynimo, of nooit geschreven).
   async function familiarityRow(dynimoId: number, personId: number): Promise<number> {
     const [row] = await deps.db
@@ -1201,8 +1333,6 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
   async function familiarityOf(dynimoId: number, personId?: number): Promise<number> {
     return familiarityRow(dynimoId, personId ?? (await getOwnerId()));
   }
-
-  const MAX_VOICE_PROFILES = 5;
 
   async function voiceProfiles(): Promise<{ personId: number; profile: Uint8Array }[]> {
     return deps.db.select({ personId: voiceProfilesTable.personId, profile: voiceProfilesTable.profile }).from(voiceProfilesTable);
@@ -1794,5 +1924,33 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     }
   }
 
-  return { bringToLife, wake, sleep, kill, list, backfill, reflect, considerInitiative, hear, forceMood, setMood, setAxes, setFamiliarity, familiarityOf, voiceProfiles, addVoiceProfile, recognizeFaces, setVerstand, setVoiceProfile, setArchetype, addMemory, removeMemory };
+  return {
+    bringToLife,
+    wake,
+    sleep,
+    kill,
+    list,
+    backfill,
+    reflect,
+    considerInitiative,
+    hear,
+    forceMood,
+    setMood,
+    setAxes,
+    setFamiliarity,
+    familiarityOf,
+    voiceProfiles,
+    addVoiceProfile,
+    recognizeFaces,
+    setVerstand,
+    setVoiceProfile,
+    setArchetype,
+    addMemory,
+    removeMemory,
+    listPersons,
+    renamePerson,
+    mergePersons,
+    deletePerson,
+    relearnPerson,
+  };
 }

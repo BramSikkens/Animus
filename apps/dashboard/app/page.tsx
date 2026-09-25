@@ -96,6 +96,9 @@ export default async function DashboardPage() {
   return (
     <main>
       <h1>Animus — dashboard</h1>
+      <p>
+        <a href="/personen">Personen beheren →</a>
+      </p>
 
       <section>
         <h2>Dynimo&apos;s</h2>

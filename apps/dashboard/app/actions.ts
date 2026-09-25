@@ -10,20 +10,23 @@ import { parseVerstand } from "@animus/brain/verstand";
 import { adoptVoice, cloneVoice, designVoice, saveDesignedVoice, type DesignPreview } from "@animus/brain/voice-design";
 import { parseVoice, speechProvider, voiceInputError } from "@animus/brain/voice";
 import { unusableVoiceError } from "@animus/brain/voice-catalog";
+import { eq } from "drizzle-orm";
+import { persons } from "@animus/db/schema";
 import { getBrain } from "../lib/brain";
+import { db } from "../lib/db";
 import { getCatalog } from "../lib/voice-catalog";
 
 export type ActionState = { error?: string };
 
 // Een string uit `work` is een foutmelding; gooit `work`, dan wordt de fout leesbaar getoond i.p.v. te crashen.
-async function run(work: () => Promise<string | void>): Promise<ActionState> {
+async function run(work: () => Promise<string | void>, path = "/"): Promise<ActionState> {
   try {
     const error = await work();
     if (error) return { error };
   } catch (error) {
     return { error: error instanceof Error ? error.message : String(error) };
   }
-  revalidatePath("/");
+  revalidatePath(path);
   return {};
 }
 
@@ -164,6 +167,49 @@ export async function removeMemory(_prev: ActionState, formData: FormData): Prom
     if (id === null || !Number.isInteger(memoryId)) return "Ongeldige Herinnering.";
     if (!(await getBrain().removeMemory(id, memoryId))) return "Deze Herinnering bestaat niet (meer).";
   });
+}
+
+// Personen (#95): server actions dun bovenop de brain-functies.
+const INVALID_PERSON = "Ongeldige Persoon.";
+const PERSON_GONE = "Deze Persoon bestaat niet (meer).";
+
+export async function renamePerson(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  return run(async () => {
+    const id = parseId(formData);
+    if (id === null) return INVALID_PERSON;
+    const name = String(formData.get("name") ?? "");
+    if (!(await getBrain().renamePerson(id, name))) return "Ongeldige naam (of de Persoon bestaat niet meer).";
+  }, "/personen");
+}
+
+export async function mergePersons(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  return run(async () => {
+    const keepId = parseId(formData);
+    const removeId = Number(formData.get("removeId"));
+    if (keepId === null || !Number.isInteger(removeId) || removeId <= 0) return INVALID_PERSON;
+    if (!(await getBrain().mergePersons(keepId, removeId))) return "Kan deze twee Personen niet samenvoegen.";
+  }, "/personen");
+}
+
+export async function relearnPerson(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  return run(async () => {
+    const id = parseId(formData);
+    if (id === null) return INVALID_PERSON;
+    if (!(await getBrain().relearnPerson(id))) return PERSON_GONE;
+  }, "/personen");
+}
+
+// Zoals kill(): de exacte naam ter bevestiging. deletePerson() kent zelf geen naam-parameter, dus de check gebeurt hier.
+export async function deletePerson(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  return run(async () => {
+    const id = parseId(formData);
+    if (id === null) return INVALID_PERSON;
+    const [person] = await db.select({ name: persons.name }).from(persons).where(eq(persons.id, id));
+    if (!person || person.name !== String(formData.get("name") ?? "")) {
+      return "De naam klopt niet (of de Persoon bestaat niet meer). Er is niets verwijderd.";
+    }
+    if (!(await getBrain().deletePerson(id))) return "De eigenaar kan niet verwijderd worden.";
+  }, "/personen");
 }
 
 // Stemontwerp (ElevenLabs). De API-key blijft server-side in process.env.

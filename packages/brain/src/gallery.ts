@@ -22,11 +22,19 @@ export function parseCommand(value: unknown): GalleryCommand | null {
 export type GalleryScreen =
   | { screen: "laden" }
   | { screen: "galerij"; beings: GalleryBeing[] }
-  | { screen: "gezicht"; awake: GalleryBeing };
+  | { screen: "wakker-worden"; being: GalleryBeing }
+  | { screen: "gezicht"; being: GalleryBeing };
 
-/** Welk scherm hoort bij de lijst: onbekend = laden, iemand wakker = zijn gezicht, anders de Galerij. */
-export function galleryView(beings: GalleryBeing[] | null): GalleryScreen {
-  if (!beings) return { screen: "laden" };
-  const awake = beings.find((being) => being.awake);
-  return awake ? { screen: "gezicht", awake } : { screen: "galerij", beings };
+/** Welk scherm hoort bij de toestand van de face. */
+export function screenFor({ connected, beings, selectedId }: { connected: boolean; beings: GalleryBeing[] | null; selectedId: number | null }): GalleryScreen {
+  if (!connected || !beings) return { screen: "laden" };
+  const being = beings.find((b) => b.id === selectedId);
+  if (!being) return { screen: "galerij", beings };
+  return { screen: being.awake ? "gezicht" : "wakker-worden", being };
+}
+
+/** Was de gekozen Dynimo al wakker gezien en slaapt hij nu (elders) of bestaat hij niet meer: dan terug naar de Galerij. */
+export function selectionLost({ selectedId, beings, sawAwake }: { selectedId: number | null; beings: GalleryBeing[]; sawAwake: boolean }): boolean {
+  if (selectedId === null || !sawAwake) return false;
+  return !beings.find((b) => b.id === selectedId)?.awake;
 }

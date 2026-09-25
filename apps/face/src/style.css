@@ -187,6 +187,21 @@ button:hover {
   stroke: #111;
 }
 
+.gallery .tile {
+  position: relative;
+}
+
+.tile-awake {
+  position: absolute;
+  top: 0.6rem;
+  right: 0.6rem;
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  background: #f4efe3;
+  box-shadow: 0 0 0.5rem #f4efe3;
+}
+
 .tile-face {
   width: 60%;
 }

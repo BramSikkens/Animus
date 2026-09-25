@@ -12,8 +12,8 @@ import {
 } from "@livekit/components-react";
 import { ConnectionState, type LocalAudioTrack } from "livekit-client";
 import { DISPLAY_STATES, DISPLAY_TOPIC, isDisplayState, type DisplayState } from "@animus/brain/display";
-import { GALLERY_TOPIC, galleryView, type GalleryBeing } from "@animus/brain/gallery";
-import { BackButton, Gallery } from "./Gallery.js";
+import { GALLERY_TOPIC, screenFor, selectionLost, type GalleryBeing } from "@animus/brain/gallery";
+import { Gallery, useSendCommand } from "./Gallery.js";
 import { EMOTION_TOPIC, EMOTIONS, isEmotion, type Emotion, type EmotionMessage } from "@animus/brain/emotion";
 import { doodleActive } from "./face/doodle.js";
 import { isSoundKind, SOUND_TOPIC } from "@animus/brain/sound";
@@ -22,6 +22,8 @@ import { Face } from "./face/Face.js";
 import { voiceReaction, type VoiceReaction } from "./face/voice-reaction.js";
 
 const VOICE_WINDOW = 20; // samples van 100ms
+const MAX_RECONNECTS = 3;
+const RECONNECT_DELAY_MS = 2000;
 import { emotionBarGroups } from "./emotion-bars.js";
 
 type TokenSession = { serverUrl: string; token: string };
@@ -226,6 +228,31 @@ function DebugPanel({
   );
 }
 
+// Galerij / wakker-worden / Terug-knop; leeft binnen de room omdat wake/sleep via de datachannel gaan.
+function Screens({ view, onSelect, onBack }: { view: ReturnType<typeof screenFor>; onSelect: (id: number) => void; onBack: () => void }) {
+  const send = useSendCommand();
+  if (view.screen === "galerij") {
+    return (
+      <Gallery
+        beings={view.beings}
+        onSelect={(being) => {
+          if (!being.awake) send({ type: "wake", id: being.id });
+          onSelect(being.id);
+        }}
+      />
+    );
+  }
+  if (view.screen !== "wakker-worden" && view.screen !== "gezicht") return null;
+  return (
+    <>
+      {view.screen === "wakker-worden" && <p className="status">Wakker worden…</p>}
+      <button type="button" onClick={() => { send({ type: "sleep", id: view.being.id }); onBack(); }}>
+        Terug
+      </button>
+    </>
+  );
+}
+
 export function App() {
   const [session, setSession] = useState<TokenSession | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -233,6 +260,12 @@ export function App() {
   const [displayState, setDisplayState] = useState<DisplayState>(DEFAULT_DISPLAY);
   const [name, setName] = useState<string | null>(null);
   const [beings, setBeings] = useState<GalleryBeing[] | null>(null);
+  const [connected, setConnected] = useState(false);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [micError, setMicError] = useState<string | null>(null);
+  const attempts = useRef(0);
+  const retryTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const sawAwake = useRef(false);
   const [mouthVolume, setMouthVolume] = useState(0);
   const [doodle, setDoodle] = useState(false);
   const [userText, setUserText] = useState<string>();
@@ -262,7 +295,7 @@ export function App() {
     return () => clearInterval(id);
   }, [thresholdMs, displayState]);
 
-  async function start(): Promise<void> {
+  async function connect(): Promise<void> {
     setError(null);
     try {
       const response = await fetch("/api/token");
@@ -273,8 +306,16 @@ export function App() {
     }
   }
 
-  function stop(): void {
+  // Direct verbinden (zonder microfoon); ?debug toont het gezicht zonder LiveKit.
+  useEffect(() => {
+    if (!debug) void connect();
+    return () => clearTimeout(retryTimer.current);
+  }, [debug]);
+
+  function reset(): void {
     setSession(null);
+    setConnected(false);
+    setSelectedId(null);
     setEmotionState(NEUTRAL_STATE);
     setDisplayState(DEFAULT_DISPLAY);
     setName(null);
@@ -283,12 +324,31 @@ export function App() {
     setUserText(undefined);
   }
 
-  // Verbonden en de lijst bekend: Galerij als niemand wakker is, anders het gezicht van de wakkere.
-  const view = session ? galleryView(beings) : { screen: "laden" as const };
+  // Verbindingsverlies: enkele keren automatisch opnieuw, daarna de foutmelding met 'Opnieuw proberen'.
+  function onDisconnected(): void {
+    reset();
+    if (attempts.current++ < MAX_RECONNECTS) retryTimer.current = setTimeout(() => void connect(), RECONNECT_DELAY_MS);
+    else setError("Verbinding verbroken");
+  }
+
+  function retry(): void {
+    attempts.current = 0;
+    void connect();
+  }
+
+  // Gekozen Dynimo elders slapend gelegd (of verdwenen): terug naar de Galerij.
+  useEffect(() => {
+    if (selectedId === null || !beings) return;
+    const being = beings.find((b) => b.id === selectedId);
+    if (being?.awake) sawAwake.current = true;
+    if (selectionLost({ selectedId, beings, sawAwake: sawAwake.current })) setSelectedId(null);
+  }, [beings, selectedId]);
+
+  const view = screenFor({ connected, beings, selectedId });
 
   return (
     <>
-      {view.screen !== "galerij" && <>
+      {(debug || view.screen === "gezicht") && <>
       <Face doodle={doodle} display={displayState} emotion={emotionState.emotion} intensity={emotionState.intensity} mouthVolume={mouthVolume} values={emotionState.values} lastUserText={userText} voice={voice} />
 
       {name && <p className="dynimo-name">{name}</p>}
@@ -312,20 +372,26 @@ export function App() {
 
       <main className="screen">
         {!session ? (
-          <>
-            <button type="button" onClick={() => void start()}>
-              Praat met Animus
-            </button>
-            {error && <p className="error">{error}</p>}
-          </>
+          error ? (
+            <>
+              <p className="error">{error}</p>
+              <button type="button" onClick={retry}>
+                Opnieuw proberen
+              </button>
+            </>
+          ) : (
+            !debug && <p className="status">Verbinden…</p>
+          )
         ) : (
           <LiveKitRoom
             serverUrl={session.serverUrl}
             token={session.token}
-            audio
+            audio={selectedId !== null}
             connect
-            onDisconnected={stop}
+            onConnected={() => { attempts.current = 0; setConnected(true); }}
+            onDisconnected={onDisconnected}
             onError={(err) => setError(err.message)}
+            onMediaDeviceFailure={() => setMicError("Microfoon niet beschikbaar; controleer de permissie.")}
           >
             <EmotionListener onEmotion={onEmotion} />
             <DisplayListener onDisplay={onDisplay} onName={setName} />
@@ -337,11 +403,12 @@ export function App() {
             <ConnectionStatus />
             <RoomAudioRenderer />
             <StartAudio label="Zet geluid aan" />
-            {view.screen === "galerij" && <Gallery beings={view.beings} />}
-            {view.screen === "gezicht" && <BackButton id={view.awake.id} />}
-            <button type="button" onClick={stop}>
-              Stop
-            </button>
+            <Screens
+              view={view}
+              onSelect={(id) => { sawAwake.current = false; setMicError(null); setSelectedId(id); }}
+              onBack={() => setSelectedId(null)}
+            />
+            {micError && <p className="error">{micError}</p>}
             {error && <p className="error">{error}</p>}
           </LiveKitRoom>
         )}

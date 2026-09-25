@@ -3,7 +3,7 @@ import { useLocalParticipant } from "@livekit/components-react";
 import { COMMAND_TOPIC, type GalleryBeing, type GalleryCommand } from "@animus/brain/gallery";
 
 // Dev-only, geen auth: de agent valideert het commando zelf.
-function useSendCommand(): (command: GalleryCommand) => void {
+export function useSendCommand(): (command: GalleryCommand) => void {
   const { localParticipant } = useLocalParticipant();
   return (command) => {
     localParticipant
@@ -21,8 +21,7 @@ function SleepingFace() {
   );
 }
 
-export function Gallery({ beings }: { beings: GalleryBeing[] }) {
-  const send = useSendCommand();
+export function Gallery({ beings, onSelect }: { beings: GalleryBeing[]; onSelect: (being: GalleryBeing) => void }) {
   // Portal: .screen heeft een transform, waardoor position:fixed daarbinnen niet meer het viewport volgt.
   return createPortal(
     <section className="gallery" aria-label="Dynimo's">
@@ -32,7 +31,8 @@ export function Gallery({ beings }: { beings: GalleryBeing[] }) {
         <ul>
           {beings.map((being) => (
             <li key={being.id}>
-              <button type="button" className="tile" onClick={() => send({ type: "wake", id: being.id })}>
+              <button type="button" className="tile" onClick={() => onSelect(being)}>
+                {being.awake && <span className="tile-awake" role="img" aria-label="wakker" />}
                 <SleepingFace />
                 <span>{being.name}</span>
               </button>
@@ -42,14 +42,5 @@ export function Gallery({ beings }: { beings: GalleryBeing[] }) {
       )}
     </section>,
     document.body,
-  );
-}
-
-export function BackButton({ id }: { id: number }) {
-  const send = useSendCommand();
-  return (
-    <button type="button" onClick={() => send({ type: "sleep", id })}>
-      Terug
-    </button>
   );
 }

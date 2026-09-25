@@ -51,7 +51,7 @@ Eén wezentje dat in Animus leeft, van genesis tot dood, met een eigen naam, Lan
 _Avoid_: wezen, robotje, identiteit, creature
 
 **Galerij**:
-Het startscherm van het gezichtje (na 'Praat met Animus'): een raster van vierkanten, één per levende Dynimo, met naam en een slapend miniatuurgezichtje. Klikken wekt die Dynimo en toont zijn gezicht; 'Terug' laat hem slapen en toont de Galerij weer. De agent publiceert de lijst (id, naam, wakker) en ontvangt wake/sleep-commando's van het gezichtje (dev-only, zonder auth, gevalideerd in de agent); de Galerij volgt live het dashboard.
+Het startscherm van het gezichtje: zodra de pagina laadt verbindt hij zelf (zonder microfoon) en toont een raster van vierkanten, één per levende Dynimo, met naam en een slapend miniatuurgezichtje; een wakkere Dynimo heeft een klein lichtstipje. Klikken kiest die Dynimo: hij wordt gewekt (als hij dat niet al is), de microfoon gaat aan en zijn gezicht verschijnt zodra hij als wakker gepubliceerd is ('Wakker worden…' tot dan). 'Terug' laat hem slapen, zet de microfoon uit en toont de Galerij weer; wordt hij elders slapend gelegd, dan valt de face ook terug op de Galerij. De agent publiceert de lijst (id, naam, wakker) en ontvangt wake/sleep-commando's van het gezichtje (dev-only, zonder auth, gevalideerd in de agent); de Galerij volgt live het dashboard.
 
 **Wakker / Slapend**:
 De twee toestanden van een levende Dynimo. Hooguit één Dynimo is wakker en praat via het gezichtje; alle anderen slapen. Na een herstart van Animus slapen ze allemaal. Slapen is een toestand binnen een draaiend Animus, geen gestopt proces. Laten slapen triggert een Reflectie en wist het Werkgeheugen; de Herinneringen blijven. Bij het wekken begint de Stemming bij wat de laatste Reflectie klaarzette.

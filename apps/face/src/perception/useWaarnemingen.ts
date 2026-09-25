@@ -66,7 +66,7 @@ export function useWaarnemingen({ enabled }: { enabled: boolean }): null {
             baseOptions: { modelAssetPath: OBJECT_MODEL_URL },
             runningMode: "VIDEO",
             scoreThreshold: OBJECT_MIN_SCORE,
-            maxResults: 5,
+            maxResults: 10, // ruim: personen en meubels mogen een nieuw object niet uit de lijst drukken
           });
           if (cancelled) {
             objectDetector.close();

@@ -328,8 +328,8 @@ export default defineAgent<AgentUserData>({
       (session.agentState === "idle" || session.agentState === "listening") && session.userState !== "speaking" && perception.isPresent();
     // Gedeeld door de timer-tick en een Waarneming (aanleiding "terug"): een in-flight-guard voorkomt dat ze
     // tegelijk een initiatief klaarzetten.
-    // ponytail: een aanleiding die binnenkomt terwijl het niet stil is (of er al een check loopt) vervalt; een wachtrij
-    // pas als terugkomsten in de praktijk gemist worden.
+    // ponytail: een aanleiding die binnenkomt terwijl het niet stil is (of er al een check loopt) vervalt; een nieuw
+    // object is dan ook als gezien gemarkeerd en de cooldown loopt. Een wachtrij pas als dat in de praktijk stoort.
     let initiativeInFlight = false;
     const runInitiative = async (aanleiding?: Aanleiding): Promise<void> => {
       if (initiativeInFlight || !isQuiet()) return;

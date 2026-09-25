@@ -15,6 +15,8 @@ export const FALLBACK_BASE: Emotion = "kalm";
  * halveringstijd: een reactieve Dynimo beweegt sterker én dooft langzamer uit, een nuchtere het omgekeerde.
  */
 export const reactivityFactor = (reactivity: number) => 0.05 + 1.9 * reactivity;
+/** Het bereik boven de rust is 50 i.p.v. 100 (ADR-0017); deze schaal herstelt de sterkte die de Type1-delta's vóór de ruststand van 50 hadden. */
+export const DELTA_SCALE = 0.5;
 /** De halveringstijd wordt begrensd: bij r≈0 dooft de Stemming niet absurd snel uit. */
 const halfLifeFactor = (reactivity: number) => Math.min(2.5, Math.max(0.25, reactivityFactor(reactivity)));
 
@@ -92,7 +94,7 @@ export function applyDeltas(
   reactivity = 0.5,
 ): { mood: Mood; next: StoredMood } {
   const current = currentMood(stored, baseEmotion, now, reactivity);
-  const scale = reactivityFactor(reactivity);
+  const scale = reactivityFactor(reactivity) * DELTA_SCALE;
   if (EMOTIONS.every((emotion) => !deltas[emotion])) return { mood: current, next: stored };
   // Een positieve delta trekt de tegenpool PAIR_PULL van die delta de andere kant op.
   const values = reconcilePairs(

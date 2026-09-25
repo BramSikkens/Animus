@@ -1131,7 +1131,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     const frame = kijken ? await haalFrame() : null;
     if (frame) yield { type: "kijk" };
     const promptMessage: ModelMessage = frame
-      ? { role: "user", content: [{ type: "text", text }, { type: "image", image: frame.data, mediaType: frame.mediaType }] }
+      ? { role: "user", content: [{ type: "text", text }, { type: "file", data: frame.data, mediaType: frame.mediaType }] }
       : userMessage;
     const noFrameMessage: SystemModelMessage[] = kijken && !frame ? [{ role: "system", content: NIETS_ZIEN }] : [];
 

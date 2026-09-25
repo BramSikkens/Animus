@@ -11,7 +11,6 @@ import {
   type Room,
   type TrackPublication,
   type VideoFrame,
-  type VideoFrameEvent,
 } from "@livekit/rtc-node";
 import type { Frame } from "@animus/brain";
 
@@ -28,59 +27,50 @@ export async function encodeFrame(rgba: Uint8Array, width: number, height: numbe
   return { data: new Uint8Array(buffer), mediaType: "image/jpeg" };
 }
 
-/** Bewaart het laatste camerabeeld van de room; levert er een JPEG van op aanvraag (ADR-0018). */
+const GRAB_TIMEOUT_MS = 1000;
+
+/**
+ * Houdt de camera-track van de room bij en pakt pas bij Kijken één beeld als JPEG (ADR-0018). Geen continue stream:
+ * elk beeld (~30/s) binnenlezen kostte GC-pauzes op de agent-loop terwijl er zelden gekeken wordt.
+ */
 export function createFrameSource(room: Room): { latest(): Promise<Frame | null>; dispose(): void } {
-  // Via de reader sluiten: cancel() op de vergrendelde stream zelf rejectt en lekt dan de native stream.
-  let reader: ReadableStreamDefaultReader<VideoFrameEvent> | undefined;
-  let lastFrame: VideoFrame | undefined;
+  let track: RemoteTrack | undefined;
   let muted = false;
-  // Enkel events van de actieve track tellen: een late unsubscribe/mute van een herladen tab mag de nieuwe niet sluiten.
+  // Enkel events van de actieve track tellen: een late unsubscribe/mute van een herladen tab mag de nieuwe niet wissen.
   let activeSid: string | undefined;
 
-  function closeStream(): void {
-    reader?.cancel().catch(() => {});
-    reader = undefined;
-    lastFrame = undefined;
+  // Opent kort een eigen stream, neemt het eerste beeld en sluit via de reader (cancel() op de vergrendelde
+  // stream zelf rejectt en lekt dan de native stream). Geen beeld binnen de timeout: null.
+  async function grab(from: RemoteTrack): Promise<VideoFrame | null> {
+    const reader = new VideoStream(from).getReader();
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      const timeout = new Promise<null>((resolve) => (timer = setTimeout(() => resolve(null), GRAB_TIMEOUT_MS)));
+      const first = reader.read().then(({ done, value }) => (done ? null : value.frame));
+      return await Promise.race([first, timeout]);
+    } finally {
+      clearTimeout(timer);
+      reader.cancel().catch(() => {});
+    }
   }
 
-  function openStream(track: RemoteTrack): void {
-    closeStream();
-    const own = new VideoStream(track).getReader();
-    reader = own;
-    // ponytail: elk frame wordt gelezen (ook als niemand kijkt), maar pas bij latest() geconverteerd; throttlen als CPU ooit telt.
-    void (async () => {
-      try {
-        for (;;) {
-          const { done, value } = await own.read();
-          if (done || reader !== own) return; // gesloten, of een nieuwere stream heeft deze vervangen
-          if (!muted) lastFrame = value.frame; // een frame dat na de mute binnenkomt, mag niet blijven hangen
-        }
-      } catch {
-        // stream gesloten (closeStream/dispose): geen fout.
-      }
-    })();
-  }
-
-  const onSubscribed = (track: RemoteTrack, publication: RemoteTrackPublication, _participant: RemoteParticipant): void => {
-    if (track.kind !== TrackKind.KIND_VIDEO) return;
+  const onSubscribed = (subscribed: RemoteTrack, publication: RemoteTrackPublication, _participant: RemoteParticipant): void => {
+    if (subscribed.kind !== TrackKind.KIND_VIDEO) return;
     activeSid = publication.sid;
     muted = publication.muted ?? false;
-    openStream(track);
+    track = subscribed;
   };
   const onUnsubscribed = (_track: RemoteTrack, publication: RemoteTrackPublication): void => {
     if (publication.sid !== activeSid) return;
-    closeStream();
+    track = undefined;
   };
-  // livekit-client's setCameraEnabled(false) mute't de track meestal i.p.v. te unpublishen; een slapende
-  // Dynimo mag nooit het laatste frame van de vorige sessie leveren (privacy).
+  // livekit-client's setCameraEnabled(false) mute't de track meestal i.p.v. te unpublishen: een slapende Dynimo
+  // mag dan niets zien (privacy).
   const onMuted = (publication: TrackPublication, _participant: Participant): void => {
-    if (publication.sid !== activeSid) return;
-    muted = true;
-    lastFrame = undefined;
+    if (publication.sid === activeSid) muted = true;
   };
   const onUnmuted = (publication: TrackPublication, _participant: Participant): void => {
-    if (publication.sid !== activeSid) return;
-    muted = false;
+    if (publication.sid === activeSid) muted = false;
   };
 
   room.on(RoomEvent.TrackSubscribed, onSubscribed);
@@ -90,8 +80,10 @@ export function createFrameSource(room: Room): { latest(): Promise<Frame | null>
 
   return {
     async latest() {
-      if (muted || !lastFrame) return null;
-      const rgba = lastFrame.convert(VideoBufferType.RGBA);
+      if (muted || !track) return null;
+      const frame = await grab(track);
+      if (!frame || muted) return null; // intussen gemute: niets tonen
+      const rgba = frame.convert(VideoBufferType.RGBA);
       return encodeFrame(rgba.data, rgba.width, rgba.height);
     },
     dispose() {
@@ -99,7 +91,7 @@ export function createFrameSource(room: Room): { latest(): Promise<Frame | null>
       room.off(RoomEvent.TrackUnsubscribed, onUnsubscribed);
       room.off(RoomEvent.TrackMuted, onMuted);
       room.off(RoomEvent.TrackUnmuted, onUnmuted);
-      closeStream();
+      track = undefined;
     },
   };
 }

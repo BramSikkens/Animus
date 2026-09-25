@@ -21,7 +21,8 @@ import { isSoundKind, SOUND_TOPIC } from "@animus/brain/sound";
 import { clipUrl } from "./sound.js";
 import { Face } from "./face/Face.js";
 import { voiceReaction, type VoiceReaction } from "./face/voice-reaction.js";
-import { useWaarnemingen } from "./perception/useWaarnemingen.js";
+import { useWaarnemingen, type VisionSnapshot } from "./perception/useWaarnemingen.js";
+import { KijkSnapshot } from "./perception/KijkSnapshot.js";
 
 const VOICE_WINDOW = 20; // samples van 100ms
 const MAX_RECONNECTS = 3;
@@ -212,8 +213,16 @@ function CameraControl({ enabled, onError }: { enabled: boolean; onError: (messa
 }
 
 // Aanwezigheidsdetectie op de al gepubliceerde cameratrack (ADR-0018), enkel actief zolang de camera aan is.
-function Perception({ enabled, facePosition }: { enabled: boolean; facePosition: { current: { x: number; y: number } | null } }) {
-  useWaarnemingen({ enabled, facePosition });
+function Perception({
+  enabled,
+  facePosition,
+  vision,
+}: {
+  enabled: boolean;
+  facePosition: { current: { x: number; y: number } | null };
+  vision: { current: VisionSnapshot | null };
+}) {
+  useWaarnemingen({ enabled, facePosition, vision });
   return null;
 }
 
@@ -308,6 +317,8 @@ export function App() {
   const voice = useRef<VoiceReaction>({ startle: 0, lean: 0, alert: 0 });
   // Genormaliseerd gezichtsmidden uit Perception; ref zodat updates geen re-render kosten.
   const facePosition = useRef<{ x: number; y: number } | null>(null);
+  // Laatste detecties + video uit Perception, voor de KijkSnapshot; ref zodat updates geen re-render kosten.
+  const vision = useRef<VisionSnapshot | null>(null);
   const lastActivity = useRef(Date.now());
   const thresholdMs = useMemo(doodleThresholdMs, []);
   const debug = useMemo(() => new URLSearchParams(window.location.search).has("debug"), []);
@@ -453,7 +464,8 @@ export function App() {
             <AgentWatchdog />
             <MicControl enabled={selectedId !== null} onError={setMicError} />
             <CameraControl enabled={view.screen === "gezicht" && displayState !== "slapend"} onError={setMicError} />
-            <Perception enabled={view.screen === "gezicht" && displayState !== "slapend"} facePosition={facePosition} />
+            <Perception enabled={view.screen === "gezicht" && displayState !== "slapend"} facePosition={facePosition} vision={vision} />
+            <KijkSnapshot vision={vision} />
             <ConnectionStatus />
             <RoomAudioRenderer />
             <StartAudio label="Zet geluid aan" />

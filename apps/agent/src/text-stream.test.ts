@@ -90,4 +90,21 @@ describe("textStream", () => {
     expect(kinds).toEqual(["brommen"]);
     expect(chunks).toEqual(["Hoi"]);
   });
+
+  it("roept onLook aan bij een kijk-event en houdt het event uit de tekst", async () => {
+    const events: BrainEvent[] = [
+      { type: "kijk" },
+      { type: "text", delta: "Hoi" },
+    ];
+    let calls = 0;
+    const chunks = await collect(textStream(gen(events), { onLook: () => calls++ }));
+    expect(calls).toBe(1);
+    expect(chunks).toEqual(["Hoi"]);
+  });
+
+  it("werkt zonder onLook zoals voorheen", async () => {
+    const events: BrainEvent[] = [{ type: "kijk" }, { type: "text", delta: "Hoi" }];
+    const chunks = await collect(textStream(gen(events)));
+    expect(chunks).toEqual(["Hoi"]);
+  });
 });

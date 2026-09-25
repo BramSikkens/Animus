@@ -1,6 +1,9 @@
 // Browser-veilig: geen node-imports. De face-app én de agent delen dit contract (ADR-0018, CONTEXT.md: Waarneming).
 export const PERCEPTION_TOPIC = "waarneming";
 
+/** Bericht van agent naar face: er ging deze beurt een camerabeeld naar Type2 (kijk-event, geen payload). */
+export const LOOK_TOPIC = "kijk";
+
 /** Goedkoop, continu Type1-event uit de camera (CONTEXT.md: Waarneming). */
 export type Waarneming = { soort: "aanwezig" } | { soort: "afwezig" } | { soort: "nieuw-object"; object: string };
 

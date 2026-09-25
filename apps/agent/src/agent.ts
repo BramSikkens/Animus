@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { createBrain, defaultVoiceDeps, type Brain } from "@animus/brain";
 import { DISPLAY_TOPIC, type DisplayMessage, type DisplayState } from "@animus/brain/display";
 import { COMMAND_TOPIC, GALLERY_TOPIC, type GalleryMessage } from "@animus/brain/gallery";
-import { isWaarneming, PERCEPTION_TOPIC, type Aanleiding } from "@animus/brain/perception";
+import { isWaarneming, LOOK_TOPIC, PERCEPTION_TOPIC, type Aanleiding } from "@animus/brain/perception";
 import { SOUND_TOPIC, type SoundMessage } from "@animus/brain/sound";
 import { EMOTION_TOPIC, type EmotionMessage } from "@animus/brain/emotion";
 import { initiativeFactor } from "@animus/brain/behavior";
@@ -160,6 +160,15 @@ class AnimusAgent extends voice.Agent {
           .publishData(new TextEncoder().encode(JSON.stringify(message)), { reliable: true, topic: SOUND_TOPIC })
           .catch((error: unknown) => {
             console.error("Geluid publiceren faalde:", error instanceof Error ? error.message : error);
+          });
+      },
+      onLook: () => {
+        const participant = this.#room.localParticipant;
+        if (!participant) return;
+        participant
+          .publishData(new TextEncoder().encode(JSON.stringify({})), { reliable: true, topic: LOOK_TOPIC })
+          .catch((error: unknown) => {
+            console.error("Kijk-event publiceren faalde:", error instanceof Error ? error.message : error);
           });
       },
     });

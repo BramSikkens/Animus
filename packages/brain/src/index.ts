@@ -45,6 +45,8 @@ export type BrainEvent =
   | { type: "mood"; emotion: Emotion; intensity: number; values: Record<Emotion, number> }
   /** De Stemming is zichtbaar veranderd: een kort geluidje van deze soort; komt direct na het mood-event. */
   | { type: "sound"; kind: SoundKind }
+  /** Er ging deze beurt echt een camerabeeld naar Type2 (Type1-/initiatief-pad of de kijk-tool). */
+  | { type: "kijk" }
   | { type: "text"; delta: string }
   | { type: "tool-call"; toolName: string; input: unknown }
   | { type: "tool-result"; toolName: string; output: unknown };
@@ -1127,6 +1129,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
         return null;
       });
     const frame = kijken ? await haalFrame() : null;
+    if (frame) yield { type: "kijk" };
     const promptMessage: ModelMessage = frame
       ? { role: "user", content: [{ type: "text", text }, { type: "image", image: frame.data, mediaType: frame.mediaType }] }
       : userMessage;
@@ -1242,7 +1245,9 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
         }
         if (part.type === "tool-result") {
           // Kijk-tool: nooit de camerabytes naar de consument lekken via het BrainEvent.
-          const output = part.toolName === "kijk" ? { gezien: (part.output as { frame: Frame | null }).frame !== null } : part.output;
+          const kijkFrame = part.toolName === "kijk" ? (part.output as { frame: Frame | null }).frame : null;
+          if (kijkFrame) yield { type: "kijk" };
+          const output = part.toolName === "kijk" ? { gezien: kijkFrame !== null } : part.output;
           yield { type: "tool-result", toolName: part.toolName, output };
         }
         if (part.type === "tool-error") {

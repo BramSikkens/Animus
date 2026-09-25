@@ -4,6 +4,7 @@ import { useLocalParticipant } from "@livekit/components-react";
 import { PERCEPTION_TOPIC, type Waarneming } from "@animus/brain/perception";
 import { createPresence } from "./presence.js";
 import { createObjectTracker } from "./objects.js";
+import type { VideoBox } from "./overlay.js";
 
 // Zelfde @mediapipe/tasks-vision-versie als in package.json (`pnpm ls @mediapipe/tasks-vision`).
 // ponytail: WASM en model komen runtime van jsdelivr/googleapis; zelf hosten (public/) als offline (Pi) ooit telt.
@@ -17,6 +18,13 @@ const OBJECT_STABLE_MS = 1000;
 // Ruim boven OBJECT_STABLE_MS: wat bij het wakker worden al stabiel in beeld staat (bureau, stoel) telt zo zeker als "al gezien".
 const OBJECT_WARMUP_MS = 3000;
 
+/** Laatste detecties + de videobron zelf, voor de KijkSnapshot (#88): hergebruikt de detecties uit de tick, geen extra detectorcall. */
+export type VisionSnapshot = {
+  video: HTMLVideoElement;
+  faces: VideoBox[];
+  objects: { box: VideoBox; name: string; score: number }[];
+};
+
 /**
  * MediaPipe-adapter (ADR-0018): detecteert gezicht én objecten (COCO) in de al gepubliceerde lokale cameratrack
  * (geen tweede getUserMedia, geen zichtbaar beeld) en publiceert aanwezig/afwezig/nieuw-object-Waarnemingen op
@@ -25,10 +33,13 @@ const OBJECT_WARMUP_MS = 3000;
 export function useWaarnemingen({
   enabled,
   facePosition,
+  vision,
 }: {
   enabled: boolean;
   /** Genormaliseerd (0..1) midden van het gedetecteerde gezicht; ref zodat updates geen re-render kosten. */
   facePosition?: { current: { x: number; y: number } | null };
+  /** Laatste detecties + video, voor de KijkSnapshot; ref zodat updates geen re-render kosten. */
+  vision?: { current: VisionSnapshot | null };
 }): null {
   const { localParticipant, cameraTrack } = useLocalParticipant();
   const mediaStreamTrack = cameraTrack?.track?.mediaStreamTrack;
@@ -98,12 +109,20 @@ export function useWaarnemingen({
             };
           }
 
+          let visionObjects: VisionSnapshot["objects"] = [];
           if (objectDetector) {
             const { detections: objectDetections } = objectDetector.detectForVideo(video, t);
-            const gedetecteerd = objectDetections
-              .filter((d) => d.categories.length > 0)
-              .map((d) => ({ category: d.categories[0]!.categoryName, score: d.categories[0]!.score }));
+            const metCategorie = objectDetections.filter((d) => d.categories.length > 0 && d.boundingBox);
+            const gedetecteerd = metCategorie.map((d) => ({ category: d.categories[0]!.categoryName, score: d.categories[0]!.score }));
             for (const object of objects.update(gedetecteerd, t)) publish({ soort: "nieuw-object", object });
+            visionObjects = metCategorie.map((d) => ({ box: d.boundingBox!, name: d.categories[0]!.categoryName, score: d.categories[0]!.score }));
+          }
+          if (vision) {
+            const visionFaces = detections
+              .map((d) => d.boundingBox)
+              .filter((b): b is NonNullable<typeof b> => b != null)
+              .map(({ originX, originY, width, height }) => ({ originX, originY, width, height }));
+            vision.current = { video, faces: visionFaces, objects: visionObjects };
           }
         }, DETECT_INTERVAL_MS);
       } catch (error) {
@@ -120,8 +139,9 @@ export function useWaarnemingen({
       video.pause();
       video.srcObject = null;
       if (facePosition) facePosition.current = null;
+      if (vision) vision.current = null;
     };
-  }, [enabled, mediaStreamTrack, localParticipant, facePosition]);
+  }, [enabled, mediaStreamTrack, localParticipant, facePosition, vision]);
 
   return null;
 }

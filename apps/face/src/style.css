@@ -148,6 +148,29 @@ button:hover {
   background: #f4efe3;
 }
 
+/* Momentopname (~5s) van wat de Dynimo net zag (kijk-event, #88); rechtsonder, los van .screen (bottom-center). */
+.kijk-snapshot {
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 2;
+  border: 1px solid #444;
+  border-radius: 0.5rem;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+}
+
+.kijk-snapshot.visible {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kijk-snapshot {
+    transition: none;
+  }
+}
+
 /* Galerij: raster van vierkanten, monochroom als het gezicht. */
 .gallery {
   position: fixed;

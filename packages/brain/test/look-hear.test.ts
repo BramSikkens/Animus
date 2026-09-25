@@ -397,6 +397,96 @@ describe("Kijk-tool in hear() (vangnet, ADR-0019)", () => {
   });
 });
 
+function countKijkEvents(events: BrainEvent[]): number {
+  return events.filter((event) => event.type === "kijk").length;
+}
+
+describe("kijk-event: er ging deze beurt echt een camerabeeld naar Type2", () => {
+  it("kijken=ja + lookFrame geeft een frame: precies één kijk-event", async () => {
+    await insertDynimo();
+    const t1 = type1({ kijken: "ja" });
+    const t2 = type2();
+    const brain = createBrain({
+      db,
+      embedder: embedder(),
+      type1: t1.model,
+      type2: { light: t2.model, heavy: t2.model },
+      now: () => now,
+      random: () => 0.99,
+      lookFrame: async () => FRAME,
+    });
+    const events = await hearEvents(brain, "Wat zie je?");
+    expect(countKijkEvents(events)).toBe(1);
+  });
+
+  it("kijken=ja + lookFrame geeft null: geen kijk-event", async () => {
+    await insertDynimo();
+    const t1 = type1({ kijken: "ja" });
+    const t2 = type2();
+    const brain = createBrain({
+      db,
+      embedder: embedder(),
+      type1: t1.model,
+      type2: { light: t2.model, heavy: t2.model },
+      now: () => now,
+      random: () => 0.99,
+      lookFrame: async () => null,
+    });
+    const events = await hearEvents(brain, "Wat zie je?");
+    expect(countKijkEvents(events)).toBe(0);
+  });
+
+  it("kijken=nee: geen kijk-event", async () => {
+    await insertDynimo();
+    const t1 = type1({ kijken: "nee" });
+    const t2 = type2();
+    const brain = createBrain({
+      db,
+      embedder: embedder(),
+      type1: t1.model,
+      type2: { light: t2.model, heavy: t2.model },
+      now: () => now,
+      random: () => 0.99,
+      lookFrame: async () => FRAME,
+    });
+    const events = await hearEvents(brain, "Hoi");
+    expect(countKijkEvents(events)).toBe(0);
+  });
+
+  it("kijk-tool met frame: precies één kijk-event", async () => {
+    await insertDynimo();
+    const { brain } = brainWith({ kijken: "nee", steps: ["kijk", "text"] });
+    const events = await hearEvents(brain, "Kijk eens");
+    expect(countKijkEvents(events)).toBe(1);
+  });
+
+  it("kijk-tool met null-frame: geen kijk-event", async () => {
+    await insertDynimo();
+    const { brain } = brainWith({ kijken: "nee", steps: ["kijk", "text"], lookFrame: async () => null });
+    const events = await hearEvents(brain, "Kijk eens");
+    expect(countKijkEvents(events)).toBe(0);
+  });
+
+  it("initiatief met pendingLook (nieuw-object + ja) en frame: precies één kijk-event", async () => {
+    await insertDynimo();
+    const t2 = type2();
+    const brain = createBrain({
+      db,
+      embedder: embedder(),
+      type1: initiativeType1("ja"),
+      type2: { light: t2.model, heavy: t2.model },
+      now: () => now,
+      random: () => 0.99,
+      lookFrame: async () => FRAME,
+    });
+
+    const instructie = await brain.considerInitiative({ soort: "nieuw-object", object: "cat" });
+    const events: BrainEvent[] = [];
+    for await (const event of brain.hear(instructie!, { initiatief: true })) events.push(event);
+    expect(countKijkEvents(events)).toBe(1);
+  });
+});
+
 describe("Spontaan Kijken: considerInitiative(nieuw-object) wordt een Kijk-beurt in hear(initiatief) (#87)", () => {
   it("ja: de initiatiefbeurt bevat precies 1 beeld, de kijk-tool wordt niet aangeboden, en de instructie noemt het object", async () => {
     await insertDynimo();

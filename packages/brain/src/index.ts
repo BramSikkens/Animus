@@ -11,8 +11,6 @@ import {
   type LanguageModel,
   type ModelMessage,
   type SystemModelMessage,
-  type ToolModelMessage,
-  type ToolResultPart,
   type ToolSet,
 } from "ai";
 import { and, asc, cosineDistance, desc, eq, gt, gte, isNotNull, isNull, lte, notInArray, sql } from "drizzle-orm";
@@ -392,15 +390,17 @@ async function classify(type1: Experimental_EvaluationModel, text: string, conte
   return { deltas, indruk, intent, kijken };
 }
 
+const NIETS_ZIEN = "Je kunt nu niets zien: er is geen camerabeeld. Zeg dat eerlijk en verzin niet wat je ziet.";
+
 // Werkgeheugen bewaart geen beelden (ADR-0019): een kijk-tool-resultaat met content (tekst + beeld) wordt herschreven
 // naar enkel tekst, zodat een beeld nooit méé blijft slepen naar volgende beurten.
 function stripBeelden(messages: ModelMessage[]): ModelMessage[] {
   return messages.map((message): ModelMessage => {
     if (message.role !== "tool") return message;
-    const content = (message as ToolModelMessage).content.map((part): ToolResultPart | (typeof part) => {
+    const content = message.content.map((part) => {
       if (part.type !== "tool-result" || part.output.type !== "content") return part;
       const text = part.output.value.filter((v) => v.type === "text").map((v) => v.text).join(" ");
-      return { ...part, output: { type: "text", value: `${text} (beeld niet bewaard)` } };
+      return { ...part, output: { type: "text" as const, value: `${text} (beeld niet bewaard)` } };
     });
     return { ...message, content };
   });
@@ -1107,15 +1107,17 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
       return;
     }
 
-    // Kijken (ADR-0019): Type1 besliste al; een fout bij het ophalen mag de beurt nooit breken.
-    const frame = kijken && deps.lookFrame ? await deps.lookFrame().catch((error: unknown) => {
-      console.warn("Frame ophalen faalde:", error instanceof Error ? error.message : error);
-      return null;
-    }) : null;
+    // Kijken (ADR-0019): Type1 besliste al; een fout bij het ophalen telt als geen beeld en breekt de beurt nooit.
+    const haalFrame = (): Promise<Frame | null> =>
+      (deps.lookFrame?.() ?? Promise.resolve(null)).catch((error: unknown) => {
+        console.warn("Frame ophalen faalde:", error instanceof Error ? error.message : error);
+        return null;
+      });
+    const frame = kijken ? await haalFrame() : null;
     const promptMessage: ModelMessage = frame
       ? { role: "user", content: [{ type: "text", text }, { type: "image", image: frame.data, mediaType: frame.mediaType }] }
       : userMessage;
-    const noFrameMessage: SystemModelMessage[] = kijken && !frame ? [{ role: "system", content: "Je kunt nu niets zien: er is geen camerabeeld. Zeg dat eerlijk en verzin niet wat je ziet." }] : [];
+    const noFrameMessage: SystemModelMessage[] = kijken && !frame ? [{ role: "system", content: NIETS_ZIEN }] : [];
 
     // Kijk-tool (ADR-0019, vangnet): enkel aangeboden als Type1 zelf geen beeld meestuurde (canLook && !kijken); zei
     // Type1 al ja (ook met een null-frame), dan wordt nooit een tweede keer gekeken. Guard binnen deze beurt: een
@@ -1131,10 +1133,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
               if (kijkGebruikt) return { frame: null, alGekeken: true };
               kijkGebruikt = true;
               return {
-                frame: await deps.lookFrame!().catch((error: unknown) => {
-                  console.warn("Frame ophalen faalde:", error instanceof Error ? error.message : error);
-                  return null;
-                }),
+                frame: await haalFrame(),
               };
             },
             toModelOutput: ({ output }) =>
@@ -1148,7 +1147,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
                         { type: "file", data: { type: "data", data: output.frame.data }, mediaType: output.frame.mediaType },
                       ],
                     }
-                  : { type: "text", value: "Je kunt nu niets zien: er is geen camerabeeld. Zeg dat eerlijk en verzin niet wat je ziet." },
+                  : { type: "text", value: NIETS_ZIEN },
           }),
         }
       : {};

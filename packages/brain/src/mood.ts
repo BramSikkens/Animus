@@ -29,6 +29,9 @@ export type Mood = { emotion: Emotion; intensity: number; values: MoodValues };
 const clamp = (value: number) => Math.min(100, Math.max(0, value));
 const clamp01 = (value: number) => Math.min(1, Math.max(0, value));
 
+/** Intensiteit die het gezicht toont: expressiviteit 0.5 laat haar ongewijzigd, 0 halveert ze (gesloten), 1 maakt ze anderhalf keer zo sterk (geklemd op 1). */
+export const faceIntensity = (intensity: number, expressiveness: number): number => clamp01(intensity * (0.5 + expressiveness));
+
 /** Hoe ver `value` boven de ruststand (REST_LEVEL) staat, als 0..1. De enige sterktemaat (ADR-0017). */
 export const strength = (value: number): number => clamp01((value - REST_LEVEL) / (100 - REST_LEVEL));
 

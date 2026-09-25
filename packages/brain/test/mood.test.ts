@@ -9,6 +9,7 @@ import {
   currentMood,
   displayMood,
   displayMoodOfRow,
+  faceIntensity,
   driftOf,
   DRIFT_AMPLITUDE,
   DRIFT_HYSTERESIS,
@@ -382,5 +383,28 @@ describe("displayMoodOfRow (ADR-0017: drift)", () => {
     const row = { id: 7, baseEmotion: "blij", moodValues: null, moodAt: null, axisReactivity: 1 };
     const mood = displayMoodOfRow(row, T0);
     expect(mood).toEqual(displayMood(storedMoodOf(row), "blij", T0, 1, "7"));
+  });
+});
+
+describe("faceIntensity", () => {
+  it("laat de intensiteit ongewijzigd bij de standaard expressiviteit 0.5", () => {
+    expect(faceIntensity(0.6, 0.5)).toBeCloseTo(0.6);
+  });
+
+  it("halveert de intensiteit bij expressiviteit 0 (gesloten)", () => {
+    expect(faceIntensity(0.6, 0)).toBeCloseTo(0.3);
+  });
+
+  it("maakt de intensiteit anderhalf keer zo sterk bij expressiviteit 1, geklemd op 1", () => {
+    expect(faceIntensity(0.4, 1)).toBeCloseTo(0.6);
+    expect(faceIntensity(0.8, 1)).toBe(1);
+  });
+
+  it("laat intensiteit 0 altijd 0 blijven", () => {
+    expect(faceIntensity(0, 1)).toBe(0);
+  });
+
+  it("klemt op minimaal 0", () => {
+    expect(faceIntensity(0.5, -2)).toBe(0);
   });
 });

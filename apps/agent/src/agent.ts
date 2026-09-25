@@ -31,7 +31,7 @@ import * as openai from "@livekit/agents-plugin-openai";
 import * as silero from "@livekit/agents-plugin-silero";
 import { RoomEvent, TrackSource, type RemoteParticipant } from "@livekit/rtc-node";
 import { readState, watchDynimos } from "./dynimo-watch.js";
-import { createStateRepublisher, emotionMessageFor } from "./state-republish.js";
+import { createStateRepublisher, emotionMessageFor, withFaceExpressiveness } from "./state-republish.js";
 import { createCommandHandler, galleryMessageFor, MAX_GRAVES } from "./gallery-commands.js";
 import { createInitiativeTimer, initiativeIntervalMs, parseInitiativeMinutes } from "./initiative-timer.js";
 import { createReflectionDisplay } from "./reflection-display.js";
@@ -105,9 +105,10 @@ class AnimusAgent extends voice.Agent {
   readonly #room: JobContext["room"];
   readonly #onUtterance: () => void;
   readonly #onMoodValues: (values: EmotionMessage["values"]) => void;
+  readonly #getExpressiveness: () => number;
   #pendingInitiative: string | undefined;
 
-  constructor(brain: Brain, room: JobContext["room"], onUtterance: () => void, onMoodValues: (values: EmotionMessage["values"]) => void) {
+  constructor(brain: Brain, room: JobContext["room"], onUtterance: () => void, onMoodValues: (values: EmotionMessage["values"]) => void, getExpressiveness: () => number = () => 0.5) {
     // instructions is verplicht op voice.Agent, maar onbenut: llmNode hieronder draait i.p.v. het
     // ingebouwde LLM-pad de brein-kern.
     super({ instructions: "Animus", llm: new BrainPlaceholderLLM() });
@@ -115,6 +116,7 @@ class AnimusAgent extends voice.Agent {
     this.#room = room;
     this.#onUtterance = onUtterance;
     this.#onMoodValues = onMoodValues;
+    this.#getExpressiveness = getExpressiveness;
   }
 
   /** Zet een spontane uiting klaar; de eerstvolgende llmNode (via session.generateReply) draait die i.p.v. een user-turn. */
@@ -142,7 +144,7 @@ class AnimusAgent extends voice.Agent {
         }
         // Fire-and-forget: een mislukte publicatie mag de beurt niet breken.
         participant
-          .publishData(new TextEncoder().encode(JSON.stringify(message)), { reliable: true, topic: EMOTION_TOPIC })
+          .publishData(new TextEncoder().encode(JSON.stringify(withFaceExpressiveness(message, this.#getExpressiveness()))), { reliable: true, topic: EMOTION_TOPIC })
           .catch((error: unknown) => {
             console.error("Emotie publiceren faalde:", error instanceof Error ? error.message : error);
           });
@@ -237,7 +239,7 @@ export default defineAgent<AgentUserData>({
       try {
         const state = await readState(brain);
         publish(DISPLAY_TOPIC, { state: effectiveDisplay(state), name: state.name });
-        publish(EMOTION_TOPIC, emotionMessageFor(state.mood));
+        publish(EMOTION_TOPIC, withFaceExpressiveness(emotionMessageFor(state.mood), state.expressiveness));
       } catch (error) {
         console.error("Toestand publiceren faalde:", error instanceof Error ? error.message : error);
       }
@@ -307,7 +309,7 @@ export default defineAgent<AgentUserData>({
       const expressiveness = initiativeAxes?.expressiveness ?? 0.5;
       // Tempo per Emotie (#70) via speed; de afronding in applyTtsEmotion voorkomt extra websocket-herstarts.
       applyTtsEmotion(speechProvider(process.env), tts, withPacingSpeed(voiceSettingsFor({ values, expressiveness }), pacingFor({ values, expressiveness }).speedFactor));
-    });
+    }, () => initiativeAxes?.expressiveness ?? 0.5);
     const initiative = createInitiativeTimer({
       intervalMs: () => initiativeIntervalMs(initiativeAxes, initiativeBaseMs.ms, initiativeMoodFactor),
       random: Math.random,

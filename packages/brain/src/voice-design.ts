@@ -74,3 +74,16 @@ export async function cloneVoice(fetchFn: typeof fetch, apiKey: string, input: {
   assertOk(response);
   return String(((await response.json()) as Raw).voice_id);
 }
+
+/** TTS kent een Voice Library-stem pas na toevoegen aan het account; geeft het bruikbare voice_id. Eigen stemmen: ongewijzigd. */
+export async function adoptVoice(fetchFn: typeof fetch, apiKey: string, voice: { id: string; name: string; publicOwnerId?: string }): Promise<string> {
+  if (!voice.publicOwnerId) return voice.id;
+  requireKey(apiKey);
+  const response = await fetchFn(`${API}/voices/add/${encodeURIComponent(voice.publicOwnerId)}/${encodeURIComponent(voice.id)}`, {
+    method: "POST",
+    headers: { "xi-api-key": apiKey, "content-type": "application/json" },
+    body: JSON.stringify({ new_name: voice.name }),
+  });
+  assertOk(response);
+  return String(((await response.json()) as Raw).voice_id);
+}

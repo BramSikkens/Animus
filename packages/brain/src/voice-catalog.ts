@@ -12,6 +12,8 @@ export type CatalogVoice = {
   category: string;
   /** Kiesbaar op dit account: op de gratis tier alleen premade/eigen stemmen (niet uit de Voice Library). */
   usableOnFree: boolean;
+  /** Alleen bij Voice Library-stemmen: die moeten eerst aan het account toegevoegd worden (adoptVoice) voor TTS. */
+  publicOwnerId?: string;
 };
 
 export const FREE_TIER_MESSAGE = "vereist betaald ElevenLabs-abonnement (Starter)";
@@ -41,6 +43,7 @@ export function normalizeVoice(raw: Raw, library = false): CatalogVoice | null {
     previewUrl: str(raw.preview_url),
     category,
     usableOnFree: !library && FREE_CATEGORIES.includes(category),
+    ...(library && str(raw.public_owner_id) ? { publicOwnerId: str(raw.public_owner_id) } : {}),
   };
 }
 

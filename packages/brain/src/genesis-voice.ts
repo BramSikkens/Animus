@@ -1,6 +1,6 @@
 // Genesis-stemkeuze: zoektermen (NL + EN) tegen de ElevenLabs-catalogus. Puur en zonder netwerk; catalogus komt van buiten.
 import { cached, fetchCatalog, fetchTier, type CatalogVoice } from "./voice-catalog.js";
-import { designVoice, saveDesignedVoice } from "./voice-design.js";
+import { adoptVoice, designVoice, saveDesignedVoice } from "./voice-design.js";
 
 // ElevenLabs-labels zijn Engels: Nederlandse stemtermen krijgen een Engels equivalent erbij.
 // ponytail: kleine handmatige lijst; breid uit als archetypes/Type2 vaker termen missen.
@@ -35,6 +35,8 @@ export function pickVoiceForCharacter({ description, catalog, tier }: { descript
 
 export type GenesisVoiceDeps = {
   loadCatalog: () => Promise<{ catalog: CatalogVoice[]; tier: string }>;
+  /** Voegt een Voice Library-stem aan het account toe (anders kent TTS hem niet); geeft het bruikbare voice_id. */
+  adopt?: (voice: CatalogVoice) => Promise<string>;
   /** Alleen gezet als voice design aan staat (GENESIS_VOICE_DESIGN=1); geeft het nieuwe voice_id of null. Kost tegoed. */
   design?: (description: string, name: string) => Promise<string | null>;
 };
@@ -49,7 +51,7 @@ export async function chooseGenesisVoice(
     const { catalog, tier } = await deps.loadCatalog();
     if (tier === "free") return null;
     const match = pickVoiceForCharacter({ description: [description, ...searchTerms, hint].join(" "), catalog, tier });
-    if (match) return { voice: match.id, description: profileDescription };
+    if (match) return { voice: deps.adopt ? await deps.adopt(match) : match.id, description: profileDescription };
     if (!deps.design || !profileDescription) return null;
     const designed = await deps.design(profileDescription, name);
     return designed ? { voice: designed, description: profileDescription } : null;
@@ -79,7 +81,7 @@ export function elevenLabsGenesisVoices(env: Record<string, string | undefined>,
           return preview ? saveDesignedVoice(fetchFn, apiKey, { name: `Animus ${name}`, description, generatedVoiceId: preview.generatedVoiceId }) : null;
         }
       : undefined;
-  return { loadCatalog, design };
+  return { loadCatalog, design, adopt: (voice) => adoptVoice(fetchFn, apiKey, voice) };
 }
 
 /** Standaardkoppeling voor aanroepers (dashboard/agent): expliciet meegeven aan createBrain({ voices }); createBrain zelf leest geen omgeving. */

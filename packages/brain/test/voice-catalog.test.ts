@@ -51,6 +51,11 @@ describe("normalizeVoice", () => {
     expect(voice).toMatchObject({ id: "v2", gender: "male", age: "middle_aged", useCase: "narration", language: "nl", description: "deep" });
   });
 
+  it("onthoudt bij een bibliotheekstem de eigenaar (nodig om hem aan het account toe te voegen)", () => {
+    expect(normalizeVoice({ voice_id: "s1", name: "Marianne", public_owner_id: "own1" }, true)).toMatchObject({ publicOwnerId: "own1" });
+    expect(normalizeVoice({ voice_id: "s1", name: "Marianne", public_owner_id: "own1" })).not.toHaveProperty("publicOwnerId");
+  });
+
   it("geeft null zonder id of naam, en lege strings voor ontbrekende velden", () => {
     expect(normalizeVoice({ name: "x" })).toBeNull();
     expect(normalizeVoice({ voice_id: "v3", name: "Zed" })).toEqual({

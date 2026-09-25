@@ -84,8 +84,10 @@ async function hear(brain: ReturnType<typeof createBrain>, text: string) {
   return boos;
 }
 
+// 0.5 (i.p.v. 0): op de nieuwe schaal (rust 50) bereikt boos na twee Ergernis-matches al de negeer-drempel;
+// dat zou hier de cooldown-telling verstoren (negeren slaat Type2 over). 0.5 blijft boven elke gedragskans.
 const brainWith = (model: MockLanguageModelV4) =>
-  createBrain({ db, embedder: embedder(), type1: type1(), type2: { light: model, heavy: model }, now: () => now, random: () => 0 });
+  createBrain({ db, embedder: embedder(), type1: type1(), type2: { light: model, heavy: model }, now: () => now, random: () => 0.5 });
 
 describe("Standpunt in hear()", () => {
   it("voegt bij een Ergernis-match een systeemregel toe en verhoogt boos via de bestaande delta's", async () => {
@@ -106,7 +108,7 @@ describe("Standpunt in hear()", () => {
     const boos = await hear(brainWith(t2.model), "Zullen we voetbal spelen?");
 
     expect(t2.prompts[0]).toContain("Dit raakt aan je Wens");
-    expect(boos).toBe(0);
+    expect(boos).toBe(50); // rust: geen boos-delta bij een Wens-match
   });
 
   it("zonder match geen Standpunt", async () => {

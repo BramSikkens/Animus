@@ -3,8 +3,10 @@ import { EMOTIONS, EMOTION_PAIRS, isEmotion, oppositeOf, type Emotion } from "./
 
 /** Halveringstijd waarmee elke emotiewaarde naar haar ruststand uitdooft. */
 export const MOOD_HALF_LIFE_MS = 3 * 60_000;
-/** Ruststand (0–100) van de Basisemotie; alle andere emoties rusten op 0. */
-export const BASE_LEVEL = 30;
+/** Ruststand (0–100) van elke emotie, behalve de Basisemotie (zie BASE_LEVEL). */
+export const REST_LEVEL = 50;
+/** Ruststand (0–100) van de Basisemotie; de rest rust op REST_LEVEL (via reconcilePairs zakt een tegenpool naar 100 - dit). */
+export const BASE_LEVEL = 65;
 /** Basisemotie als die ontbreekt (nog niet gebackfilld). */
 export const FALLBACK_BASE: Emotion = "kalm";
 
@@ -23,6 +25,10 @@ export type StoredMood = { values: MoodValues; at: Date } | null;
 export type Mood = { emotion: Emotion; intensity: number; values: MoodValues };
 
 const clamp = (value: number) => Math.min(100, Math.max(0, value));
+const clamp01 = (value: number) => Math.min(1, Math.max(0, value));
+
+/** Hoe ver `value` boven de ruststand (REST_LEVEL) staat, als 0..1. De enige sterktemaat (ADR-0017). */
+export const strength = (value: number): number => clamp01((value - REST_LEVEL) / (100 - REST_LEVEL));
 
 /** Trek van een positieve delta op de tegenpool, als fractie van die delta (blij +30 -> droevig -15). */
 export const PAIR_PULL = 0.5;
@@ -41,7 +47,8 @@ function reconcilePairs(values: MoodValues): MoodValues {
 }
 
 function restValues(base: Emotion): MoodValues {
-  return Object.fromEntries(EMOTIONS.map((emotion) => [emotion, emotion === base ? BASE_LEVEL : 0])) as MoodValues;
+  const raw = Object.fromEntries(EMOTIONS.map((emotion) => [emotion, emotion === base ? BASE_LEVEL : REST_LEVEL])) as MoodValues;
+  return reconcilePairs(raw);
 }
 
 /** De hoogste emotie; bij een gelijkstand de Basisemotie, anders de eerste in EMOTIONS. */
@@ -55,7 +62,7 @@ function dominantOf(values: MoodValues, base: Emotion): Emotion {
 
 function moodOf(values: MoodValues, base: Emotion): Mood {
   const emotion = dominantOf(values, base);
-  return { emotion, intensity: values[emotion] / 100, values };
+  return { emotion, intensity: strength(values[emotion]), values };
 }
 
 /** De effectieve Stemming: de opgeslagen waarden, per emotie exponentieel uitgedoofd naar de ruststand. */
@@ -112,13 +119,13 @@ export function baseEmotionOf(row: Pick<MoodColumns, "baseEmotion">): Emotion | 
   return isEmotion(row.baseEmotion) ? row.baseEmotion : null;
 }
 
-/** Ontbrekende of ongeldige emoties tellen als 0; waarden worden geclampt. */
+/** Ontbrekende of ongeldige emoties tellen als in rust (REST_LEVEL); waarden worden geclampt. */
 export function storedMoodOf(row: Pick<MoodColumns, "moodValues" | "moodAt">): StoredMood {
   const raw = row.moodValues;
   if (typeof raw !== "object" || raw === null || Array.isArray(raw) || !row.moodAt) return null;
   const record = raw as Record<string, unknown>;
   const values = Object.fromEntries(
-    EMOTIONS.map((emotion) => [emotion, typeof record[emotion] === "number" ? clamp(record[emotion]) : 0]),
+    EMOTIONS.map((emotion) => [emotion, typeof record[emotion] === "number" ? clamp(record[emotion]) : REST_LEVEL]),
   ) as MoodValues;
   return { values, at: row.moodAt };
 }
@@ -128,9 +135,9 @@ export function moodOfRow(row: MoodColumns, now: Date): Mood {
   return currentMood(storedMoodOf(row), baseEmotionOf(row), now, row.axisReactivity);
 }
 
-/** Eén emotie op `intensity` (0–1), de rest op 0: voor Ontwaakstemming en handmatige override. */
-export function singleEmotionValues(emotion: Emotion, intensity: number): MoodValues {
-  return { ...restValues(emotion), [emotion]: clamp(intensity * 100) } as MoodValues;
+/** Eén emotie op de ruststand van `base` plus `intensity` (0–1) erboven, de rest in rust: voor Ontwaakstemming en handmatige override. */
+export function singleEmotionValues(emotion: Emotion, intensity: number, base: Emotion = emotion): MoodValues {
+  return reconcilePairs({ ...restValues(base), [emotion]: clamp(REST_LEVEL + intensity * (100 - REST_LEVEL)) });
 }
 
 /** Dashboard-formulier: veld `mood_<emotie>` (0–100, geclampt) voor elke emotie; null als er één ontbreekt of geen getal is. */

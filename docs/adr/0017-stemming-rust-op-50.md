@@ -1,0 +1,15 @@
+# De Stemming rust op 50, niet op 0
+
+ADR-0012 liet de Stemming rusten op de Basisemotie 30, de rest op 0; `Mood.intensity` was `value / 100`. Daardoor kon een emotie nooit *onder* haar ruststand komen: "minder dan normaal" bestond niet, alleen "meer" of "niets". Met tien Emoties in de vector (ADR-0015) en 'neutraal' inmiddels geschrapt (kalm is de fallback-Basisemotie, geen aparte rusttoestand meer) verdient de ruststand een eigen midden.
+
+**Besluit.** Elke Emotie rust op `REST_LEVEL = 50`, de Basisemotie op `BASE_LEVEL = 65`. De rustvector gaat door de bestaande `reconcilePairs` (ADR-0015): is de Basisemotie deel van een paar, dan zakt haar tegenpool naar 35 (100 − 65). Zo kan een Emotie voortaan zowel boven als onder haar rust staan.
+
+**`strength` is de enige sterktemaat.** `strength(value) = clamp01((value - 50) / 50)`: hoe ver een waarde boven de rust staat, 0–1. Die vervangt overal waar voorheen `value / 100` (of een ruwe drempel op de 0–100-schaal) "hoe sterk" betekende: `Mood.intensity`, `speech-sounds.ts`, `speech-pacing.ts`, `voice-emotion.ts` en de drempels in `behavior.ts` (nu 0.7/0.7/0.6 in plaats van 70/70/60). Dominantie (welke Emotie de zichtbare is) blijft op de ruwe waarden — dat is een vergelijking, geen sterkte. Omdat de Basisemotie op 65 rust, is `strength(65) = 0.3`, precies gelijk aan de oude rust-intensiteit (30/100): gezicht, geluid en gedrag voelen in rust hetzelfde als vóór deze wijziging.
+
+**`singleEmotionValues(emotion, intensity, base)`** (Ontwaakstemming, `forceMood`) zet nu de rustvector van `base` neer en tilt `emotion` naar `REST_LEVEL + intensity * (100 - REST_LEVEL)` erboven, door `reconcilePairs`. Wie de Basisemotie meegeeft (wekken, dashboard) krijgt dus een realistische rustvector in plaats van alles-behalve-de-emotie op 0.
+
+**Bewust niet herschaald: de Type1-delta's.** Een delta van bijvoorbeeld +30 bracht een emotie voorheen van 0 naar 30 (op een bereik van 100); nu brengt diezelfde +30 haar van 50 naar 80 — op een bereik van 50 tot de rand, dus verhoudingsgewijs bijna het dubbele. Emoties bewegen daardoor merkbaar heftiger, en kunnen de rand (0 of 100) sneller raken. Dat is een bewuste keuze: meer beweging past bij een levendiger Stemming. Blijkt het te druk, dan is het schalen van de Type1-delta's (of van vaste delta's zoals de verjaardagsboost) de knop om aan te draaien — niet in deze ronde meegenomen.
+
+**Vervangt.** Dit vervangt het ruststand-deel van ADR-0012 (Basisemotie 30, rest 0) en werkt de emotieset van ADR-0015 bij naar de nieuwe rust (65/50/35 in plaats van 30/0/0). De rest van beide ADR's (vector i.p.v. één winnaar, uitdoving, paren, `reconcilePairs`) blijft ongewijzigd.
+
+**Opslag.** `mood_values` (jsonb) leest een ontbrekende sleutel voortaan als `REST_LEVEL` (in rust), niet als 0 (afwezig) — een emotie die niet is opgeslagen, is niet "nul", ze is gewoon nog niet bewogen. Bestaande rijen met nullen worden niet gemigreerd: ze doven binnen enkele minuten (de halveringstijd is 3 minuten) vanzelf uit naar de nieuwe rust.

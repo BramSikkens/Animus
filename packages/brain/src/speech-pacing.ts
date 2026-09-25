@@ -1,7 +1,7 @@
 // Browser-veilig: geen node-imports. Pure pauzes en tempo per Emotie voor TTS (ElevenLabs Flash kent geen SSML/break-tag:
 // pauzes gaan via interpunctie in de tekst, tempo via voiceSettings.speed).
 import type { Emotion } from "./emotion.js";
-import type { MoodValues } from "./mood.js";
+import { strength, type MoodValues } from "./mood.js";
 
 export type Pacing = { pauseLevel: 0 | 1 | 2; speedFactor: number; /** bang: extra '…' bij komma's. */ halting: boolean };
 
@@ -23,7 +23,7 @@ const PROFILES: Partial<Record<Emotion, { speed: number; pauseLevel: 1 | 2; halt
 export function pacingFor({ values, expressiveness }: { values: MoodValues; expressiveness: number }): Pacing {
   const [top, value] = (Object.entries(values) as [Emotion, number][]).reduce((a, b) => (b[1] > a[1] ? b : a));
   const profile = PROFILES[top];
-  const weight = (value / 100) * Math.min(1, Math.max(0, expressiveness));
+  const weight = strength(value) * Math.min(1, Math.max(0, expressiveness));
   if (!profile || weight < PACING_MIN_WEIGHT) return { pauseLevel: 0, speedFactor: 1, halting: false };
   return { pauseLevel: profile.pauseLevel, speedFactor: 1 + profile.speed * weight, halting: profile.halting ?? false };
 }

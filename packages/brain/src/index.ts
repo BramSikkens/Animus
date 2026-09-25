@@ -312,7 +312,7 @@ function moodMessage(mood: Mood): SystemModelMessage {
     .join(", ");
   return {
     role: "system",
-    content: `Je huidige stemming (emoties, 0 tot 100, hoog naar laag): ${vector}. Dominant: ${mood.emotion}. Wees eerlijk over hoe je je voelt: als iemand vraagt hoe je je voelt of of je boos (of een andere emotie) bent en die emotie staat hoog, ontken die niet. Laat je toon en antwoord kloppen met deze stemming (een geërgerde Dynimo antwoordt korter en stugger).`,
+    content: `Je huidige stemming (emoties, 0 tot 100, hoog naar laag; 50 is de ruststand, hoger is sterker dan normaal, lager is minder dan normaal): ${vector}. Dominant: ${mood.emotion}. Wees eerlijk over hoe je je voelt: als iemand vraagt hoe je je voelt of of je boos (of een andere emotie) bent en die emotie staat hoog, ontken die niet. Laat je toon en antwoord kloppen met deze stemming (een geërgerde Dynimo antwoordt korter en stugger).`,
   };
 }
 
@@ -681,7 +681,7 @@ ${fresh.map((memory) => `- (indruk ${memory.impression}) ${memory.text}`).join("
       const wakeMood =
         found.wakeMoodEmotion !== null
           ? {
-              moodValues: singleEmotionValues(found.wakeMoodEmotion as Emotion, found.wakeMoodIntensity ?? 0),
+              moodValues: singleEmotionValues(found.wakeMoodEmotion as Emotion, found.wakeMoodIntensity ?? 0, baseEmotionOf(found) ?? undefined),
               moodAt: at,
               wakeMoodEmotion: null,
               wakeMoodIntensity: null,
@@ -908,7 +908,9 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
   }
 
   async function forceMood(id: number, emotion: Emotion, intensity: number): Promise<boolean> {
-    return setMood(id, singleEmotionValues(emotion, intensity));
+    const [row] = await deps.db.select().from(dynimos).where(eq(dynimos.id, id));
+    if (!row) return false;
+    return setMood(id, singleEmotionValues(emotion, intensity, baseEmotionOf(row) ?? undefined));
   }
 
   async function setAxes(id: number, axes: Axes): Promise<boolean> {
@@ -984,7 +986,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     const context = [
       personalityText(awake),
       drivesPromptBlock(driveRows),
-      `Huidige stemming (0–100): ${EMOTIONS.map((emotion) => `${emotion} ${Math.round(before.values[emotion])}`).join(", ")}`,
+      `Huidige stemming (0–100, ruststand 50: hoger is sterker dan normaal, lager is minder dan normaal): ${EMOTIONS.map((emotion) => `${emotion} ${Math.round(before.values[emotion])}`).join(", ")}`,
     ]
       .filter(Boolean)
       .join("\n");

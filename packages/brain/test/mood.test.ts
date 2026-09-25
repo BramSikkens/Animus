@@ -1,6 +1,25 @@
 import { describe, expect, it } from "vitest";
 import { EMOTIONS, EMOTION_PAIRS } from "../src/emotion.js";
-import { applyDeltas, BASE_LEVEL, REST_LEVEL, reactivityFactor, currentMood, MOOD_HALF_LIFE_MS, moodOfRow, parseMoodValues, singleEmotionValues, storedMoodOf, strength, type MoodValues, type StoredMood } from "../src/mood.js";
+import {
+  applyDeltas,
+  BASE_LEVEL,
+  REST_LEVEL,
+  reactivityFactor,
+  currentMood,
+  displayMood,
+  displayMoodOfRow,
+  driftOf,
+  DRIFT_AMPLITUDE,
+  DRIFT_HYSTERESIS,
+  MOOD_HALF_LIFE_MS,
+  moodOfRow,
+  parseMoodValues,
+  singleEmotionValues,
+  storedMoodOf,
+  strength,
+  type MoodValues,
+  type StoredMood,
+} from "../src/mood.js";
 
 const T0 = new Date("2026-01-01T12:00:00.000Z");
 const after = (ms: number) => new Date(T0.getTime() + ms);
@@ -234,5 +253,114 @@ describe("emotieparen (ADR-0015)", () => {
   it("ontbrekende sleutels in opgeslagen mood_values lezen als rust (REST_LEVEL)", () => {
     const oud = { blij: 50, boos: 0, verrast: 0, kalm: 30, verveeld: 0, nieuwsgierig: 0, bang: 0 };
     expect(storedMoodOf({ moodValues: oud, moodAt: T0 })?.values).toMatchObject({ blij: 50, droevig: REST_LEVEL, vredig: REST_LEVEL, druk: REST_LEVEL });
+  });
+});
+
+describe("driftOf (ADR-0017: drift)", () => {
+  it("slaat echt uit: minstens de helft van de tijd voorbij de halve amplitude, en haalt (bijna) de volle", () => {
+    for (const emotion of EMOTIONS) {
+      let wide = 0;
+      let peak = 0;
+      for (let s = 0; s < 3600; s++) {
+        const value = Math.abs(driftOf(emotion, "7", after(s * 1000)));
+        if (value > 0.5) wide++;
+        peak = Math.max(peak, value);
+      }
+      expect(wide / 3600).toBeGreaterThan(0.5);
+      expect(peak).toBeGreaterThan(0.9);
+    }
+  });
+
+  it("blijft binnen [-1, 1] over een sweep van elke seconde gedurende een uur", () => {
+    for (let s = 0; s <= 3600; s++) {
+      const value = driftOf("blij", "seed-a", after(s * 1000));
+      expect(value).toBeGreaterThanOrEqual(-1);
+      expect(value).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it("is deterministisch: zelfde emotie/seed/tijd geeft altijd dezelfde waarde", () => {
+    expect(driftOf("blij", "seed-a", after(12_345))).toBe(driftOf("blij", "seed-a", after(12_345)));
+  });
+
+  it("verandert met de tijd", () => {
+    expect(driftOf("blij", "seed-a", T0)).not.toBeCloseTo(driftOf("blij", "seed-a", after(30_000)), 5);
+  });
+
+  it("verschilt tussen emoties (andere fase per emotie)", () => {
+    expect(driftOf("blij", "seed-a", T0)).not.toBeCloseTo(driftOf("boos", "seed-a", T0), 5);
+  });
+
+  it("verschilt tussen seeds (elke Dynimo golft anders)", () => {
+    expect(driftOf("blij", "seed-a", T0)).not.toBeCloseTo(driftOf("blij", "seed-b", T0), 5);
+  });
+});
+
+describe("displayMood (ADR-0017: drift)", () => {
+  it("blijft in rust dominant op een gepaarde Basisemotie (blij), reactiviteit 1, over een uur", () => {
+    for (let s = 0; s <= 3600; s++) {
+      expect(displayMood(null, "blij", after(s * 1000), 1, "dynimo-1").emotion).toBe("blij");
+    }
+  });
+
+  it("blijft in rust dominant op een ongepaarde Basisemotie (nieuwsgierig), reactiviteit 1, over een uur", () => {
+    for (let s = 0; s <= 3600; s++) {
+      expect(displayMood(null, "nieuwsgierig", after(s * 1000), 1, "dynimo-2").emotion).toBe("nieuwsgierig");
+    }
+  });
+
+  it("shown blijft 0–100 en de paar-invariant geldt", () => {
+    for (let s = 0; s <= 3600; s += 41) {
+      const mood = displayMood(stored({ boos: 95, blij: 90, droevig: 90 }), "verveeld", after(s * 1000), 1, "dynimo-3");
+      for (const emotion of EMOTIONS) {
+        expect(mood.values[emotion]).toBeGreaterThanOrEqual(0);
+        expect(mood.values[emotion]).toBeLessThanOrEqual(100);
+      }
+      for (const [a, b] of EMOTION_PAIRS) {
+        expect(Math.min(mood.values[a], mood.values[b])).toBeLessThanOrEqual(100 - Math.max(mood.values[a], mood.values[b]));
+      }
+    }
+  });
+
+  it("reactiviteit 0 geeft een amplitude van ~0.5: shown wijkt nauwelijks af van de ruststand", () => {
+    for (let s = 0; s <= 3600; s += 41) {
+      const now = after(s * 1000);
+      const truth = currentMood(null, "kalm", now, 0);
+      const shown = displayMood(null, "kalm", now, 0, "dynimo-4").values;
+      for (const emotion of EMOTIONS) {
+        expect(Math.abs(shown[emotion] - truth.values[emotion])).toBeLessThanOrEqual(0.5 + 1e-9);
+      }
+    }
+  });
+
+  // Hysterese los van de precieze golfvorm: over een sweep zoeken we zelf momenten waarop "verrast" na drift nipt
+  // (< 8) of ruim (>= 8) boven de echte dominant "nieuwsgierig" uitkomt, en eisen dat beide gevallen voorkomen.
+  it("hysterese: wisselt pas als een andere emotie na drift met minstens DRIFT_HYSTERESIS wint", () => {
+    let nipt = 0;
+    let ruim = 0;
+    for (let s = 0; s < 600; s++) {
+      const now = after(s * 1000);
+      const truthVector: StoredMood = { values: values({ nieuwsgierig: 80, verrast: 77 }), at: now }; // echte voorsprong 3
+      expect(currentMood(truthVector, "kalm", now).emotion).toBe("nieuwsgierig");
+      const mood = displayMood(truthVector, "kalm", now, 1, "hysterese-seed");
+      const lead = mood.values.verrast - mood.values.nieuwsgierig;
+      if (lead > 0 && lead < DRIFT_HYSTERESIS) {
+        nipt++;
+        expect(mood.emotion).toBe("nieuwsgierig");
+      } else if (lead >= DRIFT_HYSTERESIS) {
+        ruim++;
+        expect(mood.emotion).toBe("verrast");
+      }
+    }
+    expect(nipt).toBeGreaterThan(0);
+    expect(ruim).toBeGreaterThan(0);
+  });
+});
+
+describe("displayMoodOfRow (ADR-0017: drift)", () => {
+  it("gebruikt de kolommen en de rij-id als drift-seed", () => {
+    const row = { id: 7, baseEmotion: "blij", moodValues: null, moodAt: null, axisReactivity: 1 };
+    const mood = displayMoodOfRow(row, T0);
+    expect(mood).toEqual(displayMood(storedMoodOf(row), "blij", T0, 1, "7"));
   });
 });

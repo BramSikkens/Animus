@@ -1,7 +1,7 @@
 import postgres from "postgres";
 import { STATE_CHANNEL, type Brain } from "@animus/brain";
 import type { DisplayState } from "@animus/brain/display";
-import { moodOfRow, type Mood } from "@animus/brain/mood";
+import { displayMoodOfRow, type Mood } from "@animus/brain/mood";
 
 export type DynimoState = {
   /** Identiteit van de huidige Wakker-generatie; verandert bij wisselen, slapen of gedood worden. */
@@ -19,7 +19,7 @@ export type DynimoState = {
 export async function readState(brain: Brain): Promise<DynimoState> {
   const awake = (await brain.list()).find((dynimo) => dynimo.awakeSince);
   return awake
-    ? { key: `${awake.id}:${awake.awakeSince!.getTime()}`, display: "wakker", mood: moodOfRow(awake, new Date()), name: awake.name, voice: awake.voice }
+    ? { key: `${awake.id}:${awake.awakeSince!.getTime()}`, display: "wakker", mood: displayMoodOfRow(awake, new Date()), name: awake.name, voice: awake.voice }
     : { key: "none", display: "slapend", mood: null, name: null, voice: null };
 }
 

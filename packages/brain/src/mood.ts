@@ -135,6 +135,57 @@ export function moodOfRow(row: MoodColumns, now: Date): Mood {
   return currentMood(storedMoodOf(row), baseEmotionOf(row), now, row.axisReactivity);
 }
 
+/** Amplitude (in punten) van de trage weergave-drift rond de ruststand; geschaald met reactiviteit in `displayMood`. */
+export const DRIFT_AMPLITUDE = 10;
+/** Hysterese (in punten): de dominante emotie wisselt pas als de kandidaat met minstens dit verschil wint. */
+export const DRIFT_HYSTERESIS = 8;
+
+/** Simpele 31-hash naar [0, 2π), voor de fase van elke driftsinus. */
+function phaseHash(text: string): number {
+  let hash = 0;
+  for (let i = 0; i < text.length; i++) hash = (hash * 31 + text.charCodeAt(i)) | 0;
+  return ((hash % 1000) / 1000) * 2 * Math.PI;
+}
+
+// Eén dragende golf (113s) plus twee kleine variaties; gewichten tellen op tot 1. Een gelijk gemiddelde van drie
+// sinussen dooft zichzelf grotendeels uit (zelden voorbij ±0.5), waardoor ±DRIFT_AMPLITUDE nooit zichtbaar werd.
+const DRIFT_WAVES = [
+  { periodMs: 113_000, weight: 0.75 },
+  { periodMs: 47_000, weight: 0.2 },
+  { periodMs: 271_000, weight: 0.05 },
+];
+
+/** Traag, deterministisch golfje in [-1, 1], per emotie+seed anders gefaseerd. */
+export function driftOf(emotion: Emotion, seed: string, now: Date): number {
+  const t = now.getTime();
+  return DRIFT_WAVES.reduce(
+    (total, { periodMs, weight }, i) => total + weight * Math.sin((2 * Math.PI * t) / periodMs + phaseHash(`${seed}:${emotion}:${i}`)),
+    0,
+  );
+}
+
+/**
+ * Alleen voor weergave (gezichtje, dashboardbalk): de echte Stemming (`currentMood`) plus een trage, per emotie
+ * verschillende drift rond de ruststand (ADR-0017). Stateloze hysterese voorkomt dat de dominante emotie
+ * heen-en-weer springt door een klein driftverschil.
+ */
+export function displayMood(stored: StoredMood, baseEmotion: Emotion | null, now: Date, reactivity: number, seed: string): Mood {
+  const base = baseEmotion ?? FALLBACK_BASE;
+  const truth = currentMood(stored, baseEmotion, now, reactivity);
+  const amplitude = DRIFT_AMPLITUDE * Math.min(1, reactivityFactor(reactivity));
+  const shown = reconcilePairs(
+    Object.fromEntries(EMOTIONS.map((emotion) => [emotion, clamp(truth.values[emotion] + amplitude * driftOf(emotion, seed, now))])) as MoodValues,
+  );
+  const candidate = dominantOf(shown, base);
+  const dominant = candidate !== truth.emotion && shown[candidate] - shown[truth.emotion] < DRIFT_HYSTERESIS ? truth.emotion : candidate;
+  return { emotion: dominant, intensity: strength(shown[dominant]), values: shown };
+}
+
+/** De weergave-Stemming van een rij op tijdstip `now`, met de rij-id als drift-seed. */
+export function displayMoodOfRow(row: MoodColumns & { id: number }, now: Date): Mood {
+  return displayMood(storedMoodOf(row), baseEmotionOf(row), now, row.axisReactivity ?? 0.5, String(row.id));
+}
+
 /** Eén emotie op de ruststand van `base` plus `intensity` (0–1) erboven, de rest in rust: voor Ontwaakstemming en handmatige override. */
 export function singleEmotionValues(emotion: Emotion, intensity: number, base: Emotion = emotion): MoodValues {
   return reconcilePairs({ ...restValues(base), [emotion]: clamp(REST_LEVEL + intensity * (100 - REST_LEVEL)) });

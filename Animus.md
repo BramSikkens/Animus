@@ -228,8 +228,9 @@ Onderdeel van de bestaande Reflectie-bij-het-slapen (geen apart schema of schedu
 
 Twee sporen, te combineren:
 
-- **Type1 — snelle, continue detectie:** lokale CV via **MediaPipe** (lichte JS/WASM-variant, draait in Node zonder aparte service) voor gezichtsdetectie/aanwezigheid/beweging op 10-30fps. Triggert pas de dure Type2-vision-call wanneer iets écht interessant is.
-- **Type2 — de volledige interpretatie:** multimodale LLM-input (Claude/GPT/Gemini kunnen beelden direct verwerken via dezelfde Vercel AI SDK) om een scène te beschrijven/duiden wanneer Type1 groen licht geeft.
+- **Type1 — snelle, continue detectie:** lokale CV via **MediaPipe** in de face-app (browser, zie [ADR-0018](docs/adr/0018-perceptie-in-de-browser.md)) voor aanwezigheid en nieuwe objecten, als Waarnemingen over het datachannel. Zonder iemand in beeld geen spontaan spreken; iemand die terugkomt na >10 minuten of een nieuw object triggert de initiatiefcheck.
+- **Type2 — Kijken:** Type1 beslist per beurt of er gekeken wordt en stuurt dan één frame mee; een `kijk`-tool is het vangnet (zie [ADR-0019](docs/adr/0019-kijken-beslist-door-type1.md)). Beelden worden nooit bewaard.
+- **Optioneel:** pupillen volgen het gezicht in beeld (voorproef van het hoofdvolggedrag).
 
 **Hoofdvolggedrag (fase 4, Pi):** Type1-taak (face/object-detectie → coördinaat → pan/tilt-hoek voor servo's), volledig los van het Type2-brein, continue feedback-loop zonder LLM-call per frame. Audio-richting (indien microfoon-array) kan voorrang geven op wat de camera ziet.
 

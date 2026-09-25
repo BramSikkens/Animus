@@ -325,6 +325,8 @@ export default defineAgent<AgentUserData>({
       (session.agentState === "idle" || session.agentState === "listening") && session.userState !== "speaking" && perception.isPresent();
     // Gedeeld door de timer-tick en een Waarneming (aanleiding "terug"): een in-flight-guard voorkomt dat ze
     // tegelijk een initiatief klaarzetten.
+    // ponytail: een aanleiding die binnenkomt terwijl het niet stil is (of er al een check loopt) vervalt; een wachtrij
+    // pas als terugkomsten in de praktijk gemist worden.
     let initiativeInFlight = false;
     const runInitiative = async (aanleiding?: Aanleiding): Promise<void> => {
       if (initiativeInFlight || !isQuiet()) return;
@@ -350,6 +352,8 @@ export default defineAgent<AgentUserData>({
 
     // Waarnemingen van de face-app (ADR-0018): aanwezig/afwezig over PERCEPTION_TOPIC; enkel van een remote
     // participant (niet van de agent zelf).
+    // ponytail: elke remote deelnemer mag Waarnemingen sturen (dev-only, zoals COMMAND_TOPIC); twee face-tabs kunnen
+    // elkaar dan overschrijven.
     ctx.room.on(RoomEvent.DataReceived, (payload, participant, _kind, topic) => {
       if (topic !== PERCEPTION_TOPIC || !participant) return;
       let parsed: unknown;
@@ -360,8 +364,10 @@ export default defineAgent<AgentUserData>({
       }
       if (!isWaarneming(parsed)) return;
       const aanleiding = perception.onWaarneming(parsed);
-      if (aanleiding) void runInitiative(aanleiding);
+      if (aanleiding) runInitiative(aanleiding).catch((error: unknown) => console.warn("Initiatief-check faalde:", error instanceof Error ? error.message : error));
     });
+    // Vertrekt de face-app terwijl niemand in beeld was, dan mag "afwezig" het initiatief niet voorgoed stilleggen.
+    ctx.room.on(RoomEvent.ParticipantDisconnected, () => perception.reset());
 
     // closeOnDisconnect uit: anders sluit de sessie (en stopt de job) zodra de eerste face disconnect, terwijl de room
     // voor een andere tab blijft bestaan; LiveKit dispatcht enkel bij room-creatie, dus die tab zag dan geen agent.

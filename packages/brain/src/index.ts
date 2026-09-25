@@ -1356,7 +1356,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
         pendingSpontaneousId = undefined;
         pendingDreamId = undefined;
         return `Je begint uit jezelf een gesprek: ${aanleidingText(aanleiding)}. ${
-          aanleiding.soort === "terug" ? "Begroet hem kort, op je eigen manier." : "Reageer daar kort en nieuwsgierig op, op je eigen manier."
+          aanleiding.soort === "terug" ? "Begroet de Gesprekspartner kort, op je eigen manier." : "Reageer daar kort en nieuwsgierig op, op je eigen manier."
         }`;
       }
       const axes = rowAxes(awake);

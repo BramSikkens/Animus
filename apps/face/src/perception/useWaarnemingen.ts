@@ -5,6 +5,7 @@ import { PERCEPTION_TOPIC, type Waarneming } from "@animus/brain/perception";
 import { createPresence } from "./presence.js";
 
 // Zelfde @mediapipe/tasks-vision-versie als in package.json (`pnpm ls @mediapipe/tasks-vision`).
+// ponytail: WASM en model komen runtime van jsdelivr/googleapis; zelf hosten (public/) als offline (Pi) ooit telt.
 const WASM_BASE = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1/wasm";
 const MODEL_URL = "https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite";
 const DETECT_INTERVAL_MS = 200; // ~5 fps: genoeg voor aanwezigheid, scheelt CPU.
@@ -48,8 +49,9 @@ export function useWaarnemingen({ enabled }: { enabled: boolean }): null {
         }
         interval = setInterval(() => {
           if (!detector || video.readyState < video.HAVE_CURRENT_DATA) return;
-          const { detections } = detector.detectForVideo(video, performance.now());
-          const waarneming = presence.update(detections.length > 0, performance.now());
+          const t = performance.now();
+          const { detections } = detector.detectForVideo(video, t);
+          const waarneming = presence.update(detections.length > 0, t);
           if (!waarneming) return;
           const message: Waarneming = { soort: waarneming };
           localParticipant
@@ -57,6 +59,7 @@ export function useWaarnemingen({ enabled }: { enabled: boolean }): null {
             .catch((error: unknown) => console.error("Waarneming publiceren faalde:", error instanceof Error ? error.message : error));
         }, DETECT_INTERVAL_MS);
       } catch (error) {
+        if (cancelled) return; // play() rejectt na de cleanup: geen fout
         console.error("Waarnemingen (MediaPipe) laden faalde:", error instanceof Error ? error.message : error);
       }
     })();

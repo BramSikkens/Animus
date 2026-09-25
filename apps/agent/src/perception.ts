@@ -42,6 +42,7 @@ export function createPerception({ now, returnAfterMs }: { now: () => number; re
     },
     reset(): void {
       presentState = "onbekend";
+      absentSince = undefined;
     },
   };
 }

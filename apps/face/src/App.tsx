@@ -200,6 +200,16 @@ function MicControl({ enabled, onError }: { enabled: boolean; onError: (message:
   return null;
 }
 
+// Camera enkel aan als een Dynimo wakker is en zijn gezicht toont (ADR-0018); geen videobeeld in deze UI, enkel
+// de publicatie voor de agent.
+function CameraControl({ enabled, onError }: { enabled: boolean; onError: (message: string) => void }) {
+  const { localParticipant } = useLocalParticipant();
+  useEffect(() => {
+    localParticipant.setCameraEnabled(enabled).catch(() => onError("Camera niet beschikbaar; controleer de permissie."));
+  }, [enabled, localParticipant, onError]);
+  return null;
+}
+
 // ?debug: paneel om het gezicht handmatig of met Playwright te sturen, zonder LiveKit.
 function DebugPanel({
   state,
@@ -433,6 +443,7 @@ export function App() {
             <SoundListener display={displayState} onSound={touch} />
             <AgentWatchdog />
             <MicControl enabled={selectedId !== null} onError={setMicError} />
+            <CameraControl enabled={view.screen === "gezicht" && displayState !== "slapend"} onError={setMicError} />
             <ConnectionStatus />
             <RoomAudioRenderer />
             <StartAudio label="Zet geluid aan" />

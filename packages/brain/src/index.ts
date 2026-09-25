@@ -46,6 +46,9 @@ export type BrainEvent =
   | { type: "tool-call"; toolName: string; input: unknown }
   | { type: "tool-result"; toolName: string; output: unknown };
 
+/** Eén camerabeeld: JPEG-data (max 768px lange zijde), zoals door lookFrame() geleverd. */
+export type Frame = { data: Uint8Array; mediaType: "image/jpeg" };
+
 export type Dynimo = typeof dynimos.$inferSelect;
 
 export type Epitaph = typeof epitaphs.$inferSelect;
@@ -286,7 +289,7 @@ function dreamPrompt(dream: string): SystemModelMessage {
   };
 }
 
-type Type1Result = { deltas: MoodDeltas; indruk: number; intent: "simpel" | "complex" };
+type Type1Result = { deltas: MoodDeltas; indruk: number; intent: "simpel" | "complex"; kijken: boolean };
 
 // Type1 scoort per emotie een verandering op een schaal van 9 niveaus (de typesafe-Score ondersteunt er max 10): niveau 4
 // is "geen verandering"; de tabel is niet-lineair zodat zowel kleine als grote delta's (0–100-schaal van de Stemming) kunnen.
@@ -332,7 +335,7 @@ const pairHint = (emotion: Emotion) => {
 
 // Eén Type1-call per beurt: per emotie de verandering (delta) die de uiting bij de Dynimo zelf teweegbrengt (reactie,
 // niet de emotie van de uiting) + intent-routering. De context (persoonlijkheid, Drijfveren, Stemming) zit in de state naast de uiting.
-async function classify(type1: Experimental_EvaluationModel, text: string, context: string): Promise<Type1Result> {
+async function classify(type1: Experimental_EvaluationModel, text: string, context: string, canLook: boolean): Promise<Type1Result> {
   const { answers } = await experimental_evaluate({
     model: type1,
     state: `${context}\n\nUiting: ${text}`,
@@ -361,6 +364,14 @@ async function classify(type1: Experimental_EvaluationModel, text: string, conte
           complex: "vraagt uitleg, redenering, planning of een oordeel",
         },
       },
+      ...(canLook && {
+        kijken: {
+          type: "choice" as const,
+          instructions:
+            "Vraagt de Gesprekspartner de Dynimo om te kijken naar wat er voor de camera is (bv. 'wat zie je?', 'kijk eens', iets tonen)? Los van of het antwoord simpel of complex is.",
+          criteria: { ja: "hij moet kijken om te kunnen antwoorden", nee: "kijken is niet nodig" },
+        },
+      }),
     },
   });
 
@@ -371,8 +382,10 @@ async function classify(type1: Experimental_EvaluationModel, text: string, conte
   }
   const indruk = Math.min(1, Math.max(0, answers.indruk.score));
   const intent = answers.intent.choice === "complex" ? "complex" : "simpel";
+  // Zonder canLook is de vraag niet gesteld (undefined): dan geen kijken.
+  const kijken = (answers as Record<string, { choice?: string } | undefined>).kijken?.choice === "ja";
 
-  return { deltas, indruk, intent };
+  return { deltas, indruk, intent, kijken };
 }
 
 type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
@@ -386,6 +399,8 @@ export function createBrain(deps: {
   random?: () => number;
   /** Stemkeuze bij genesis; default: geen (geen netwerk). Aanroepers geven defaultVoiceDeps(process.env) mee. */
   voices?: GenesisVoiceDeps;
+  /** Levert het laatste camerabeeld, of null zonder beeld. Ontbreekt deze: blind, brain gedraagt zich als nu. */
+  lookFrame?: () => Promise<Frame | null>;
 }): Brain {
   const now = deps.now ?? (() => new Date());
   const random = deps.random ?? Math.random;
@@ -1012,12 +1027,13 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
         if (drive.kind === "ergernis") opinionBoos = OPINION_BOOS_DELTA;
       }
     }
-    const { deltas: type1Deltas, indruk, intent } = await (options.initiatief
-      ? Promise.resolve<Type1Result>({ deltas: {}, indruk: 0.2, intent: "simpel" })
-      : classify(deps.type1, text, context)
+    const canLook = deps.lookFrame !== undefined;
+    const { deltas: type1Deltas, indruk, intent, kijken } = await (options.initiatief
+      ? Promise.resolve<Type1Result>({ deltas: {}, indruk: 0.2, intent: "simpel", kijken: false })
+      : classify(deps.type1, text, context, canLook)
     ).catch((error: unknown): Type1Result => {
       console.warn("Type1 faalde, val terug op geen delta/simpel:", error instanceof Error ? error.message : error);
-      return { deltas: {}, indruk: 0, intent: "simpel" };
+      return { deltas: {}, indruk: 0, intent: "simpel", kijken: false };
     });
 
     const deltas: MoodDeltas = opinionBoos ? { ...type1Deltas, boos: (type1Deltas.boos ?? 0) + opinionBoos } : type1Deltas;
@@ -1073,6 +1089,16 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
       return;
     }
 
+    // Kijken (ADR-0019): Type1 besliste al; een fout bij het ophalen mag de beurt nooit breken.
+    const frame = kijken && deps.lookFrame ? await deps.lookFrame().catch((error: unknown) => {
+      console.warn("Frame ophalen faalde:", error instanceof Error ? error.message : error);
+      return null;
+    }) : null;
+    const promptMessage: ModelMessage = frame
+      ? { role: "user", content: [{ type: "text", text }, { type: "image", image: frame.data, mediaType: frame.mediaType }] }
+      : userMessage;
+    const noFrameMessage: SystemModelMessage[] = kijken && !frame ? [{ role: "system", content: "Je kunt nu niets zien: er is geen camerabeeld. Zeg dat eerlijk en verzin niet wat je ziet." }] : [];
+
     // ponytail: sequentieel na de emotie; parallel met Type1 als de latency ooit telt.
     const recalled = await recall(text, being.id);
     // Spontane herinnering: bij initiatief die van considerInitiative (al in `text`), anders heel zelden een aanleiding.
@@ -1102,8 +1128,8 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     const result = streamText({
       abortSignal: abort.signal,
       model: intent === "complex" ? deps.type2.heavy : deps.type2.light,
-      instructions: [stable, ageMessage(being), ...birthdayMessages(awake), moodMessage(mood, axes?.expressiveness ?? 0.5), familiarityMessage(familiarity), ...(BEHAVIOR_PROMPTS[behavior] ? [BEHAVIOR_PROMPTS[behavior]] : []), ...opinionMessage, recallPrompt(recalled), ...spontaneousPromptMessage, ...(dream ? [dreamPrompt(dream.text)] : [])],
-      messages: [...workingMemory, userMessage],
+      instructions: [stable, ageMessage(being), ...birthdayMessages(awake), moodMessage(mood, axes?.expressiveness ?? 0.5), familiarityMessage(familiarity), ...(BEHAVIOR_PROMPTS[behavior] ? [BEHAVIOR_PROMPTS[behavior]] : []), ...opinionMessage, recallPrompt(recalled), ...spontaneousPromptMessage, ...(dream ? [dreamPrompt(dream.text)] : []), ...noFrameMessage],
+      messages: [...workingMemory, promptMessage],
       tools,
       // Genoeg stappen om een tool te gebruiken en daarna het resultaat te verwoorden.
       stopWhen: isStepCount(5),

@@ -33,6 +33,7 @@ import { RoomEvent, TrackSource, type RemoteParticipant } from "@livekit/rtc-nod
 import { readState, watchDynimos } from "./dynimo-watch.js";
 import { createStateRepublisher, emotionMessageFor, withFaceExpressiveness } from "./state-republish.js";
 import { createCommandHandler, galleryMessageFor, MAX_GRAVES } from "./gallery-commands.js";
+import { createFrameSource } from "./frame-source.js";
 import { createInitiativeTimer, initiativeIntervalMs, parseInitiativeMinutes } from "./initiative-timer.js";
 import { createReflectionDisplay } from "./reflection-display.js";
 import { createSilenceTimer, parseSilenceMinutes } from "./silence-timer.js";
@@ -173,10 +174,13 @@ export default defineAgent<AgentUserData>({
     const db = createDb(databaseUrl);
     await migrate(db);
 
+    // Kijken (ADR-0018/0019): het laatste camerabeeld van de room, vóór createBrain zodat lookFrame meteen mee kan.
+    const frames = createFrameSource(ctx.room);
     // In-process (spec: geen aparte brein-API); elke job krijgt zijn eigen brein-instantie.
     // voices: een geboorte vanuit de Galerij kiest net als in het dashboard een stem.
-    const brain = createBrain({ db, type1: TYPE1_MODEL, type2: loadType2Config(), embedder: EMBEDDING_MODEL, voices: defaultVoiceDeps(process.env) });
+    const brain = createBrain({ db, type1: TYPE1_MODEL, type2: loadType2Config(), embedder: EMBEDDING_MODEL, voices: defaultVoiceDeps(process.env), lookFrame: () => frames.latest() });
 
+    ctx.addShutdownCallback(async () => frames.dispose());
     ctx.addShutdownCallback(async () => {
       await db.$client.end();
     });

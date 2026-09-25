@@ -30,6 +30,7 @@ import { applyDeltas, baseEmotionOf, currentMood, moodOfRow, singleEmotionValues
 import { isVisibleMoodChange, soundKindFor, type SoundKind } from "./sound.js";
 import { FAMILIARITY_POSITIVE_DELTA, familiarityStyle, updateFamiliarity } from "./familiarity.js";
 import { AXIS_DESCRIPTIONS, type Axes, axisGuidelines, mbtiType, rowAxes } from "./personality.js";
+import { verstandGuidelines } from "./verstand.js";
 import { EMOTIONS, oppositeOf, type Emotion } from "./emotion.js";
 import { SEEDS } from "./seeds.js";
 import { createTools } from "./tools.js";
@@ -96,6 +97,8 @@ export type Brain = {
   setVoiceProfile(id: number, profile: { voice: string | null; description: string | null }): Promise<boolean>;
   /** Dashboard-override: zet de Vertrouwdheid (0–1). False bij een onbekende id. */
   setFamiliarity(id: number, familiarity: number): Promise<boolean>;
+  /** Dashboard-override: zet het Verstand (0–1), zonder pinning. False bij een onbekende id. */
+  setVerstand(id: number, verstand: number): Promise<boolean>;
   /** Dashboard-override: kiest een archetype en zet zijn zes assen en Basisemotie als startpunt (geen pinning). False bij een onbekende id of een onbekend archetype. */
   setArchetype(id: number, archetypeId: string): Promise<boolean>;
   /**
@@ -241,24 +244,27 @@ function pickSeed(random: () => number): string {
   return SEEDS[Math.floor(random() * SEEDS.length)]!;
 }
 
-// Leeg zolang de assen ontbreken (backfill).
-function personalityText(row: Dynimo): string {
+// Leeg zolang de assen ontbreken (backfill). `verstand` tempert (enkel bij hoog) de sterke tf/jp/sn-regels; enkel
+// buildStableSystemPrompt geeft die mee, de andere aanroepers (Type1-context, considerInitiative, Reflectie) niet.
+function personalityText(row: Dynimo, options?: { verstand?: number | null }): string {
   const axes = rowAxes(row);
   if (!axes) return "";
-  const rules = axisGuidelines(axes);
+  const rules = axisGuidelines(axes, options);
   const header = `Persoonlijkheid: ${mbtiType(axes)}`;
   return rules.length ? `${header}. Volg deze gedragsregels strikt; ze bepalen hoe je klinkt:${rules.map((line) => `\n- ${line}`).join("")}` : header;
 }
 
 function buildStableSystemPrompt(identityRecord: Dynimo, driveRows: readonly DriveRow[]): string {
-  const personalityBlock = personalityText(identityRecord);
+  const personalityBlock = personalityText(identityRecord, { verstand: identityRecord.verstand });
   const personality = personalityBlock ? `\n${personalityBlock}` : "";
+  const verstandRules = verstandGuidelines(identityRecord.verstand);
+  const verstand = verstandRules.length ? `\n${verstandRules.join(" ")}` : "";
   const driveBlock = drivesPromptBlock(driveRows);
   const archetype = getArchetype(identityRecord.archetype);
   const speechStyle = archetype ? `\nJe spreekstijl (${archetype.name}): ${archetype.speechStyle}` : "";
   return `Je bent ${identityRecord.name}.
 Je kern-karakter: ${identityRecord.coreCharacter}${identityRecord.evolvedCharacter ? `\nJe geëvolueerde karakter: ${identityRecord.evolvedCharacter}` : ""}
-Je geboorteverhaal: ${identityRecord.birthStory}${speechStyle}${personality}${driveBlock ? `\n${driveBlock}` : ""}
+Je geboorteverhaal: ${identityRecord.birthStory}${speechStyle}${personality}${verstand}${driveBlock ? `\n${driveBlock}` : ""}
 Antwoord in karakter en in het Nederlands.`;
 }
 
@@ -974,6 +980,11 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     return updated.length > 0;
   }
 
+  async function setVerstand(id: number, verstand: number): Promise<boolean> {
+    const updated = await deps.db.update(dynimos).set({ verstand }).where(eq(dynimos.id, id)).returning({ id: dynimos.id });
+    return updated.length > 0;
+  }
+
   async function setArchetype(id: number, archetypeId: string): Promise<boolean> {
     const archetype = getArchetype(archetypeId);
     if (!archetype) return false;
@@ -1403,5 +1414,5 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     }
   }
 
-  return { bringToLife, wake, sleep, kill, list, backfill, reflect, considerInitiative, hear, forceMood, setMood, setAxes, setFamiliarity, setVoiceProfile, setArchetype, addMemory, removeMemory };
+  return { bringToLife, wake, sleep, kill, list, backfill, reflect, considerInitiative, hear, forceMood, setMood, setAxes, setFamiliarity, setVerstand, setVoiceProfile, setArchetype, addMemory, removeMemory };
 }

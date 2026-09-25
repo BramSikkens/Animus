@@ -1,4 +1,5 @@
 // Browser-veilig: geen node-imports. Brein en dashboard delen dit.
+import { verstandBand } from "./verstand.js";
 // Elke as is een getal 0..1 = positie richting de TWEEDE letter: I↔E (1 = E), S↔N (1 = N),
 // T↔F (1 = F), J↔P (1 = P). Vanaf 0.5 telt de tweede letter.
 // Naast de vier MBTI-assen twee losse: reactivity (0 = nuchter, 1 = heftig; schaalt de Stemming, zie mood.ts) en
@@ -114,15 +115,26 @@ const GUIDELINES: Record<Axis, readonly [first: readonly [string, string], secon
   ],
 };
 
-/** Gedragsrichtlijnen (Nederlands) voor het stabiele deel van de prompt; hoogstens één per as. */
-export function axisGuidelines(axes: Axes): string[] {
+// Verstand (ADR-0021): bij hoog Verstand tempert dit de paar sterke regels die kennis tegenhouden. Enkel de
+// "sterk"-variant (>0.75) van deze drie assen wordt vervangen; de rest (incl. de I↔E-lengteregels) blijft gelijk.
+const HIGH_VERSTAND_OVERRIDES: Partial<Record<Axis, string>> = {
+  tf: "Je reageert sterk warm en vanuit gevoel: erken eerst hoe de ander zich voelt en toon zichtbaar meeleven, maar verzwijg geen waarheid: verwoord ook harde feiten zacht en volledig.",
+  jp: "Je bent sterk speels en open: volg gerust de inval van het moment en maak zijsprongen, maar kom bij een vraag altijd tot een duidelijk antwoord of conclusie.",
+  sn: "Je denkt sterk associatief en fantasierijk: gebruik in elk antwoord een beeld of vergelijking en leg verbanden tussen ver uiteenliggende dingen, maar laat die beelden de feiten verhelderen, niet vervangen.",
+};
+
+/** Gedragsrichtlijnen (Nederlands) voor het stabiele deel van de prompt; hoogstens één per as.
+ * Met een hoog Verstand (band "hoog" of "sterk-hoog", zie verstand.ts) worden de sterke tf/jp/sn-regels vervangen. */
+export function axisGuidelines(axes: Axes, options?: { verstand?: number | null }): string[] {
+  const band = options ? verstandBand(options.verstand ?? null) : "midden";
+  const tempered = band === "hoog" || band === "sterk-hoog";
   const lines: string[] = [];
   for (const axis of AXES) {
     const value = axes[axis];
     const [first, second] = GUIDELINES[axis];
     if (value < 0.25) lines.push(first[0]);
     else if (value < 0.4) lines.push(first[1]);
-    else if (value > 0.75) lines.push(second[0]);
+    else if (value > 0.75) lines.push(tempered && HIGH_VERSTAND_OVERRIDES[axis] ? HIGH_VERSTAND_OVERRIDES[axis]! : second[0]);
     else if (value > 0.6) lines.push(second[1]);
   }
   return lines;

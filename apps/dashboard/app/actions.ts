@@ -6,6 +6,7 @@ import { isEmotion } from "@animus/brain/emotion";
 import { parseMoodValues } from "@animus/brain/mood";
 import { parseFamiliarity } from "@animus/brain/familiarity";
 import { parseAxes } from "@animus/brain/personality";
+import { parseVerstand } from "@animus/brain/verstand";
 import { adoptVoice, cloneVoice, designVoice, saveDesignedVoice, type DesignPreview } from "@animus/brain/voice-design";
 import { parseVoice, speechProvider, voiceInputError } from "@animus/brain/voice";
 import { unusableVoiceError } from "@animus/brain/voice-catalog";
@@ -102,6 +103,16 @@ export async function setFamiliarity(_prev: ActionState, formData: FormData): Pr
     const familiarity = parseFamiliarity((name) => formData.get(name));
     if (familiarity === null) return "Ongeldige vertrouwdheid.";
     if (!(await getBrain().setFamiliarity(id, familiarity))) return DYNIMO_GONE;
+  });
+}
+
+export async function setVerstand(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  return run(async () => {
+    const id = parseId(formData);
+    if (id === null) return INVALID_ID;
+    const verstand = parseVerstand((name) => formData.get(name));
+    if (verstand === null) return "Ongeldig Verstand.";
+    if (!(await getBrain().setVerstand(id, verstand))) return DYNIMO_GONE;
   });
 }
 

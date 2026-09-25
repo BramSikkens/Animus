@@ -6,6 +6,7 @@ import { DRIVE_KINDS, DRIVE_LABELS, type DriveKind } from "@animus/brain/drives"
 import { ARCHETYPES, getArchetype } from "@animus/brain/archetypes";
 import { familiarityStyle } from "@animus/brain/familiarity";
 import { AXES, AXIS_LABELS, AXIS_LETTERS, MBTI_AXES, mbtiType, rowAxes } from "@animus/brain/personality";
+import { verstandBand } from "@animus/brain/verstand";
 import { speechProvider, voicesFor } from "@animus/brain/voice";
 import { dreams, drives, dynimos, epitaphs, memories } from "@animus/db/schema";
 import { db } from "../lib/db";
@@ -13,7 +14,7 @@ import { ActionForm } from "./action-form";
 import { VoiceCatalog } from "./voice-catalog";
 import { VoiceDesign } from "./voice-design";
 import { getCatalog, getTier } from "../lib/voice-catalog";
-import { addMemory, bringToLife, forceMood, kill, removeMemory, setArchetype, setAxes, setFamiliarity, setMood, setVoice, sleep, wake } from "./actions";
+import { addMemory, bringToLife, forceMood, kill, removeMemory, setArchetype, setAxes, setFamiliarity, setMood, setVerstand, setVoice, sleep, wake } from "./actions";
 import { formatDate, formatDateTime } from "../lib/format";
 
 export const dynamic = "force-dynamic";
@@ -120,6 +121,9 @@ export default async function DashboardPage() {
                   <p>
                     Vertrouwdheid: {familiarityStyle(dynimo.familiarity).band} ({dynimo.familiarity.toFixed(2)})
                   </p>
+                  <p>
+                    Verstand: {dynimo.verstand === null ? "(leeg)" : `${verstandBand(dynimo.verstand)} (${dynimo.verstand.toFixed(2)})`}
+                  </p>
                   {axes ? (
                     <div className="personality">
                       <p>
@@ -204,6 +208,12 @@ export default async function DashboardPage() {
                     <label className="slider">
                       Vertrouwdheid
                       <input name="familiarity" type="range" min={0} max={1} step={0.01} defaultValue={dynimo.familiarity} />
+                    </label>
+                  </ActionForm>
+                  <ActionForm action={setVerstand} label="Verstand zetten" pendingLabel="Zet…" id={dynimo.id}>
+                    <label className="slider">
+                      Verstand
+                      <input name="verstand" type="range" min={0} max={1} step={0.01} defaultValue={dynimo.verstand ?? 0.5} />
                     </label>
                   </ActionForm>
                   <ActionForm action={setArchetype} label="Archetype toepassen (zet assen en basisemotie)" pendingLabel="Zet…" id={dynimo.id}>

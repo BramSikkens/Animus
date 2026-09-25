@@ -44,6 +44,9 @@ export const dynimos = pgTable(
     voiceDescription: text("voice_description"),
     // Archetype (#60): id uit @animus/brain/archetypes; startpunt voor assen/spreekstijl, geen pinning. NULL = geen.
     archetype: text("archetype"),
+    // Verstand (#96/#97): 0–1, hoe inhoudelijk hij antwoordt (los van hoe hij praat, zie verstand.ts). NULL = nog te
+    // backfillen; telt tot dan als 0.5 (middenband, gedrag zoals nu).
+    verstand: real("verstand"),
   },
   // Hooguit één Wakker: alle wakkere rijen delen dezelfde constante indexwaarde.
   (table) => [
@@ -68,6 +71,7 @@ export const dynimos = pgTable(
     check("dynimos_axis_reactivity_range", sql`${table.axisReactivity} between 0 and 1`),
     check("dynimos_axis_expressiveness_range", sql`${table.axisExpressiveness} between 0 and 1`),
     check("dynimos_familiarity_range", sql`${table.familiarity} between 0 and 1`),
+    check("dynimos_verstand_range", sql`${table.verstand} between 0 and 1`),
     uniqueIndex("dynimos_single_awake_idx").on(sql`(true)`).where(sql`${table.awakeSince} is not null`),
   ],
 );

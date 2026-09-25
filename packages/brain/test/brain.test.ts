@@ -3788,6 +3788,14 @@ describe("createBrain", () => {
         });
       });
 
+      it("zet ook Verstand op de richtwaarde van het nieuwe archetype (zonder spreiding)", async () => {
+        const vero = await insertDynimo({ verstand: 0.2 });
+
+        await brainWith().setArchetype(vero.id, "professor");
+
+        expect((await rowOf(vero.id)).verstand).toBeCloseTo(getArchetype("professor")!.verstand);
+      });
+
       it("geeft false bij een onbekende Dynimo of een onbekend archetype en wijzigt niets", async () => {
         const vero = await insertDynimo();
 

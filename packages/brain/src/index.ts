@@ -99,7 +99,7 @@ export type Brain = {
   setFamiliarity(id: number, familiarity: number): Promise<boolean>;
   /** Dashboard-override: zet het Verstand (0–1), zonder pinning. False bij een onbekende id. */
   setVerstand(id: number, verstand: number): Promise<boolean>;
-  /** Dashboard-override: kiest een archetype en zet zijn zes assen en Basisemotie als startpunt (geen pinning). False bij een onbekende id of een onbekend archetype. */
+  /** Dashboard-override: kiest een archetype en zet zijn zes assen, Basisemotie en Verstand (richtwaarde) als startpunt (geen pinning). False bij een onbekende id of een onbekend archetype. */
   setArchetype(id: number, archetypeId: string): Promise<boolean>;
   /**
    * Dashboard-override: voegt een Herinnering toe met dezelfde embed-stap als een normale beurt en de neutrale
@@ -1021,6 +1021,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
         axisJp: axes.jp,
         axisReactivity: axes.reactivity,
         axisExpressiveness: axes.expressiveness,
+        verstand: archetype.verstand,
       })
       .where(eq(dynimos.id, id))
       .returning({ id: dynimos.id });

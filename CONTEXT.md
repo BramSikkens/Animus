@@ -82,7 +82,7 @@ Vrije tekst naast het Kernkarakter, die elke Reflectie in kleine stappen herschr
 _Avoid_: groei, nieuw karakter
 
 **Archetype**:
-Een vooringesteld karakterpatroon (bv. schattig wezentje, robot, lieve oude dame, professor) met zes assen, Basisemotie, spreekstijl-instructies voor Type2 en een stemomschrijving. Bij genesis kiest Type2 altijd één uit een gevarieerd aanbod van vier; geeft hij een id buiten het aanbod (onbekend, leeg of niet aangeboden), dan kiest de rng er een aangeboden. Assen en Basisemotie worden daaruit voorgezet. Bestaande Dynimo's met `archetype = null` blijven zoals ze zijn (het dashboard kan er een zetten). Bewaard bij de Dynimo; in het dashboard te wijzigen, wat assen en Basisemotie opnieuw als startpunt zet — geen pinning, de assen schuiven daarna vrij.
+Een vooringesteld karakterpatroon (bv. schattig wezentje, robot, lieve oude dame, professor) met zes assen, Basisemotie, spreekstijl-instructies voor Type2 en een stemomschrijving. Bij genesis kiest Type2 altijd één uit een gevarieerd aanbod van vier; geeft hij een id buiten het aanbod (onbekend, leeg of niet aangeboden), dan kiest de rng er een aangeboden. Assen en Basisemotie worden daaruit voorgezet. Bestaande Dynimo's met `archetype = null` blijven zoals ze zijn (het dashboard kan er een zetten). Bewaard bij de Dynimo; in het dashboard te wijzigen, wat assen, Basisemotie en Verstand opnieuw als startpunt zet — geen pinning, de assen schuiven daarna vrij.
 _Avoid_: rol, persona, type (dat is Type1/Type2)
 
 **Persoonlijkheid**:

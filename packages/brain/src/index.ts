@@ -28,7 +28,7 @@ import { pickDreamToTell, DREAM_MAX_AGE_MS } from "./dream-tell.js";
 import { pickSpontaneousMemory, spontaneousChance, SPONTANEOUS_INITIATIVE_CHANCE, SPONTANEOUS_MIN_AGE_MS, SPONTANEOUS_MIN_IMPRESSION, SPONTANEOUS_TURN_CHANCE, type SpontaneousCandidate } from "./recall-spontaneous.js";
 import { applyDeltas, baseEmotionOf, currentMood, moodOfRow, singleEmotionValues, storedMoodOf, type Mood, type MoodDeltas, type MoodValues, type StoredMood } from "./mood.js";
 import { isVisibleMoodChange, soundKindFor, type SoundKind } from "./sound.js";
-import { FAMILIARITY_POSITIVE_DELTA, familiarityStyle, updateFamiliarity } from "./familiarity.js";
+import { FAMILIARITY_DEFAULT, FAMILIARITY_POSITIVE_DELTA, familiarityStyle, updateFamiliarity } from "./familiarity.js";
 import { AXIS_DESCRIPTIONS, type Axes, axisGuidelines, mbtiType, rowAxes } from "./personality.js";
 import { growVerstand, rollVerstand, tempersAxisRules, VERSTAND_GROWTH_LIMIT, verstandGuidelines } from "./verstand.js";
 import { EMOTIONS, oppositeOf, type Emotion } from "./emotion.js";
@@ -448,7 +448,6 @@ export function createBrain(deps: {
   let lastOpinionTurn: number | undefined;
   let lastSpeechSound: string | undefined; // Spraakgeluid van de vorige beurt: nooit twee keer hetzelfde.
   let current: Dynimo | undefined;
-  const tools = createTools({ now, remember });
   const workingMemory: ModelMessage[] = [];
   // Herinneringen uit deze sessie staan al in het werkgeheugen; niet dubbel ophalen.
   const sessionMemoryIds: number[] = [];
@@ -459,9 +458,6 @@ export function createBrain(deps: {
   // considerInitiative(nieuw-object) + "ja" zet dit; de eerstvolgende hear(..., { initiatief: true }) verbruikt
   // het als `kijken` (ADR-0019): zo gaat het beeld mee in precies die ene initiatiefbeurt.
   let pendingLook = false;
-  // Persoon (#91) van de lopende beurt: de Gesprekspartner, of de eigenaar bij initiatief zonder Gesprekspartner.
-  // Zo bereikt `remember` (via de tool, mid-beurt) dezelfde persoon als de eindremember van `hear`.
-  let currentTurnPersonId: number | null | undefined;
 
   async function genesis(): Promise<{ dynimo: typeof dynimos.$inferInsert; drives: DrivesOutput; voice: { voice: string; description: string } | null }> {
     const seed = pickSeed(random);
@@ -719,7 +715,6 @@ ${fresh.map((memory) => `- (indruk ${memory.impression}) ${memory.text}`).join("
     pendingSpontaneousId = undefined;
     pendingDreamId = undefined;
     pendingLook = false;
-    currentTurnPersonId = undefined;
   }
 
   // Een andere Wakker-generatie (andere Dynimo of nieuwe awake_since) is een nieuwe sessie.
@@ -959,11 +954,12 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
   }
 
   // De expliciete onthoud-tool geeft de neutrale Indruk 0.5; de eindremember van `hear` geeft die van Type1 mee.
-  // personId (default: de Gesprekspartner van de lopende beurt, #91) hoort net als dynimoId bij de sessie, niet bij de aanroep.
-  async function remember(memoryText: string, dynimoId = current?.id, impression = 0.5, personId = currentTurnPersonId): Promise<boolean> {
+  // personId (#91) komt expliciet van de aanroeper (geen instance-state): elke beurt (en zijn onthoud-tool) sluit
+  // over zijn eigen Gesprekspartner, zodat een overlappende tweede beurt hem niet kan overschrijven.
+  async function remember(memoryText: string, dynimoId = current?.id, impression = 0.5, personId: number | null = null): Promise<boolean> {
     if (dynimoId === undefined) return false;
     try {
-      sessionMemoryIds.push(await insertMemory(memoryText, dynimoId, impression, personId ?? null));
+      sessionMemoryIds.push(await insertMemory(memoryText, dynimoId, impression, personId));
       return true;
     } catch (error) {
       console.warn("Herinnering opslaan faalde:", error instanceof Error ? error.message : error);
@@ -1032,10 +1028,12 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
       .select({ familiarity: familiarities.familiarity })
       .from(familiarities)
       .where(and(eq(familiarities.dynimoId, dynimoId), eq(familiarities.personId, personId)));
-    return row?.familiarity ?? 0.2;
+    return row?.familiarity ?? FAMILIARITY_DEFAULT;
   }
 
-  // Upsert van (dynimo, persoon); false als de Dynimo intussen verwijderd is (FK-violation op dynimo_id).
+  // Upsert van (dynimo, persoon); false als de Dynimo intussen verwijderd is (FK-violation op dynimo_id). Een
+  // FK-violation op person_id (de Gesprekspartner bestaat niet (meer)) breekt de beurt niet af: enkel de
+  // Vertrouwdheid wordt dan niet geschreven.
   async function upsertFamiliarity(dynimoId: number, personId: number, familiarity: number): Promise<boolean> {
     try {
       await deps.db
@@ -1044,10 +1042,18 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
         .onConflictDoUpdate({ target: [familiarities.dynimoId, familiarities.personId], set: { familiarity } });
       return true;
     } catch (error) {
-      // Drizzle wikkelt de Postgres-fout in; de code zit op de fout zelf of op `cause` (zie ook page.tsx).
-      const { code, cause } = error as { code?: string; cause?: { code?: string } };
-      if ((code ?? cause?.code) === "23503") return false;
-      throw error;
+      // Drizzle wikkelt de Postgres-fout in; code/constraint_name zitten op de fout zelf of op `cause` (zie ook page.tsx).
+      const { code, constraint_name: constraint, cause } = error as {
+        code?: string;
+        constraint_name?: string;
+        cause?: { code?: string; constraint_name?: string };
+      };
+      const errorCode = code ?? cause?.code;
+      const errorConstraint = constraint ?? cause?.constraint_name;
+      if (errorCode !== "23503") throw error;
+      if (errorConstraint === "familiarities_dynimo_id_dynimos_id_fk") return false;
+      console.warn(`Vertrouwdheid niet opgeslagen: Persoon ${personId} bestaat niet (meer).`);
+      return true;
     }
   }
 
@@ -1118,9 +1124,9 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     }
     const being = adopt(awake);
     // Persoon van deze beurt (#91): meegegeven Gesprekspartner (null = onbekend), anders de eigenaar. Ook bij
-    // initiatief: die krijgt de eigenaar tenzij een Gesprekspartner is meegegeven.
+    // initiatief: die krijgt de eigenaar tenzij een Gesprekspartner is meegegeven. Lokaal (geen instance-state):
+    // een overlappende tweede beurt (bv. initiatief) mag deze niet kunnen overschrijven.
     const personId = options.gesprekspartner !== undefined ? options.gesprekspartner : await getOwnerId();
-    currentTurnPersonId = personId;
     const driveRows = await loadDrives(awake.id);
     const baseEmotion = baseEmotionOf(awake);
     const stored = storedMoodOf(awake);
@@ -1177,7 +1183,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     // Vertrouwdheid (familiarity.ts): een beurt telt, een positieve beurt extra; een genegeerde beurt telt niet als
     // beurt. Onbekend (personId null, #91): altijd 0.2, nooit opgeslagen.
     const familiarityAxes = axes ?? { tf: 0.5, expressiveness: 0.5 };
-    const startFamiliarity = personId === null ? 0.2 : await familiarityRow(being.id, personId);
+    const startFamiliarity = personId === null ? FAMILIARITY_DEFAULT : await familiarityRow(being.id, personId);
     let familiarity = startFamiliarity;
     if (!options.initiatief && personId !== null) {
       if (behavior === "negeren") familiarity = updateFamiliarity({ current: familiarity, event: "genegeerd", axes: familiarityAxes });
@@ -1219,7 +1225,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
       // Zichtbaar op het gezichtje via de (boze) Stemming plus een non-verbaal geluid; geen antwoord en geen TTS.
       if (soundKind && !soundYielded) yield { type: "sound", kind: soundKind };
       workingMemory.push(userMessage, { role: "assistant", content: "(je negeert dit)" });
-      await remember(`Gesprekspartner: ${text}\n${being.name} negeert dit.`, being.id, indruk);
+      await remember(`Gesprekspartner: ${text}\n${being.name} negeert dit.`, being.id, indruk, personId);
       return;
     }
 
@@ -1269,6 +1275,9 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
         }
       : {};
 
+    // Tools van deze beurt (#91): de onthoud-tool sluit over de Gesprekspartner van déze beurt, niet over instance-state.
+    const turnTools = createTools({ now, remember: (memoryText: string) => remember(memoryText, being.id, undefined, personId) });
+
     // ponytail: sequentieel na de emotie; parallel met Type1 als de latency ooit telt.
     const recalled = await recall(text, being.id);
     // Spontane herinnering: bij initiatief die van considerInitiative (al in `text`), anders heel zelden een aanleiding.
@@ -1300,7 +1309,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
       model: intent === "complex" ? deps.type2.heavy : deps.type2.light,
       instructions: [stable, ageMessage(being), ...birthdayMessages(awake), moodMessage(mood, axes?.expressiveness ?? 0.5), familiarityMessage(familiarity), ...(BEHAVIOR_PROMPTS[behavior] ? [BEHAVIOR_PROMPTS[behavior]] : []), ...opinionMessage, recallPrompt(recalled), ...spontaneousPromptMessage, ...(dream ? [dreamPrompt(dream.text)] : []), ...noFrameMessage],
       messages: [...workingMemory, promptMessage],
-      tools: { ...tools, ...kijkTools },
+      tools: { ...turnTools, ...kijkTools },
       // Genoeg stappen om een tool te gebruiken en daarna het resultaat te verwoorden.
       stopWhen: isStepCount(5),
     });
@@ -1377,7 +1386,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
         await deps.db.update(dreams).set({ toldAt: now() }).where(eq(dreams.id, dreamToMark));
       }
       if (outcome !== "failed" && full.trim()) {
-        await remember(options.initiatief ? `${being.name}: ${full}` : `Gesprekspartner: ${text}\n${being.name}: ${full}`, being.id, indruk);
+        await remember(options.initiatief ? `${being.name}: ${full}` : `Gesprekspartner: ${text}\n${being.name}: ${full}`, being.id, indruk, personId);
       }
     }
   }

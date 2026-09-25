@@ -3,6 +3,9 @@ import type { Axes } from "./personality.js";
 
 export type FamiliarityEvent = "beurt" | "positief" | "genegeerd" | "langeStilte";
 
+/** Vertrouwdheid zonder rij (nieuwe Dynimo, onbekende Gesprekspartner, of geen Persoon opgegeven). */
+export const FAMILIARITY_DEFAULT = 0.2;
+
 /** Groei per beurt bij snelheid 1, als aandeel van de resterende ruimte (1 − current). */
 export const FAMILIARITY_TURN_RATE = 0.01;
 
@@ -49,7 +52,7 @@ const STYLES: Record<FamiliarityBand, string> = {
     "De Gesprekspartner is je dierbaar: spreek informeel en persoonlijk, geef de ander gerust bijnamen, plaag hem of haar liefdevol en durf persoonlijke dingen te zeggen en te vragen.",
 };
 
-/** Bandgrenzen (ondergrens per band); een nieuwe Dynimo (0.2) start afstandelijk. */
+/** Bandgrenzen (ondergrens per band); een nieuwe Dynimo (FAMILIARITY_DEFAULT) start afstandelijk. */
 const BAND_FLOORS: readonly [FamiliarityBand, number][] = [["intiem", 0.8], ["vertrouwd", 0.55], ["vriendelijk", 0.3]];
 
 /** De toon-band bij een Vertrouwdheid en de bijbehorende Nederlandse Type2-instructie. */

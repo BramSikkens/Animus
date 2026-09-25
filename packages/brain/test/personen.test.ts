@@ -102,6 +102,35 @@ describe("Personen in hear() (#91)", () => {
     outputTokens: { total: undefined, text: undefined, reasoning: undefined },
   };
   const STOP: { unified: "stop"; raw: undefined } = { unified: "stop", raw: undefined };
+  const TOOL_CALLS: { unified: "tool-calls"; raw: undefined } = { unified: "tool-calls", raw: undefined };
+
+  // Een model dat eerst de remember-tool aanroept, en daarna pas met tekst antwoordt.
+  function toolThenTextModel(input: object, answer: string) {
+    return new MockLanguageModelV4({
+      doStream: [
+        {
+          stream: simulateReadableStream({
+            chunks: [
+              { type: "stream-start" as const, warnings: [] },
+              { type: "tool-call" as const, toolCallId: "call-1", toolName: "remember", input: JSON.stringify(input) },
+              { type: "finish" as const, usage: NULL_USAGE, finishReason: TOOL_CALLS },
+            ],
+          }),
+        },
+        {
+          stream: simulateReadableStream({
+            chunks: [
+              { type: "stream-start" as const, warnings: [] },
+              { type: "text-start" as const, id: "1" },
+              { type: "text-delta" as const, id: "1", delta: answer },
+              { type: "text-end" as const, id: "1" },
+              { type: "finish" as const, usage: NULL_USAGE, finishReason: STOP },
+            ],
+          }),
+        },
+      ],
+    });
+  }
 
   // Eén Type1 voor de classificatie in hear(); blijScore configureerbaar voor de "positief"-drempel.
   const type1 = (blijScore = 4) =>
@@ -208,6 +237,32 @@ describe("Personen in hear() (#91)", () => {
 
     expect(await brain.familiarityOf(vero.id, anna.id)).toBeLessThan(0.5);
     expect(await brain.familiarityOf(vero.id)).toBe(0.5); // eigenaar onaangeroerd
+  });
+
+  it("de remember-tool geeft de nieuwe Herinnering de Gesprekspartner van zijn eigen beurt", async () => {
+    const vero = await insertDynimo();
+    const anna = await insertPerson("Anna");
+    const light = toolThenTextModel({ text: "Anna houdt van thee." }, "Onthouden!");
+    const brain = createBrain({ db, embedder: embedder(), type1: type1(), type2: { light, heavy: light }, now: () => now, random: () => 0.99 });
+
+    await hear(brain, "Onthoud dat ik van thee houd", { gesprekspartner: anna.id });
+
+    const rows = await db.select().from(memories).where(eq(memories.dynimoId, vero.id));
+    const remembered = rows.find((row) => row.text === "Anna houdt van thee.");
+    expect(remembered?.personId).toBe(anna.id);
+  });
+
+  it("hear met een onbestaand Persoon-id geeft wél een antwoord; Vertrouwdheid wordt niet geschreven", async () => {
+    const vero = await insertDynimo();
+    const brain = brainWith(type2().model);
+
+    const events: string[] = [];
+    for await (const event of brain.hear("Hoi", { gesprekspartner: 999_999 })) {
+      if (event.type === "text") events.push(event.delta);
+    }
+
+    expect(events.join("")).toContain("Hoi!");
+    expect(await db.select().from(familiarities)).toHaveLength(0);
   });
 
   it("zonder Gesprekspartner gedraagt alles zich als nu (eigenaar)", async () => {

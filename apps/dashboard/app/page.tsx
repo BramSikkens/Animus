@@ -4,7 +4,7 @@ import { formatAge } from "@animus/brain/age";
 import { displayMoodOfRow, moodOfRow } from "@animus/brain/mood";
 import { DRIVE_KINDS, DRIVE_LABELS, type DriveKind } from "@animus/brain/drives";
 import { ARCHETYPES, getArchetype } from "@animus/brain/archetypes";
-import { familiarityStyle } from "@animus/brain/familiarity";
+import { FAMILIARITY_DEFAULT, familiarityStyle } from "@animus/brain/familiarity";
 import { AXES, AXIS_LABELS, AXIS_LETTERS, MBTI_AXES, mbtiType, rowAxes } from "@animus/brain/personality";
 import { verstandBand } from "@animus/brain/verstand";
 import { speechProvider, voicesFor } from "@animus/brain/voice";
@@ -104,7 +104,7 @@ export default async function DashboardPage() {
           <ul>
             {dynimoRows.map((dynimo, index) => {
               const awake = dynimo.awakeSince !== null;
-              const familiarity = familiarityByDynimo.get(dynimo.id) ?? 0.2;
+              const familiarity = familiarityByDynimo.get(dynimo.id) ?? FAMILIARITY_DEFAULT;
               const axes = rowAxes(dynimo);
               // Enkel de wakkere Dynimo heeft een levende Stemming.
               const mood = awake ? displayMoodOfRow(dynimo, new Date()) : null;

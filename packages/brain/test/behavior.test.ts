@@ -45,14 +45,20 @@ describe("decideBehavior: blij, bang, verveeld", () => {
     expect(decideBehavior({ values: singleEmotionValues("blij", 0.6), axes: axes(), rng: rng(0) })).toBe("normaal");
   });
 
-  it("bang en verveeld geven kort", () => {
+  it("bang, verveeld en droevig geven kort", () => {
     expect(decideBehavior({ values: singleEmotionValues("bang", 0.8), axes: axes(), rng: rng(0) })).toBe("kort");
     expect(decideBehavior({ values: singleEmotionValues("verveeld", 0.8), axes: axes(), rng: rng(0) })).toBe("kort");
+    expect(decideBehavior({ values: singleEmotionValues("droevig", 0.8), axes: axes(), rng: rng(0) })).toBe("kort");
+  });
+
+  it("droevig onder de drempel of bij een hoge worp blijft normaal", () => {
+    expect(decideBehavior({ values: singleEmotionValues("droevig", 0.5), axes: axes(), rng: rng(0) })).toBe("normaal");
+    expect(decideBehavior({ values: singleEmotionValues("droevig", 0.8), axes: axes(), rng: rng(0.99) })).toBe("normaal");
   });
 
   it("een robot is bij elke emotie normaal", () => {
     const robot = axes({ reactivity: 0, expressiveness: 0 });
-    for (const emotion of ["blij", "boos", "bang", "verveeld"] as const) {
+    for (const emotion of ["blij", "boos", "bang", "verveeld", "droevig"] as const) {
       expect(decideBehavior({ values: singleEmotionValues(emotion, 1), axes: robot, rng: rng(0) })).toBe("normaal");
     }
   });
@@ -64,11 +70,17 @@ describe("initiativeFactor", () => {
     expect(initiativeFactor(singleEmotionValues("blij", 0.9), axes())).toBeGreaterThan(1);
     expect(initiativeFactor(singleEmotionValues("blij", 0.9), axes({ expressiveness: 0 }))).toBe(1);
   });
+
+  it("sterk nieuwsgierig praat ook vaker uit zichzelf, geschaald door expressiviteit", () => {
+    expect(initiativeFactor(singleEmotionValues("nieuwsgierig", 0.5), axes())).toBe(1);
+    expect(initiativeFactor(singleEmotionValues("nieuwsgierig", 0.8), axes())).toBeGreaterThan(1);
+    expect(initiativeFactor(singleEmotionValues("nieuwsgierig", 0.8), axes({ expressiveness: 0 }))).toBe(1);
+  });
 });
 
 describe("decideBehavior: nieuwe emoties", () => {
-  it("droevig, vredig en druk worden nooit genegeerd of kort/lang", () => {
-    for (const emotion of ["droevig", "vredig", "druk"] as const) {
+  it("vredig en druk worden nooit genegeerd of kort/lang", () => {
+    for (const emotion of ["vredig", "druk"] as const) {
       const values = singleEmotionValues(emotion, 1);
       for (const roll of [0, 0.5, 0.99]) expect(decideBehavior({ values, axes: axes(), rng: rng(roll) })).toBe("normaal");
       expect(initiativeFactor(values, axes())).toBe(1);

@@ -15,10 +15,12 @@ export const BOOS_KORT_CHANCE = 0.3;
 /** Zeer blij vanaf deze sterkte (0-1) én dominant: kans op lange antwoorden en meer eigen initiatief. */
 export const BLIJ_THRESHOLD = 0.7;
 export const LANG_CHANCE = 0.7;
-/** Bang of verveeld vanaf deze sterkte (dominant): kans op korte antwoorden. */
+/** Bang, verveeld of droevig vanaf deze sterkte (dominant): kans op korte antwoorden. */
 export const KORT_THRESHOLD = 0.6;
 export const KORT_CHANCE = 0.6;
-/** Bij zeer blij wordt het initiatief-interval gedeeld door deze factor (vóór schaling met expressiviteit). */
+/** Sterk nieuwsgierig vanaf deze sterkte (0-1) én dominant: meer eigen initiatief (zoals zeer blij). */
+export const NIEUWSGIERIG_THRESHOLD = 0.6;
+/** Bij zeer blij of sterk nieuwsgierig wordt het initiatief-interval gedeeld door deze factor (vóór schaling met expressiviteit). */
 export const BLIJ_INITIATIVE_BOOST = 2;
 
 /** Schaal 0..1: reactiviteit, gedempt door warmte (T↔F: 1 = F verlaagt de kans tot een kwart). */
@@ -47,11 +49,13 @@ export function decideBehavior({
   const top = dominant(values);
   const emotive = (axes.reactivity + axes.expressiveness) / 2;
   if (top === "blij" && strength(values.blij) >= BLIJ_THRESHOLD && rng() < LANG_CHANCE * emotive) return "lang";
-  if ((top === "bang" || top === "verveeld") && strength(values[top]) >= KORT_THRESHOLD && rng() < KORT_CHANCE * axes.reactivity) return "kort";
+  if ((top === "bang" || top === "verveeld" || top === "droevig") && strength(values[top]) >= KORT_THRESHOLD && rng() < KORT_CHANCE * axes.reactivity) return "kort";
   return "normaal";
 }
 
-/** Factor (>= 1) waarmee het initiatief-interval korter wordt: zeer blij praat vaker uit zichzelf, geschaald door expressiviteit. */
+/** Factor (>= 1) waarmee het initiatief-interval korter wordt: zeer blij of sterk nieuwsgierig praat vaker uit zichzelf, geschaald door expressiviteit. */
 export function initiativeFactor(values: MoodValues, axes: Axes): number {
-  return dominant(values) === "blij" && strength(values.blij) >= BLIJ_THRESHOLD ? 1 + (BLIJ_INITIATIVE_BOOST - 1) * axes.expressiveness : 1;
+  const top = dominant(values);
+  const eager = (top === "blij" && strength(values.blij) >= BLIJ_THRESHOLD) || (top === "nieuwsgierig" && strength(values.nieuwsgierig) >= NIEUWSGIERIG_THRESHOLD);
+  return eager ? 1 + (BLIJ_INITIATIVE_BOOST - 1) * axes.expressiveness : 1;
 }

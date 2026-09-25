@@ -4,4 +4,4 @@ Animus is opgezet als een monorepo-visie met meerdere modules (Brein, Geheugen, 
 
 ## Consequences
 
-**Revisit-trigger:** herzie deze beslissing zodra de eerste pnpm-package een eigen, divergerende woordenschat krijgt — bijvoorbeeld de CV-microservice in fase 3, of wanneer brein-API en gezichtje-app termen anders gaan gebruiken. Dat is het signaal om naar `CONTEXT-MAP.md` te migreren.
+**Revisit-trigger:** herzie deze beslissing zodra de eerste pnpm-package een eigen, divergerende woordenschat krijgt — bijvoorbeeld de CV-microservice in fase 4, of wanneer brein-API en gezichtje-app termen anders gaan gebruiken. Dat is het signaal om naar `CONTEXT-MAP.md` te migreren.

@@ -56,7 +56,7 @@ flowchart LR
 - Perceptie-filtering (is er een gezicht? interessant genoeg voor Type2?)
 - Emotielabel + intensiteit uit toon/tekst
 - Intent-routering (simpele vraag vs. complexe babbel)
-- Veiligheid & fysieke controlegrenzen (fase 3)
+- Veiligheid & fysieke controlegrenzen (fase 4)
 - Turn-taking (grotendeels al gedekt door LiveKit's ingebouwde endpointing-model)
 - Nieuwsgierigheids-trigger ("is dit de moeite om spontaan iets te zeggen?")
 
@@ -157,7 +157,7 @@ Er kunnen meerdere wezens naast elkaar bestaan, elk met een eigen identiteit, ge
 | **Laten slapen** | het wakkere wezen gaat slapen; niets gaat verloren |
 | **Doden** | *Verwijderen* zoals hierboven: bevestigde, onomkeerbare actie met Afscheidsreflectie en Grafschrift — nu ook vanuit het dashboard en de Galerij i.p.v. enkel de CLI |
 
-- **Eén wezen tegelijk wakker:** wie je wakker maakt, praat met het gezichtje; de anderen slapen. Een ander wezen wakker maken laat het huidige eerst slapen. Past bij één robotlichaam in fase 3.
+- **Eén wezen tegelijk wakker:** wie je wakker maakt, praat met het gezichtje; de anderen slapen. Een ander wezen wakker maken laat het huidige eerst slapen. Past bij één robotlichaam in fase 4.
 - **Volledig gescheiden:** wezens weten niet dat de anderen bestaan en delen niets — geen geheugens, geen Grafschriften (zoals nu al: een nieuw wezen kan het Grafschrift van zijn voorganger niet lezen).
 - **Slapen = verwerken:** de Leeftijd telt door (ADR-0002), en de reflectie-taak en Dromen draaien bij voorkeur tijdens de slaap. Slapen wordt het moment waarop het wezen zijn ervaringen verwerkt.
 - **Datamodel:** `identity` is in fase 1 een singleton (`id = 1`); in fase 2 wordt het een tabel met één rij per wezen (plus een status wakker/slapend), en krijgen geheugens, Drijfveren en Dromen een verwijzing naar hun wezen. Dat raakt ADR-0003 niet: Grafschriften blijven los van alles.
@@ -196,7 +196,7 @@ Onderdeel van de bestaande Reflectie-bij-het-slapen (geen apart schema of schedu
 - Elke emotie = een keyframe-object (oogvorm/scale/pupil-offset per oog, mond-beziercurve, achtergrondkleur)
 - Bij een emotiewissel wordt getweend tussen huidig en doel-keyframe (\~300-500ms) voor een vloeiend, levend gevoel
 - **React + SVG**, met **Framer Motion** voor de interpolatie en evt. **Flubber** voor het morphen tussen wezenlijk verschillende oogvormen
-- Fase 1: webapp op de computer; fase 3: dezelfde app in kiosk-mode (Chromium) op het Pi-schermpje — geen herbouw nodig
+- Fase 1: webapp op de computer; fase 3: dezelfde app in kiosk-mode (Chromium) op een schermpje; fase 4: idem op de Pi — geen herbouw nodig
 
 **Koppeling met het brein:**
 
@@ -220,18 +220,18 @@ Onderdeel van de bestaande Reflectie-bij-het-slapen (geen apart schema of schedu
 - **STT:** Deepgram
 - **TTS:** ElevenLabs voor speciale/emotionele momenten (meerdere stemmen, hoge kwaliteit); een goedkopere stem (bv. Deepgram Aura) voor alledaagse babbel, als kostenhefboom
 
-**Later voordeel (fase 3):** het robotje zit als "participant" in een LiveKit-room, waardoor een telefoon/webapp later kan meeluisteren/kijken of het op afstand aansturen — handig voor debugging op de Pi.
+**Later voordeel (fase 4):** het robotje zit als "participant" in een LiveKit-room, waardoor een telefoon/webapp later kan meeluisteren/kijken of het op afstand aansturen — handig voor debugging op de Pi.
 
 ## Zicht/camera
 
-*Fase 3, samen met de Pi-hardware en het hoofdvolggedrag.*
+*Fase 3 (camera, perceptie en vision); het hoofdvolggedrag volgt in fase 4, samen met de Pi-hardware.*
 
 Twee sporen, te combineren:
 
 - **Type1 — snelle, continue detectie:** lokale CV via **MediaPipe** (lichte JS/WASM-variant, draait in Node zonder aparte service) voor gezichtsdetectie/aanwezigheid/beweging op 10-30fps. Triggert pas de dure Type2-vision-call wanneer iets écht interessant is.
 - **Type2 — de volledige interpretatie:** multimodale LLM-input (Claude/GPT/Gemini kunnen beelden direct verwerken via dezelfde Vercel AI SDK) om een scène te beschrijven/duiden wanneer Type1 groen licht geeft.
 
-**Hoofdvolggedrag (fase 3, Pi):** Type1-taak (face/object-detectie → coördinaat → pan/tilt-hoek voor servo's), volledig los van het Type2-brein, continue feedback-loop zonder LLM-call per frame. Audio-richting (indien microfoon-array) kan voorrang geven op wat de camera ziet.
+**Hoofdvolggedrag (fase 4, Pi):** Type1-taak (face/object-detectie → coördinaat → pan/tilt-hoek voor servo's), volledig los van het Type2-brein, continue feedback-loop zonder LLM-call per frame. Audio-richting (indien microfoon-array) kan voorrang geven op wat de camera ziet.
 
 *Indien de CV-behoefte later zwaarder wordt dan MediaPipe aankan (bv. YOLO), dan als aparte Python-microservice ernaast — breekt de Node-architectuur niet, wordt gewoon een extra "sense"-service.*
 
@@ -278,8 +278,8 @@ Twee sporen, te combineren:
 | Kostenmonitoring | Langfuse (zelf gehost) |
 | Vision — Type1 | MediaPipe (JS/WASM) |
 | Vision — Type2 | Multimodale LLM-call via Vercel AI SDK |
-| Motoraansturing (Pi, fase 3) | johnny-five (Node.js GPIO/robotica) |
-| Schermpje (Pi, fase 3) | Chromium in kiosk-mode, zelfde gezichtje-app |
+| Motoraansturing (Pi, fase 4) | johnny-five (Node.js GPIO/robotica) |
+| Schermpje (fase 3, Pi vanaf fase 4) | Chromium in kiosk-mode, zelfde gezichtje-app |
 | Testing | Vitest |
 | Infrastructuur | Coolify op Hetzner, achter Cloudflare (bestaande setup) |
 
@@ -289,7 +289,9 @@ Twee sporen, te combineren:
 
 **Fase 2 — uitbreiding op de computer:** volledige feature-set (dromen, verjaardag, nieuwsgierigheid, zelf geluiden, doodle-modus, levendige idle-animatie) + karakterevolutie via de reflectie-loop (basis voor de dromen), inclusief een MBTI-persoonlijkheid met traag verschuivende assen (spraakzaamheid via I/E, initiatief afgeleid van N/P) + Langfuse-kostenmonitoring (uitgesteld, nog niet gebouwd) + handmatige overrides (emotie forceren, herinnering toevoegen/verwijderen) in het dashboard + meerdere wezens, te beheren via het dashboard (tot leven wekken, wakker maken, laten slapen, doden) + Drijfveren (wensen, doelen, toekomstdromen, afkeren, ergernissen) + emotie als reactie van het wezen, met een uitdovende stemming die de toon van Type2 kleurt.
 
-**Fase 3 — Raspberry Pi + motoren:** Alles porteren naar de Pi, camera + MediaPipe (Type1-perceptie) en multimodale Type2-vision (verschoven uit fase 2: de camera hoort bij de hardware en het hoofdvolggedrag), motoraansturing (johnny-five) gekoppeld aan de tool-laag, hoofdvolggedrag via servo's, schermpje in kiosk-mode voor het gezichtje, ervaringsgeheugen voor fysieke acties, veiligheidslaag (Type1) voor motorbewegingen, privacy-maatregelen (mute-knop, luister-indicator, wake-word), optioneel per-persoon-geheugen (stem/gezicht-herkenning), modelwissel-experiment (Type2-model wisselen vanuit het dashboard).
+**Fase 3 — zintuigen, privacy & dashboard:** camera + MediaPipe (Type1-perceptie) en multimodale Type2-vision (verschoven uit fase 2), zodat de Type1-initiatiefcheck ook op een onbekend object in beeld kan triggeren + schermpje in kiosk-mode voor het gezichtje + privacy-maatregelen (mute-knop, luister-indicator, wake-word) + per-persoon-geheugen (stem-/gezichtsherkenning, meerdere gebruikers) + modelwissel-experiment (Type2-model wisselen vanuit het dashboard) + BullMQ + Redis voor achtergrondtaken (retries/backoff/meerdere workers) + een mooi, overzichtelijk dashboard.
+
+**Fase 4 — Raspberry Pi + motoren:** Alles porteren naar de Pi, motoraansturing (johnny-five) gekoppeld aan de tool-laag, hoofdvolggedrag via servo's, ervaringsgeheugen voor fysieke acties, veiligheidslaag (Type1) voor motorbewegingen.
 
 ## Open vragen & nog te beslissen punten
 

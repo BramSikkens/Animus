@@ -1,13 +1,13 @@
 // Browser-veilig: geen node-imports. De face-app én de agent delen dit contract (ADR-0018, CONTEXT.md: Waarneming).
 export const PERCEPTION_TOPIC = "waarneming";
 
-/** Goedkoop, continu Type1-event uit de camera (CONTEXT.md: Waarneming). "nieuw-object" volgt pas in #87. */
+/** Goedkoop, continu Type1-event uit de camera (CONTEXT.md: Waarneming). */
 export type Waarneming = { soort: "aanwezig" } | { soort: "afwezig" } | { soort: "nieuw-object"; object: string };
 
 /** Aanleiding voor de agent om de initiatiefcheck uit te lokken (considerInitiative). */
 export type Aanleiding = { soort: "terug" } | { soort: "nieuw-object"; object: string };
 
-// COCO-labels: lowercase woorden, gescheiden door spaties (het label komt later in prompts, #87).
+// COCO-labels: lowercase woorden, gescheiden door spaties (het label komt in prompts, #87).
 const OBJECT_PATTERN = /^[a-z][a-z ]{0,29}$/;
 
 /** Trust boundary: valideert een Waarneming die over het datachannel binnenkomt. */

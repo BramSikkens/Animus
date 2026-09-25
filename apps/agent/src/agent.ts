@@ -36,7 +36,7 @@ import { createStateRepublisher, emotionMessageFor, withFaceExpressiveness } fro
 import { createCommandHandler, galleryMessageFor, MAX_GRAVES } from "./gallery-commands.js";
 import { createFrameSource } from "./frame-source.js";
 import { createInitiativeTimer, initiativeIntervalMs, parseInitiativeMinutes } from "./initiative-timer.js";
-import { createPerception, parseReturnAfterMinutes } from "./perception.js";
+import { createPerception, parseLookCooldownMinutes, parseReturnAfterMinutes } from "./perception.js";
 import { createReflectionDisplay } from "./reflection-display.js";
 import { createSilenceTimer, parseSilenceMinutes } from "./silence-timer.js";
 import { voiceSettingsFor } from "@animus/brain/voice-emotion";
@@ -302,7 +302,10 @@ export default defineAgent<AgentUserData>({
     // afwezigheid lokt de check meteen uit met de aanleiding "terug".
     const returnAfterConfig = parseReturnAfterMinutes(process.env.RETURN_AFTER_MINUTES);
     if (returnAfterConfig.warning) console.warn(returnAfterConfig.warning);
-    const perception = createPerception({ now: Date.now, returnAfterMs: returnAfterConfig.ms });
+    // Spontaan Kijken (#87): een nieuw object lokt de initiatiefcheck uit, begrensd door deze cooldown.
+    const lookCooldownConfig = parseLookCooldownMinutes(process.env.SPONTANEOUS_LOOK_COOLDOWN_MINUTES);
+    if (lookCooldownConfig.warning) console.warn(lookCooldownConfig.warning);
+    const perception = createPerception({ now: Date.now, returnAfterMs: returnAfterConfig.ms, lookCooldownMs: lookCooldownConfig.ms });
     let initiativeAxes: ReturnType<typeof rowAxes> = null;
     let initiativeMoodFactor = 1;
     const refreshInitiativeAxes = async (): Promise<void> => {

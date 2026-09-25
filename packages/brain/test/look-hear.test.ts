@@ -108,6 +108,21 @@ async function hear(brain: ReturnType<typeof createBrain>, text: string): Promis
   for await (const _ of brain.hear(text)) void _;
 }
 
+async function hearInitiatief(brain: ReturnType<typeof createBrain>, text: string): Promise<void> {
+  for await (const _ of brain.hear(text, { initiatief: true })) void _;
+}
+
+// Type1-mock voor considerInitiative (spreken/onderwerp), los van de classify-mock hierboven: hear(initiatief:true)
+// roept classify() niet aan, dus dit is de enige vraag die dit model hoeft te beantwoorden.
+function initiativeType1(spreken: "ja" | "nee") {
+  return new Experimental_EvaluationMockModelV4({
+    doEvaluate: async () => ({
+      answers: { spreken: { type: "choice", choice: spreken }, onderwerp: { type: "choice", choice: "vrij" } },
+      warnings: [],
+    }),
+  });
+}
+
 async function hearEvents(brain: ReturnType<typeof createBrain>, text: string): Promise<BrainEvent[]> {
   const events: BrainEvent[] = [];
   for await (const event of brain.hear(text)) events.push(event);
@@ -379,5 +394,83 @@ describe("Kijk-tool in hear() (vangnet, ADR-0019)", () => {
     expect(countAllImages(t2.calls[2]!.prompt)).toBe(0);
     expect(JSON.stringify(t2.calls[2]!.prompt)).toContain("Dit zie je nu door je camera");
     expect(JSON.stringify(t2.calls[2]!.prompt)).toContain("(beeld niet bewaard)");
+  });
+});
+
+describe("Spontaan Kijken: considerInitiative(nieuw-object) wordt een Kijk-beurt in hear(initiatief) (#87)", () => {
+  it("ja: de initiatiefbeurt bevat precies 1 beeld, de kijk-tool wordt niet aangeboden, en de instructie noemt het object", async () => {
+    await insertDynimo();
+    const t2 = type2();
+    const brain = createBrain({
+      db,
+      embedder: embedder(),
+      type1: initiativeType1("ja"),
+      type2: { light: t2.model, heavy: t2.model },
+      now: () => now,
+      random: () => 0.99,
+      lookFrame: async () => FRAME,
+    });
+
+    const instructie = await brain.considerInitiative({ soort: "nieuw-object", object: "cat" });
+    expect(instructie).toContain("cat");
+
+    await hearInitiatief(brain, instructie!);
+    expect(countImages(t2.prompts[0])).toBe(1);
+    expect(toolNames(t2.calls[0])).not.toContain("kijk");
+  });
+
+  it("een volgende initiatiefbeurt heeft 0 beelden: de vlag is verbruikt", async () => {
+    await insertDynimo();
+    const t2 = type2();
+    const brain = createBrain({
+      db,
+      embedder: embedder(),
+      type1: initiativeType1("ja"),
+      type2: { light: t2.model, heavy: t2.model },
+      now: () => now,
+      random: () => 0.99,
+      lookFrame: async () => FRAME,
+    });
+
+    const instructie = await brain.considerInitiative({ soort: "nieuw-object", object: "cat" });
+    await hearInitiatief(brain, instructie!);
+    await hearInitiatief(brain, "Je begint uit jezelf een gesprek.");
+    expect(countImages(t2.prompts[1])).toBe(0);
+  });
+
+  it("nee: geen pending Kijk", async () => {
+    await insertDynimo();
+    const t2 = type2();
+    const brain = createBrain({
+      db,
+      embedder: embedder(),
+      type1: initiativeType1("nee"),
+      type2: { light: t2.model, heavy: t2.model },
+      now: () => now,
+      random: () => 0.99,
+      lookFrame: async () => FRAME,
+    });
+
+    expect(await brain.considerInitiative({ soort: "nieuw-object", object: "cat" })).toBeNull();
+    await hearInitiatief(brain, "Je begint uit jezelf een gesprek.");
+    expect(countImages(t2.prompts[0])).toBe(0);
+  });
+
+  it("aanleiding 'terug' + ja: de initiatiefbeurt heeft geen beeld", async () => {
+    await insertDynimo();
+    const t2 = type2();
+    const brain = createBrain({
+      db,
+      embedder: embedder(),
+      type1: initiativeType1("ja"),
+      type2: { light: t2.model, heavy: t2.model },
+      now: () => now,
+      random: () => 0.99,
+      lookFrame: async () => FRAME,
+    });
+
+    const instructie = await brain.considerInitiative({ soort: "terug" });
+    await hearInitiatief(brain, instructie!);
+    expect(countImages(t2.prompts[0])).toBe(0);
   });
 });

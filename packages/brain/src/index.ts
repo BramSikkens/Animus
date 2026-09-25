@@ -109,6 +109,8 @@ export type Brain = {
    * lopende Reflectie: altijd null. Gooit nooit; wijzigt nooit de status van een Doel.
    * Met `aanleiding` (een Waarneming, ADR-0018) krijgt Type1 die als extra context; bij "ja" gaat de aanleiding
    * vóór Spontane herinnering en Droom (die worden dan niet gekozen) en verwerkt de instructie de aanleiding.
+   * Bij aanleiding "nieuw-object" en "ja" wordt de eerstvolgende `hear(..., { initiatief: true })` een Kijk-beurt
+   * (het beeld gaat mee, ADR-0019).
    */
   considerInitiative(aanleiding?: Aanleiding): Promise<string | null>;
   /**
@@ -439,6 +441,9 @@ export function createBrain(deps: {
   let pendingSpontaneousId: number | undefined;
   // Idem voor een Droom die considerInitiative koos (verteld = told_at).
   let pendingDreamId: number | undefined;
+  // considerInitiative(nieuw-object) + "ja" zet dit; de eerstvolgende hear(..., { initiatief: true }) verbruikt
+  // het als `kijken` (ADR-0019): zo gaat het beeld mee in precies die ene initiatiefbeurt.
+  let pendingLook = false;
 
   async function genesis(): Promise<{ dynimo: typeof dynimos.$inferInsert; drives: DrivesOutput; voice: { voice: string; description: string } | null }> {
     const seed = pickSeed(random);
@@ -680,6 +685,7 @@ ${fresh.map((memory) => `- (indruk ${memory.impression}) ${memory.text}`).join("
     lastOpinionTurn = undefined;
     pendingSpontaneousId = undefined;
     pendingDreamId = undefined;
+    pendingLook = false;
   }
 
   // Een andere Wakker-generatie (andere Dynimo of nieuwe awake_since) is een nieuwe sessie.
@@ -1049,8 +1055,12 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
       }
     }
     const canLook = deps.lookFrame !== undefined;
+    // Een initiatiefbeurt verbruikt pendingLook meteen (ADR-0019: hoogstens één Kijk per aanleiding); zonder
+    // lookFrame-dep nooit kijken, ook al stond de vlag klaar (considerInitiative weet niets van canLook).
+    const initiatiefKijken = canLook && pendingLook;
+    if (options.initiatief) pendingLook = false;
     const { deltas: type1Deltas, indruk, intent, kijken } = await (options.initiatief
-      ? Promise.resolve<Type1Result>({ deltas: {}, indruk: 0.2, intent: "simpel", kijken: false })
+      ? Promise.resolve<Type1Result>({ deltas: {}, indruk: 0.2, intent: "simpel", kijken: initiatiefKijken })
       : classify(deps.type1, text, context, canLook)
     ).catch((error: unknown): Type1Result => {
       console.warn("Type1 faalde, val terug op geen delta/simpel:", error instanceof Error ? error.message : error);
@@ -1319,6 +1329,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     if (!awake) return null;
     adopt(awake); // wisselen wist de pending-ids van de vorige Dynimo vóór we die van deze zetten
     try {
+      pendingLook = false; // enkel "ja" + nieuw-object hieronder zet hem weer aan
       const driveRows = await loadDrives(awake.id);
       const mood = moodOfRow(awake, now());
       const hasGoal = driveRows.some((drive) => drive.kind === "doel" && isActiveDrive(drive));
@@ -1355,6 +1366,8 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
       if (aanleiding) {
         pendingSpontaneousId = undefined;
         pendingDreamId = undefined;
+        // Een nieuw object wordt de eerstvolgende initiatiefbeurt een Kijk-beurt (ADR-0019); "terug" niet.
+        pendingLook = aanleiding.soort === "nieuw-object";
         return `Je begint uit jezelf een gesprek: ${aanleidingText(aanleiding)}. ${
           aanleiding.soort === "terug" ? "Begroet de Gesprekspartner kort, op je eigen manier." : "Reageer daar kort en nieuwsgierig op, op je eigen manier."
         }`;

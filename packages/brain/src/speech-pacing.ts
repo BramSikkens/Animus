@@ -5,7 +5,7 @@ import { strength, type MoodValues } from "./mood.js";
 
 export type Pacing = { pauseLevel: 0 | 1 | 2; speedFactor: number; /** bang: extra '…' bij komma's. */ halting: boolean };
 
-/** Onder deze gewogen waarde (waarde/100 × expressiviteit) van de dominante Emotie blijft alles neutraal. */
+/** Onder deze gewogen waarde (strength × expressiviteit) van de dominante Emotie blijft alles neutraal. */
 export const PACING_MIN_WEIGHT = 0.25;
 
 /** Tempo-verschuiving bij gewicht 1 en pauzeniveau (1 = kort, 2 = lang) per Emotie. */

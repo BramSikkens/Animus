@@ -89,6 +89,37 @@ function toolThenTextModel(toolName: string, input: object, answer: string) {
   });
 }
 
+// Roept dezelfde tool tweemaal aan binnen één beurt (multi-step), dan pas tekst: simuleert een model dat
+// leerKennen per ongeluk twee keer aanroept.
+function toolTwiceThenTextModel(toolName: string, firstInput: object, secondInput: object, answer: string) {
+  const step = (toolCallId: string, input: object) => ({
+    stream: simulateReadableStream({
+      chunks: [
+        { type: "stream-start" as const, warnings: [] },
+        { type: "tool-call" as const, toolCallId, toolName, input: JSON.stringify(input) },
+        { type: "finish" as const, usage: NULL_USAGE, finishReason: TOOL_CALLS },
+      ],
+    }),
+  });
+  return new MockLanguageModelV4({
+    doStream: [
+      step("call-1", firstInput),
+      step("call-2", secondInput),
+      {
+        stream: simulateReadableStream({
+          chunks: [
+            { type: "stream-start" as const, warnings: [] },
+            { type: "text-start" as const, id: "1" },
+            { type: "text-delta" as const, id: "1", delta: answer },
+            { type: "text-end" as const, id: "1" },
+            { type: "finish" as const, usage: NULL_USAGE, finishReason: STOP },
+          ],
+        }),
+      },
+    ],
+  });
+}
+
 const brainWith = (model: MockLanguageModelV4, random = () => 0.99) =>
   createBrain({ db, embedder: embedder(), type1: type1(), type2: { light: model, heavy: model }, now: () => now, random });
 
@@ -206,6 +237,87 @@ describe("leerKennen (#92)", () => {
     const brain = brainWith(model);
     await drain(brain.hear("Ik heet ", { gesprekspartner: null }));
     expect(await db.select().from(persons)).toHaveLength(0);
+  });
+
+  it("naam met cijfers of symbolen: tool-fout, geen Persoon aangemaakt", async () => {
+    await insertDynimo();
+    const model = toolThenTextModel("leerKennen", { naam: "Anna123" }, "Oh.");
+    const brain = brainWith(model);
+    await drain(brain.hear("Ik heet Anna123", { gesprekspartner: null }));
+    expect(await db.select().from(persons)).toHaveLength(0);
+  });
+
+  it("naam met accenten, koppelteken en apostrof is geldig", async () => {
+    await insertDynimo();
+    const model = toolThenTextModel("leerKennen", { naam: "Anne-José O'Brien" }, "Hoi!");
+    const brain = brainWith(model);
+    await drain(brain.hear("Ik heet Anne-José O'Brien", { gesprekspartner: null }));
+    expect(await db.select().from(persons)).toHaveLength(1);
+  });
+
+  it("een tweede leerKennen-aanroep binnen dezelfde beurt maakt geen tweede Persoon", async () => {
+    await insertDynimo();
+    const model = toolTwiceThenTextModel("leerKennen", { naam: "Anna" }, { naam: "Bert" }, "Hoi!");
+    const brain = brainWith(model);
+
+    const events: unknown[] = [];
+    for await (const event of brain.hear("Ik heet Anna", { gesprekspartner: null })) events.push(event);
+
+    expect(await db.select().from(persons)).toHaveLength(1);
+    const persoonEvents = events.filter((event) => (event as { type: string }).type === "persoon");
+    expect(persoonEvents).toHaveLength(1);
+    expect(events).toContainEqual(expect.objectContaining({ toolName: "leerKennen", output: { algekend: true } }));
+  });
+
+  it("een latere, andere onbekende in dezelfde sessie koppelt enkel de Herinneringen van ná de vorige kennismaking", async () => {
+    await insertDynimo();
+    // Eén model, drie opeenvolgende beurten in dezelfde brain-sessie: leerKennen(Anna), een gewone (nog steeds
+    // onbekende) tussenbeurt, dan leerKennen(Bert). unknownSessionMemoryIds hoort na Anna geleegd te zijn, zodat
+    // Bert niet ook Anna's al-gekoppelde Herinnering krijgt.
+    const step = (toolCall?: { toolName: string; input: object }, text = "Hoi!") =>
+      toolCall
+        ? {
+            stream: simulateReadableStream({
+              chunks: [
+                { type: "stream-start" as const, warnings: [] },
+                { type: "tool-call" as const, toolCallId: `call-${toolCall.toolName}-${text}`, toolName: toolCall.toolName, input: JSON.stringify(toolCall.input) },
+                { type: "finish" as const, usage: NULL_USAGE, finishReason: TOOL_CALLS },
+              ],
+            }),
+          }
+        : {
+            stream: simulateReadableStream({
+              chunks: [
+                { type: "stream-start" as const, warnings: [] },
+                { type: "text-start" as const, id: "1" },
+                { type: "text-delta" as const, id: "1", delta: text },
+                { type: "text-end" as const, id: "1" },
+                { type: "finish" as const, usage: NULL_USAGE, finishReason: STOP },
+              ],
+            }),
+          };
+    const model = new MockLanguageModelV4({
+      doStream: [
+        step({ toolName: "leerKennen", input: { naam: "Anna" } }),
+        step(undefined, "Hoi Anna!"),
+        step(undefined, "Oké"),
+        step({ toolName: "leerKennen", input: { naam: "Bert" } }),
+        step(undefined, "Hoi Bert!"),
+      ],
+    });
+    const brain = brainWith(model);
+
+    await drain(brain.hear("Ik heet Anna", { gesprekspartner: null }));
+    const anna = (await db.select().from(persons).where(eq(persons.name, "Anna")))[0]!;
+    await drain(brain.hear("Nog een vraag", { gesprekspartner: null }));
+    await drain(brain.hear("Ik heet Bert", { gesprekspartner: null }));
+    const bert = (await db.select().from(persons).where(eq(persons.name, "Bert")))[0]!;
+
+    const annaMemories = await db.select().from(memories).where(eq(memories.personId, anna.id));
+    const bertMemories = await db.select().from(memories).where(eq(memories.personId, bert.id));
+    expect(annaMemories.length).toBeGreaterThan(0);
+    expect(bertMemories.length).toBeGreaterThan(0);
+    for (const memory of bertMemories) expect(memory.personId).not.toBe(anna.id);
   });
 });
 

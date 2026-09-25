@@ -1,17 +1,10 @@
-// Int16Array<ArrayBufferLike>: subarray() geeft dat type terug, niet het striktere Int16Array<ArrayBuffer>.
-type Int16Buf = Int16Array<ArrayBufferLike>;
-
-function concatInt16(a: Int16Buf, b: Int16Buf): Int16Buf {
-  const out = new Int16Array(a.length + b.length);
-  out.set(a, 0);
-  out.set(b, a.length);
-  return out;
-}
+import { concatInt16, type Int16Buf } from "./pcm.js";
 
 /**
  * Buffert PCM-frames terwijl de Gesprekspartner spreekt (stemherkenning, #92): een korte pre-roll (frames van
- * vlak vóór het spreken) zodat het begin van de uiting niet verloren gaat, met een bovengrens zodat een lang
- * openstaande "speaking"-toestand niet onbeperkt geheugen opeet.
+ * vlak vóór het spreken) zodat het begin van de uiting niet verloren gaat, met een bovengrens die de NIEUWSTE
+ * audio bewaart (oudste frames vallen weg) zodat een lang openstaande "speaking"-toestand niet onbeperkt
+ * geheugen opeet en de meest recente (dus relevantste) audio niet verliest.
  */
 export function createSpeechAudioBuffer({ prerollSamples, maxSamples }: { prerollSamples: number; maxSamples: number }): {
   /** Eén frame; `speaking` is `session.userState === "speaking"` op het moment van dit frame. */
@@ -20,8 +13,23 @@ export function createSpeechAudioBuffer({ prerollSamples, maxSamples }: { prerol
   drain(): Int16Buf;
 } {
   let preroll: Int16Buf = new Int16Array(0);
-  let speech: Int16Buf[] = [];
-  let speechSamples = 0;
+  let chunks: Int16Buf[] = [];
+  let total = 0;
+
+  // Verwijdert oudste chunks/samples tot de buffer weer binnen maxSamples past.
+  function trimToCap(): void {
+    while (total > maxSamples && chunks.length > 0) {
+      const excess = total - maxSamples;
+      const first = chunks[0]!;
+      if (first.length <= excess) {
+        chunks.shift();
+        total -= first.length;
+      } else {
+        chunks[0] = first.subarray(excess);
+        total -= excess;
+      }
+    }
+  }
 
   return {
     push(frame, speaking) {
@@ -30,18 +38,25 @@ export function createSpeechAudioBuffer({ prerollSamples, maxSamples }: { prerol
         preroll = combined.length > prerollSamples ? combined.subarray(combined.length - prerollSamples) : combined;
         return;
       }
-      if (speech.length === 0) speech.push(preroll);
-      const room = maxSamples - speechSamples;
-      if (room <= 0) return;
-      const toAdd = frame.length > room ? frame.subarray(0, room) : frame;
-      speech.push(toAdd);
-      speechSamples += toAdd.length;
+      if (chunks.length === 0 && total === 0) {
+        chunks.push(preroll);
+        total += preroll.length;
+      }
+      chunks.push(frame);
+      total += frame.length;
+      trimToCap();
     },
     drain() {
-      const combined = speech.reduce(concatInt16, new Int16Array(0));
-      speech = [];
-      speechSamples = 0;
-      return combined;
+      // Eén allocatie op de totale lengte i.p.v. een concat per chunk (O(n) i.p.v. O(n²)).
+      const out = new Int16Array(total);
+      let offset = 0;
+      for (const chunk of chunks) {
+        out.set(chunk, offset);
+        offset += chunk.length;
+      }
+      chunks = [];
+      total = 0;
+      return out;
     },
   };
 }

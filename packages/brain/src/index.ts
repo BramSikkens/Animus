@@ -369,13 +369,14 @@ const UNKNOWN_NAME_PROMPT: SystemModelMessage = {
   content: "Je kent de persoon die nu praat nog niet. Vraag vriendelijk hoe die heet; noemt die een naam, gebruik dan leerKennen. Wil die zijn naam niet geven, dring dan niet aan.",
 };
 
-// leerKennen (#92): getrimd, 1–40 tekens, geen regeleinden.
+// leerKennen (#92): getrimd, 1–40 tekens, enkel letters (met accenten), spatie, koppelteken en apostrof.
+const NAAM_PATTERN = /^[\p{L}' -]+$/u;
 const NAAM_SCHEMA = z
   .string()
   .trim()
   .min(1)
   .max(40)
-  .refine((naam) => !/[\r\n]/.test(naam), { message: "geen regeleinden" });
+  .regex(NAAM_PATTERN, { message: "ongeldige tekens in naam" });
 
 // De tegenpool remt vanzelf af (ADR-0015); Type1 hoeft die niet ook nog omlaag te scoren.
 const pairHint = (emotion: Emotion) => {
@@ -1059,15 +1060,18 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     return owner!.id;
   }
 
-  // leerKennen (#92): maakt de Persoon aan en koppelt de onbekende-Herinneringen van déze sessie eraan.
+  // leerKennen (#92): maakt de Persoon aan en koppelt de onbekende-Herinneringen van déze sessie eraan. Leegt
+  // de lijst nadien: een latere, andere onbekende Gesprekspartner (nieuwe bezoeker) in dezelfde sessie mag deze
+  // al-gekoppelde Herinneringen niet nog eens meekrijgen bij zíjn leerKennen.
   async function leerKennenPersoon(naam: string): Promise<{ id: number; name: string }> {
-    return deps.db.transaction(async (tx) => {
-      const [created] = await tx.insert(persons).values({ name: naam }).returning();
-      if (unknownSessionMemoryIds.length) {
-        await tx.update(memories).set({ personId: created!.id }).where(inArray(memories.id, unknownSessionMemoryIds));
-      }
-      return created!;
+    const linked = [...unknownSessionMemoryIds];
+    const created = await deps.db.transaction(async (tx) => {
+      const [row] = await tx.insert(persons).values({ name: naam }).returning();
+      if (linked.length) await tx.update(memories).set({ personId: row!.id }).where(inArray(memories.id, linked));
+      return row!;
     });
+    unknownSessionMemoryIds.length = 0;
+    return created;
   }
 
   // Vertrouwdheid van (dynimo, persoon), of 0.2 als die rij ontbreekt (nieuwe Dynimo, of nooit geschreven).
@@ -1350,13 +1354,17 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
 
     // leerKennen (#92): enkel aangeboden als de Gesprekspartner van déze beurt onbekend is. `personId` wordt bij
     // succes herbonden, zodat de rest van deze beurt (waaronder de eind-Herinnering) de nieuwe Persoon krijgt.
+    // Guard binnen deze beurt: een tweede aanroep (multi-step) maakt geen tweede Persoon.
+    let leerKennenGebruikt = false;
     const leerKennenTools: ToolSet =
       personId === null
         ? {
             leerKennen: tool({
               description: "Maakt een nieuwe Persoon aan voor wie nu met je praat, zodra die zijn naam geeft.",
               inputSchema: z.object({ naam: NAAM_SCHEMA }),
-              execute: async ({ naam }) => {
+              execute: async ({ naam }): Promise<{ personId: number; naam: string } | { algekend: true }> => {
+                if (leerKennenGebruikt) return { algekend: true };
+                leerKennenGebruikt = true;
                 const created = await leerKennenPersoon(naam);
                 personId = created.id;
                 return { personId: created.id, naam: created.name };
@@ -1454,8 +1462,9 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
           if (kijkFrame) yield { type: "kijk" };
           const output = part.toolName === "kijk" ? { gezien: kijkFrame !== null } : part.output;
           yield { type: "tool-result", toolName: part.toolName, output };
-          // #92: leerKennen slaagde; de agent kan hierop het stemprofiel beginnen opbouwen.
-          if (part.toolName === "leerKennen") {
+          // #92: leerKennen slaagde (niet bij een herhaalde aanroep, "algekend"); de agent kan hierop het
+          // stemprofiel beginnen opbouwen.
+          if (part.toolName === "leerKennen" && output && typeof output === "object" && "personId" in output) {
             const { personId: newPersonId, naam } = output as { personId: number; naam: string };
             yield { type: "persoon", personId: newPersonId, naam };
           }

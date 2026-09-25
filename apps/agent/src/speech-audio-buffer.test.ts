@@ -15,11 +15,27 @@ describe("createSpeechAudioBuffer", () => {
     expect(Array.from(buffer.drain())).toEqual([]);
   });
 
-  it("cap op maxSamples: latere samples worden afgekapt", () => {
+  it("cap op maxSamples: de OUDSTE samples vallen weg, de nieuwste blijven", () => {
     const buffer = createSpeechAudioBuffer({ prerollSamples: 0, maxSamples: 3 });
     buffer.push(new Int16Array([1, 2]), true);
-    buffer.push(new Int16Array([3, 4]), true); // zou 4 samples maken; blijft op 3 (het laatste sample past niet meer)
-    expect(Array.from(buffer.drain())).toEqual([1, 2, 3]);
+    buffer.push(new Int16Array([3, 4]), true); // zou 4 samples maken; de oudste (1) valt weg
+    expect(Array.from(buffer.drain())).toEqual([2, 3, 4]);
+  });
+
+  it("cap: een frame groter dan de hele cap laat enkel het nieuwste stuk over", () => {
+    const buffer = createSpeechAudioBuffer({ prerollSamples: 0, maxSamples: 2 });
+    buffer.push(new Int16Array([1, 2, 3, 4, 5]), true);
+    expect(Array.from(buffer.drain())).toEqual([4, 5]);
+  });
+
+  it("veel kleine frames: drain geeft alles in volgorde (O(n)-pad, geen kwadratische heropbouw)", () => {
+    const buffer = createSpeechAudioBuffer({ prerollSamples: 0, maxSamples: 100_000 });
+    const frameCount = 2000;
+    for (let i = 0; i < frameCount; i++) buffer.push(new Int16Array([i]), true);
+    const drained = buffer.drain();
+    expect(drained.length).toBe(frameCount);
+    expect(drained[0]).toBe(0);
+    expect(drained[frameCount - 1]).toBe(frameCount - 1);
   });
 
   it("drain leegt de buffer", () => {

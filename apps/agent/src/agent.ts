@@ -118,6 +118,9 @@ class AnimusAgent extends voice.Agent {
   // ponytail: hoogstens één lopende inschrijving tegelijk (een scalar, geen wachtrij); twee tegelijk leren kennen
   // in dezelfde sessie komt in de praktijk niet voor.
   #enrollingPersonId: number | undefined;
+  // In-flight-guard: voorkomt dat een tweede, snel opvolgende beurt een nieuwe enroll()-aanroep start terwijl de
+  // vorige nog loopt (die kan de profiler intern al hebben afgerond en losgelaten).
+  #enrolling = false;
 
   constructor(
     brain: Brain,
@@ -148,26 +151,45 @@ class AnimusAgent extends voice.Agent {
       item.type === "message" && item.role === "user";
     const initiative = this.#pendingInitiative;
     this.#pendingInitiative = undefined;
+
+    // Altijd draineren zodra er een speaker-module is — ook bij initiatief of een overgeslagen beurt (geen tekst)
+    // — anders lekt audio van een periode die niet gebruikt werd door naar een latere identify/enroll.
+    const pcm = this.#speaker?.audio.drain();
+
     const text = initiative ?? chatCtx.items.filter(isUserMessage).at(-1)?.textContent;
     if (!text) return null;
     this.#onUtterance();
 
     // Stemherkenning (#92): enkel bij een echte beurt (niet bij initiatief, dan spreekt de Dynimo zelf).
     let gesprekspartner: number | null | undefined;
-    if (this.#speaker && initiative === undefined) {
-      const pcm = this.#speaker.audio.drain();
-      const identified = pcm.length > 0 ? this.#speaker.speakerId.identify(pcm) : null;
+    if (this.#speaker && initiative === undefined && pcm) {
+      let identified: { personId: number; score: number } | null = null;
+      if (pcm.length > 0) {
+        try {
+          identified = this.#speaker.speakerId.identify(pcm);
+        } catch (error) {
+          // Nooit de beurt breken op een identificatiefout: gedraagt zich als geen match (onbekend/eigenaar-regel).
+          console.warn("Stem identificeren faalde:", error instanceof Error ? error.message : error);
+        }
+      }
       gesprekspartner = decideGesprekspartner({ voice: identified && { personId: identified.personId, sure: true } });
       // Onzeker terwijl er een inschrijving loopt: dan is dit hoogstwaarschijnlijk nog steeds die Persoon (zijn
       // profiel is nog niet compleet genoeg om zichzelf te herkennen).
       if (identified === null && this.#enrollingPersonId !== undefined) gesprekspartner = this.#enrollingPersonId;
-      if (this.#enrollingPersonId !== undefined && pcm.length > 0) {
+      // Enkel voeden als déze beurt ook echt aan de ingeschreven Persoon werd toegeschreven (niet bv. een andere,
+      // al bekende stem die net het gesprek overnam), en niet terwijl een vorige enroll()-aanroep nog loopt.
+      if (gesprekspartner === this.#enrollingPersonId && this.#enrollingPersonId !== undefined && pcm.length > 0 && !this.#enrolling) {
+        const enrollingPersonId = this.#enrollingPersonId;
+        this.#enrolling = true;
         this.#speaker.speakerId
-          .enroll(this.#enrollingPersonId, pcm)
+          .enroll(enrollingPersonId, pcm)
           .then((status) => {
             if (status === "klaar") this.#enrollingPersonId = undefined;
           })
-          .catch((error: unknown) => console.warn("Stemprofiel opbouwen faalde:", error instanceof Error ? error.message : error));
+          .catch((error: unknown) => console.warn("Stemprofiel opbouwen faalde:", error instanceof Error ? error.message : error))
+          .finally(() => {
+            this.#enrolling = false;
+          });
       }
     }
 
@@ -265,8 +287,9 @@ export default defineAgent<AgentUserData>({
     if (speakerThreshold.warning) console.warn(speakerThreshold.warning);
     let speakerRecognition: { speakerId: SpeakerId; audio: ReturnType<typeof createSpeakerAudio> } | undefined;
     if (process.env.PICOVOICE_ACCESS_KEY) {
+      let speakerId: SpeakerId | undefined;
       try {
-        const speakerId = createEagleSpeakerId({
+        speakerId = createEagleSpeakerId({
           accessKey: process.env.PICOVOICE_ACCESS_KEY,
           threshold: speakerThreshold.threshold,
           loadProfiles: () => brain.voiceProfiles(),
@@ -276,6 +299,8 @@ export default defineAgent<AgentUserData>({
         const audio = createSpeakerAudio(ctx.room, () => session.userState === "speaking");
         speakerRecognition = { speakerId, audio };
       } catch (error) {
+        // reload() kan falen ná een geslaagde new Eagle(...): dan wél de native resources weer vrijgeven.
+        speakerId?.dispose();
         console.warn("Stemherkenning (Eagle) kon niet starten, blijft uit:", error instanceof Error ? error.message : error);
       }
     }

@@ -34,6 +34,8 @@ export function createFrameSource(room: Room): { latest(): Promise<Frame | null>
   let reader: ReadableStreamDefaultReader<VideoFrameEvent> | undefined;
   let lastFrame: VideoFrame | undefined;
   let muted = false;
+  // Enkel events van de actieve track tellen: een late unsubscribe/mute van een herladen tab mag de nieuwe niet sluiten.
+  let activeSid: string | undefined;
 
   function closeStream(): void {
     reader?.cancel().catch(() => {});
@@ -51,7 +53,7 @@ export function createFrameSource(room: Room): { latest(): Promise<Frame | null>
         for (;;) {
           const { done, value } = await own.read();
           if (done || reader !== own) return; // gesloten, of een nieuwere stream heeft deze vervangen
-          lastFrame = value.frame;
+          if (!muted) lastFrame = value.frame; // een frame dat na de mute binnenkomt, mag niet blijven hangen
         }
       } catch {
         // stream gesloten (closeStream/dispose): geen fout.
@@ -61,22 +63,23 @@ export function createFrameSource(room: Room): { latest(): Promise<Frame | null>
 
   const onSubscribed = (track: RemoteTrack, publication: RemoteTrackPublication, _participant: RemoteParticipant): void => {
     if (track.kind !== TrackKind.KIND_VIDEO) return;
+    activeSid = publication.sid;
     muted = publication.muted ?? false;
     openStream(track);
   };
-  const onUnsubscribed = (track: RemoteTrack): void => {
-    if (track.kind !== TrackKind.KIND_VIDEO) return;
+  const onUnsubscribed = (_track: RemoteTrack, publication: RemoteTrackPublication): void => {
+    if (publication.sid !== activeSid) return;
     closeStream();
   };
   // livekit-client's setCameraEnabled(false) mute't de track meestal i.p.v. te unpublishen; een slapende
   // Dynimo mag nooit het laatste frame van de vorige sessie leveren (privacy).
   const onMuted = (publication: TrackPublication, _participant: Participant): void => {
-    if (publication.kind !== TrackKind.KIND_VIDEO) return;
+    if (publication.sid !== activeSid) return;
     muted = true;
     lastFrame = undefined;
   };
   const onUnmuted = (publication: TrackPublication, _participant: Participant): void => {
-    if (publication.kind !== TrackKind.KIND_VIDEO) return;
+    if (publication.sid !== activeSid) return;
     muted = false;
   };
 

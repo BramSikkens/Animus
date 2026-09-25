@@ -39,6 +39,10 @@ import { createInitiativeTimer, initiativeIntervalMs, parseInitiativeMinutes } f
 import { createPerception, parseLookCooldownMinutes, parseReturnAfterMinutes } from "./perception.js";
 import { createReflectionDisplay } from "./reflection-display.js";
 import { createSilenceTimer, parseSilenceMinutes } from "./silence-timer.js";
+import { createEagleSpeakerId } from "./eagle-speaker-id.js";
+import { decideGesprekspartner } from "./gesprekspartner.js";
+import { parseSpeakerMatchThreshold, type SpeakerId } from "./speaker-id.js";
+import { createSpeakerAudio } from "./speaker-audio.js";
 import { voiceSettingsFor } from "@animus/brain/voice-emotion";
 import { pacingFor, withPacingSpeed } from "@animus/brain/speech-pacing";
 import { applyTtsEmotion, applyTtsVoice } from "./tts-voice.js";
@@ -109,9 +113,20 @@ class AnimusAgent extends voice.Agent {
   readonly #onUtterance: () => void;
   readonly #onMoodValues: (values: EmotionMessage["values"]) => void;
   readonly #getExpressiveness: () => number;
+  readonly #speaker: { speakerId: SpeakerId; audio: ReturnType<typeof createSpeakerAudio> } | undefined;
   #pendingInitiative: string | undefined;
+  // ponytail: hoogstens één lopende inschrijving tegelijk (een scalar, geen wachtrij); twee tegelijk leren kennen
+  // in dezelfde sessie komt in de praktijk niet voor.
+  #enrollingPersonId: number | undefined;
 
-  constructor(brain: Brain, room: JobContext["room"], onUtterance: () => void, onMoodValues: (values: EmotionMessage["values"]) => void, getExpressiveness: () => number = () => 0.5) {
+  constructor(
+    brain: Brain,
+    room: JobContext["room"],
+    onUtterance: () => void,
+    onMoodValues: (values: EmotionMessage["values"]) => void,
+    getExpressiveness: () => number = () => 0.5,
+    speaker?: { speakerId: SpeakerId; audio: ReturnType<typeof createSpeakerAudio> },
+  ) {
     // instructions is verplicht op voice.Agent, maar onbenut: llmNode hieronder draait i.p.v. het
     // ingebouwde LLM-pad de brein-kern.
     super({ instructions: "Animus", llm: new BrainPlaceholderLLM() });
@@ -120,6 +135,7 @@ class AnimusAgent extends voice.Agent {
     this.#onUtterance = onUtterance;
     this.#onMoodValues = onMoodValues;
     this.#getExpressiveness = getExpressiveness;
+    this.#speaker = speaker;
   }
 
   /** Zet een spontane uiting klaar; de eerstvolgende llmNode (via session.generateReply) draait die i.p.v. een user-turn. */
@@ -135,8 +151,32 @@ class AnimusAgent extends voice.Agent {
     const text = initiative ?? chatCtx.items.filter(isUserMessage).at(-1)?.textContent;
     if (!text) return null;
     this.#onUtterance();
+
+    // Stemherkenning (#92): enkel bij een echte beurt (niet bij initiatief, dan spreekt de Dynimo zelf).
+    let gesprekspartner: number | null | undefined;
+    if (this.#speaker && initiative === undefined) {
+      const pcm = this.#speaker.audio.drain();
+      const identified = pcm.length > 0 ? this.#speaker.speakerId.identify(pcm) : null;
+      gesprekspartner = decideGesprekspartner({ voice: identified && { personId: identified.personId, sure: true } });
+      // Onzeker terwijl er een inschrijving loopt: dan is dit hoogstwaarschijnlijk nog steeds die Persoon (zijn
+      // profiel is nog niet compleet genoeg om zichzelf te herkennen).
+      if (identified === null && this.#enrollingPersonId !== undefined) gesprekspartner = this.#enrollingPersonId;
+      if (this.#enrollingPersonId !== undefined && pcm.length > 0) {
+        this.#speaker.speakerId
+          .enroll(this.#enrollingPersonId, pcm)
+          .then((status) => {
+            if (status === "klaar") this.#enrollingPersonId = undefined;
+          })
+          .catch((error: unknown) => console.warn("Stemprofiel opbouwen faalde:", error instanceof Error ? error.message : error));
+      }
+    }
+
     // tool-*-events uit brain.hear() worden hier genegeerd (ticket #7).
-    return textStream(this.#brain.hear(text, { initiatief: initiative !== undefined }), {
+    return textStream(this.#brain.hear(text, { initiatief: initiative !== undefined, ...(gesprekspartner !== undefined && { gesprekspartner }) }), {
+      onPersoon: (personId) => {
+        // Net leren kennen (#92): het stemprofiel van deze nieuwe Persoon beginnen opbouwen.
+        this.#enrollingPersonId = personId;
+      },
       onMood: (message) => {
         // Vóór de eerste tekst (dus vóór de TTS-context van deze beurt opent): emotie in de stem.
         this.#onMoodValues(message.values);
@@ -217,6 +257,31 @@ export default defineAgent<AgentUserData>({
         // Niet in het ticket beschreven — hier bewust uitgezet i.p.v. de default (true).
         preemptiveGeneration: { enabled: false },
       },
+    });
+
+    // Stemherkenning (#92, ADR-0020): enkel aan als de sleutel gezet is én Eagle initialiseert; anders precies het
+    // huidige gedrag (geen gesprekspartner-optie, hear() valt terug op de eigenaar).
+    const speakerThreshold = parseSpeakerMatchThreshold(process.env.SPEAKER_MATCH_THRESHOLD);
+    if (speakerThreshold.warning) console.warn(speakerThreshold.warning);
+    let speakerRecognition: { speakerId: SpeakerId; audio: ReturnType<typeof createSpeakerAudio> } | undefined;
+    if (process.env.PICOVOICE_ACCESS_KEY) {
+      try {
+        const speakerId = createEagleSpeakerId({
+          accessKey: process.env.PICOVOICE_ACCESS_KEY,
+          threshold: speakerThreshold.threshold,
+          loadProfiles: () => brain.voiceProfiles(),
+          saveProfile: (personId, profile) => brain.addVoiceProfile(personId, profile),
+        });
+        await speakerId.reload();
+        const audio = createSpeakerAudio(ctx.room, () => session.userState === "speaking");
+        speakerRecognition = { speakerId, audio };
+      } catch (error) {
+        console.warn("Stemherkenning (Eagle) kon niet starten, blijft uit:", error instanceof Error ? error.message : error);
+      }
+    }
+    ctx.addShutdownCallback(async () => {
+      speakerRecognition?.speakerId.dispose();
+      speakerRecognition?.audio.dispose();
     });
 
     const publish = (topic: string, message: DisplayMessage | GalleryMessage | ReturnType<typeof emotionMessageFor>): void => {
@@ -332,7 +397,7 @@ export default defineAgent<AgentUserData>({
       const expressiveness = initiativeAxes?.expressiveness ?? 0.5;
       // Tempo per Emotie (#70) via speed; de afronding in applyTtsEmotion voorkomt extra websocket-herstarts.
       applyTtsEmotion(speechProvider(process.env), tts, withPacingSpeed(voiceSettingsFor({ values, expressiveness }), pacingFor({ values, expressiveness }).speedFactor));
-    }, () => initiativeAxes?.expressiveness ?? 0.5);
+    }, () => initiativeAxes?.expressiveness ?? 0.5, speakerRecognition);
     const isQuiet = (): boolean =>
       (session.agentState === "idle" || session.agentState === "listening") && session.userState !== "speaking" && perception.isPresent();
     // Gedeeld door de timer-tick en een Waarneming (aanleiding "terug"): een in-flight-guard voorkomt dat ze
@@ -389,7 +454,10 @@ export default defineAgent<AgentUserData>({
     // De sessie luistert naar één deelnemer (de eerste face) en blijft die trouw, ook als die tab al weg is; elke
     // reload is een nieuwe identiteit. Wij luisteren naar wie zijn microfoon aanzet: de face met een gekozen Dynimo.
     // ponytail: `_roomIO` is private API van @livekit/agents 1.9; bij een upgrade nakijken (RoomIO.setParticipant).
-    const listenTo = (participant: RemoteParticipant): void => session._roomIO?.setParticipant(participant.identity);
+    const listenTo = (participant: RemoteParticipant): void => {
+      session._roomIO?.setParticipant(participant.identity);
+      speakerRecognition?.audio.listenTo(participant.identity);
+    };
     const hasMic = (participant: RemoteParticipant): boolean =>
       [...participant.trackPublications.values()].some((t) => t.source === TrackSource.SOURCE_MICROPHONE && !t.muted);
     const speaker = [...ctx.room.remoteParticipants.values()].find(hasMic);

@@ -183,6 +183,13 @@
       "when": 1790366861400,
       "tag": "0025_personen",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1790368564299,
+      "tag": "0026_voice_profiles",
+      "breakpoints": true
     }
   ]
 }

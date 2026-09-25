@@ -24,8 +24,9 @@ async function migrateUpToPersonen(client: ReturnType<typeof postgres>): Promise
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "animus-drizzle-"));
   fs.cpSync(DRIZZLE_DIR, tmpDir, { recursive: true });
   const journalPath = path.join(tmpDir, "meta", "_journal.json");
-  const journal = JSON.parse(fs.readFileSync(journalPath, "utf8")) as { entries: unknown[] };
-  journal.entries = journal.entries.slice(0, -1);
+  const journal = JSON.parse(fs.readFileSync(journalPath, "utf8")) as { entries: { tag: string }[] };
+  const personenIdx = journal.entries.findIndex((entry) => entry.tag.includes("personen"));
+  journal.entries = journal.entries.slice(0, personenIdx);
   fs.writeFileSync(journalPath, JSON.stringify(journal, null, 2));
   const { drizzle } = await import("drizzle-orm/postgres-js");
   await drizzleMigrate(drizzle(client), { migrationsFolder: tmpDir });

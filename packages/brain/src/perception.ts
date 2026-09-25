@@ -7,8 +7,11 @@ export const LOOK_TOPIC = "kijk";
 /** Goedkoop, continu Type1-event uit de camera (CONTEXT.md: Waarneming). */
 export type Waarneming = { soort: "aanwezig" } | { soort: "afwezig" } | { soort: "nieuw-object"; object: string };
 
-/** Aanleiding voor de agent om de initiatiefcheck uit te lokken (considerInitiative). */
-export type Aanleiding = { soort: "terug" } | { soort: "nieuw-object"; object: string };
+/**
+ * Aanleiding voor de agent om de initiatiefcheck uit te lokken (considerInitiative). "onbekend" (#92/#93) is geen
+ * Waarneming (isWaarneming valideert hem niet): hij komt van stem- of gezichtsherkenning in de agent zelf.
+ */
+export type Aanleiding = { soort: "terug" } | { soort: "nieuw-object"; object: string } | { soort: "onbekend" };
 
 // COCO-labels: lowercase woorden, gescheiden door spaties (het label komt in prompts, #87).
 const OBJECT_PATTERN = /^[a-z][a-z ]{0,29}$/;

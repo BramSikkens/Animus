@@ -1,5 +1,19 @@
 import { sql } from "drizzle-orm";
-import { boolean, check, date, index, integer, jsonb, pgTable, primaryKey, real, serial, text, timestamp, uniqueIndex, vector } from "drizzle-orm/pg-core";
+import { boolean, check, customType, date, index, integer, jsonb, pgTable, primaryKey, real, serial, text, timestamp, uniqueIndex, vector } from "drizzle-orm/pg-core";
+
+// Ruwe bytes (Eagle-stemprofiel, nooit audio zelf); drizzle-orm heeft geen ingebouwd bytea-type. Geen Buffer-type
+// hier (dit package heeft geen @types/node): de postgres-driver accepteert/levert Uint8Array-compatibele waarden.
+const bytea = customType<{ data: Uint8Array; driverData: Uint8Array }>({
+  dataType() {
+    return "bytea";
+  },
+  toDriver(value) {
+    return value;
+  },
+  fromDriver(value) {
+    return new Uint8Array(value);
+  },
+});
 
 // Meerdere rijen mogelijk: elke rij is een Dynimo.
 export const dynimos = pgTable(
@@ -85,6 +99,17 @@ export const persons = pgTable(
   },
   (table) => [uniqueIndex("persons_single_owner_idx").on(sql`(true)`).where(sql`${table.owner}`)],
 );
+
+// Stemprofielen (#92): Eagle-profiel per Persoon, hoogstens 5 (oudste wordt vervangen, zie addVoiceProfile).
+// Nooit audio zelf, enkel het geëxporteerde profiel (art. 9 AVG, ADR-0020).
+export const voiceProfiles = pgTable("voice_profiles", {
+  id: serial("id").primaryKey(),
+  personId: integer("person_id")
+    .notNull()
+    .references(() => persons.id, { onDelete: "cascade" }),
+  profile: bytea("profile").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
 
 // Dimensie van OpenAI text-embedding-3-small (ADR-0008): een andere embedding-provider
 // betekent een migratie én alles opnieuw embedden.

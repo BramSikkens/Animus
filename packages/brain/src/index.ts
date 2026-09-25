@@ -13,10 +13,10 @@ import {
   type SystemModelMessage,
   type ToolSet,
 } from "ai";
-import { and, asc, cosineDistance, desc, eq, gt, gte, isNotNull, isNull, lte, notInArray, sql } from "drizzle-orm";
+import { and, asc, cosineDistance, desc, eq, gt, gte, inArray, isNotNull, isNull, lte, notInArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { Db } from "@animus/db";
-import { dreams, drives, dynimos, epitaphs, familiarities, memories, persons } from "@animus/db/schema";
+import { dreams, drives, dynimos, epitaphs, familiarities, memories, persons, voiceProfiles as voiceProfilesTable } from "@animus/db/schema";
 import { formatAge } from "./age.js";
 import { archetypeOfferText, getArchetype, pickOffer } from "./archetypes.js";
 import { DRIVE_DESCRIPTIONS, DRIVE_KINDS, drivesPromptBlock, isActiveDrive, type DriveRow } from "./drives.js";
@@ -48,6 +48,8 @@ export type BrainEvent =
   | { type: "sound"; kind: SoundKind }
   /** Er ging deze beurt echt een camerabeeld naar Type2 (Type1-/initiatief-pad of de kijk-tool). */
   | { type: "kijk" }
+  /** Er is net iemand leren kennen (leerKennen); de agent kan hierop het stemprofiel beginnen opbouwen. */
+  | { type: "persoon"; personId: number; naam: string }
   | { type: "text"; delta: string }
   | { type: "tool-call"; toolName: string; input: unknown }
   | { type: "tool-result"; toolName: string; output: unknown };
@@ -99,6 +101,10 @@ export type Brain = {
   setFamiliarity(id: number, familiarity: number): Promise<boolean>;
   /** Dashboard: Vertrouwdheid van `personId` (default eigenaar) met deze Dynimo; 0.2 zonder rij (#91). */
   familiarityOf(dynimoId: number, personId?: number): Promise<number>;
+  /** Alle Stemprofielen (Eagle-export) van elke Persoon; nooit audio zelf (#92). */
+  voiceProfiles(): Promise<{ personId: number; profile: Uint8Array }[]>;
+  /** Voegt een Stemprofiel toe voor `personId`; houdt er hoogstens 5 (oudste eerst weg), in één transactie (#92). */
+  addVoiceProfile(personId: number, profile: Uint8Array): Promise<void>;
   /** Dashboard-override: zet het Verstand (0–1), zonder pinning. False bij een onbekende id. */
   setVerstand(id: number, verstand: number): Promise<boolean>;
   /** Dashboard-override: kiest een archetype en zet zijn zes assen, Basisemotie en Verstand (richtwaarde) als startpunt (geen pinning). False bij een onbekende id of een onbekend archetype. */
@@ -349,6 +355,28 @@ function familiarityMessage(familiarity: number): SystemModelMessage {
   return { role: "system", content: `Vertrouwdheid met de Gesprekspartner: ${familiarityStyle(familiarity).instruction}` };
 }
 
+// Naam van de Gesprekspartner (#92), na het cachepunt: verschilt per beurt. De eigenaar wordt nooit bij zijn
+// letterlijke naam genoemd (die kan een andere zijn dan "eigenaar").
+const UNKNOWN_SPEAKER_MESSAGE: SystemModelMessage = { role: "system", content: "Je weet niet wie er nu praat." };
+function speakerMessage(person: { name: string; owner: boolean } | undefined): SystemModelMessage {
+  if (!person) return UNKNOWN_SPEAKER_MESSAGE;
+  return { role: "system", content: person.owner ? "Je praat nu met je eigenaar." : `Je praat nu met ${person.name}.` };
+}
+
+// #92: als de Gesprekspartner onbekend is en er deze sessie nog niet naar gevraagd is.
+const UNKNOWN_NAME_PROMPT: SystemModelMessage = {
+  role: "system",
+  content: "Je kent de persoon die nu praat nog niet. Vraag vriendelijk hoe die heet; noemt die een naam, gebruik dan leerKennen. Wil die zijn naam niet geven, dring dan niet aan.",
+};
+
+// leerKennen (#92): getrimd, 1–40 tekens, geen regeleinden.
+const NAAM_SCHEMA = z
+  .string()
+  .trim()
+  .min(1)
+  .max(40)
+  .refine((naam) => !/[\r\n]/.test(naam), { message: "geen regeleinden" });
+
 // De tegenpool remt vanzelf af (ADR-0015); Type1 hoeft die niet ook nog omlaag te scoren.
 const pairHint = (emotion: Emotion) => {
   const opposite = oppositeOf(emotion);
@@ -451,6 +479,10 @@ export function createBrain(deps: {
   const workingMemory: ModelMessage[] = [];
   // Herinneringen uit deze sessie staan al in het werkgeheugen; niet dubbel ophalen.
   const sessionMemoryIds: number[] = [];
+  // Herinneringen van de onbekende (person_id null) uit deze sessie (#92): leerKennen koppelt ze aan de nieuwe Persoon.
+  const unknownSessionMemoryIds: number[] = [];
+  // Al naar de naam gevraagd deze sessie (#92)? Voorkomt opnieuw vragen na een weigering.
+  let askedName = false;
   // Spontane herinnering die considerInitiative koos: pas na de initiatief-beurt als aangehaald gemarkeerd.
   let pendingSpontaneousId: number | undefined;
   // Idem voor een Droom die considerInitiative koos (verteld = told_at).
@@ -710,6 +742,8 @@ ${fresh.map((memory) => `- (indruk ${memory.impression}) ${memory.text}`).join("
     lastSpeechSound = undefined;
     workingMemory.length = 0;
     sessionMemoryIds.length = 0;
+    unknownSessionMemoryIds.length = 0;
+    askedName = false;
     turnCount = 0;
     lastOpinionTurn = undefined;
     pendingSpontaneousId = undefined;
@@ -959,7 +993,10 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
   async function remember(memoryText: string, dynimoId = current?.id, impression = 0.5, personId: number | null = null): Promise<boolean> {
     if (dynimoId === undefined) return false;
     try {
-      sessionMemoryIds.push(await insertMemory(memoryText, dynimoId, impression, personId));
+      const id = await insertMemory(memoryText, dynimoId, impression, personId);
+      sessionMemoryIds.push(id);
+      // #92: apart bijgehouden zodat leerKennen precies de onbekende-Herinneringen van déze sessie kan koppelen.
+      if (personId === null) unknownSessionMemoryIds.push(id);
       return true;
     } catch (error) {
       console.warn("Herinnering opslaan faalde:", error instanceof Error ? error.message : error);
@@ -1022,6 +1059,17 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     return owner!.id;
   }
 
+  // leerKennen (#92): maakt de Persoon aan en koppelt de onbekende-Herinneringen van déze sessie eraan.
+  async function leerKennenPersoon(naam: string): Promise<{ id: number; name: string }> {
+    return deps.db.transaction(async (tx) => {
+      const [created] = await tx.insert(persons).values({ name: naam }).returning();
+      if (unknownSessionMemoryIds.length) {
+        await tx.update(memories).set({ personId: created!.id }).where(inArray(memories.id, unknownSessionMemoryIds));
+      }
+      return created!;
+    });
+  }
+
   // Vertrouwdheid van (dynimo, persoon), of 0.2 als die rij ontbreekt (nieuwe Dynimo, of nooit geschreven).
   async function familiarityRow(dynimoId: number, personId: number): Promise<number> {
     const [row] = await deps.db
@@ -1064,6 +1112,25 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
   /** Vertrouwdheid voor het dashboard: van `personId` (default eigenaar) met deze Dynimo, 0.2 zonder rij. */
   async function familiarityOf(dynimoId: number, personId?: number): Promise<number> {
     return familiarityRow(dynimoId, personId ?? (await getOwnerId()));
+  }
+
+  const MAX_VOICE_PROFILES = 5;
+
+  async function voiceProfiles(): Promise<{ personId: number; profile: Uint8Array }[]> {
+    return deps.db.select({ personId: voiceProfilesTable.personId, profile: voiceProfilesTable.profile }).from(voiceProfilesTable);
+  }
+
+  async function addVoiceProfile(personId: number, profile: Uint8Array): Promise<void> {
+    await deps.db.transaction(async (tx) => {
+      await tx.insert(voiceProfilesTable).values({ personId, profile });
+      const rows = await tx
+        .select({ id: voiceProfilesTable.id })
+        .from(voiceProfilesTable)
+        .where(eq(voiceProfilesTable.personId, personId))
+        .orderBy(desc(voiceProfilesTable.createdAt), desc(voiceProfilesTable.id));
+      const excess = rows.slice(MAX_VOICE_PROFILES);
+      if (excess.length) await tx.delete(voiceProfilesTable).where(inArray(voiceProfilesTable.id, excess.map((row) => row.id)));
+    });
   }
 
   async function setVerstand(id: number, verstand: number): Promise<boolean> {
@@ -1126,7 +1193,8 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     // Persoon van deze beurt (#91): meegegeven Gesprekspartner (null = onbekend), anders de eigenaar. Ook bij
     // initiatief: die krijgt de eigenaar tenzij een Gesprekspartner is meegegeven. Lokaal (geen instance-state):
     // een overlappende tweede beurt (bv. initiatief) mag deze niet kunnen overschrijven.
-    const personId = options.gesprekspartner !== undefined ? options.gesprekspartner : await getOwnerId();
+    // `let`: leerKennen (#92) bindt de rest van déze beurt aan de nieuw aangemaakte Persoon.
+    let personId = options.gesprekspartner !== undefined ? options.gesprekspartner : await getOwnerId();
     const driveRows = await loadDrives(awake.id);
     const baseEmotion = baseEmotionOf(awake);
     const stored = storedMoodOf(awake);
@@ -1229,6 +1297,11 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
       return;
     }
 
+    // #92: de eerste keer dat de onbekende Gesprekspartner echt een antwoord krijgt, vraagt Type2 vriendelijk zijn
+    // naam; een weigering wordt (askedName blijft true) deze sessie niet opnieuw gevraagd.
+    const askNameNow = personId === null && !askedName;
+    if (askNameNow) askedName = true;
+
     // Kijken (ADR-0019): Type1 besliste al; een fout bij het ophalen telt als geen beeld en breekt de beurt nooit.
     const haalFrame = (): Promise<Frame | null> =>
       (deps.lookFrame?.() ?? Promise.resolve(null)).catch((error: unknown) => {
@@ -1275,8 +1348,30 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
         }
       : {};
 
+    // leerKennen (#92): enkel aangeboden als de Gesprekspartner van déze beurt onbekend is. `personId` wordt bij
+    // succes herbonden, zodat de rest van deze beurt (waaronder de eind-Herinnering) de nieuwe Persoon krijgt.
+    const leerKennenTools: ToolSet =
+      personId === null
+        ? {
+            leerKennen: tool({
+              description: "Maakt een nieuwe Persoon aan voor wie nu met je praat, zodra die zijn naam geeft.",
+              inputSchema: z.object({ naam: NAAM_SCHEMA }),
+              execute: async ({ naam }) => {
+                const created = await leerKennenPersoon(naam);
+                personId = created.id;
+                return { personId: created.id, naam: created.name };
+              },
+            }),
+          }
+        : {};
+
     // Tools van deze beurt (#91): de onthoud-tool sluit over de Gesprekspartner van déze beurt, niet over instance-state.
     const turnTools = createTools({ now, remember: (memoryText: string) => remember(memoryText, being.id, undefined, personId) });
+
+    // Naam van de Gesprekspartner (#92): bekend (met owner-vlag) of onbekend.
+    const speakerPerson = personId === null
+      ? undefined
+      : await deps.db.select({ name: persons.name, owner: persons.owner }).from(persons).where(eq(persons.id, personId)).then((rows) => rows[0]);
 
     // ponytail: sequentieel na de emotie; parallel met Type1 als de latency ooit telt.
     const recalled = await recall(text, being.id);
@@ -1307,9 +1402,9 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     const result = streamText({
       abortSignal: abort.signal,
       model: intent === "complex" ? deps.type2.heavy : deps.type2.light,
-      instructions: [stable, ageMessage(being), ...birthdayMessages(awake), moodMessage(mood, axes?.expressiveness ?? 0.5), familiarityMessage(familiarity), ...(BEHAVIOR_PROMPTS[behavior] ? [BEHAVIOR_PROMPTS[behavior]] : []), ...opinionMessage, recallPrompt(recalled), ...spontaneousPromptMessage, ...(dream ? [dreamPrompt(dream.text)] : []), ...noFrameMessage],
+      instructions: [stable, ageMessage(being), ...birthdayMessages(awake), moodMessage(mood, axes?.expressiveness ?? 0.5), familiarityMessage(familiarity), speakerMessage(speakerPerson), ...(askNameNow ? [UNKNOWN_NAME_PROMPT] : []), ...(BEHAVIOR_PROMPTS[behavior] ? [BEHAVIOR_PROMPTS[behavior]] : []), ...opinionMessage, recallPrompt(recalled), ...spontaneousPromptMessage, ...(dream ? [dreamPrompt(dream.text)] : []), ...noFrameMessage],
       messages: [...workingMemory, promptMessage],
-      tools: { ...turnTools, ...kijkTools },
+      tools: { ...turnTools, ...kijkTools, ...leerKennenTools },
       // Genoeg stappen om een tool te gebruiken en daarna het resultaat te verwoorden.
       stopWhen: isStepCount(5),
     });
@@ -1359,6 +1454,11 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
           if (kijkFrame) yield { type: "kijk" };
           const output = part.toolName === "kijk" ? { gezien: kijkFrame !== null } : part.output;
           yield { type: "tool-result", toolName: part.toolName, output };
+          // #92: leerKennen slaagde; de agent kan hierop het stemprofiel beginnen opbouwen.
+          if (part.toolName === "leerKennen") {
+            const { personId: newPersonId, naam } = output as { personId: number; naam: string };
+            yield { type: "persoon", personId: newPersonId, naam };
+          }
         }
         if (part.type === "tool-error") {
           const message = part.error instanceof Error ? part.error.message : String(part.error);
@@ -1433,16 +1533,18 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
   }
 
   function aanleidingText(aanleiding: Aanleiding): string {
-    return aanleiding.soort === "terug"
-      ? "de Gesprekspartner is net terug in beeld na een tijd weg te zijn geweest"
-      : `er verscheen net iets nieuws in beeld: ${aanleiding.object}`;
+    if (aanleiding.soort === "terug") return "de Gesprekspartner is net terug in beeld na een tijd weg te zijn geweest";
+    if (aanleiding.soort === "onbekend") return "er is iemand die je nog niet kent";
+    return `er verscheen net iets nieuws in beeld: ${aanleiding.object}`;
   }
 
   async function considerInitiative(aanleiding?: Aanleiding): Promise<string | null> {
     if (reflecting > 0) return null;
     const [awake] = await deps.db.select().from(dynimos).where(isNotNull(dynimos.awakeSince));
     if (!awake) return null;
-    adopt(awake); // wisselen wist de pending-ids van de vorige Dynimo vóór we die van deze zetten
+    adopt(awake); // wisselen wist de pending-ids (en askedName) van de vorige Dynimo vóór we die van deze lezen
+    // #92: is er deze sessie al naar de naam gevraagd, dan lokt "onbekend" geen nieuwe Type1-call meer uit.
+    if (aanleiding?.soort === "onbekend" && askedName) return null;
     try {
       pendingLook = false; // enkel "ja" + nieuw-object hieronder zet hem weer aan
       const driveRows = await loadDrives(awake.id);
@@ -1477,12 +1579,16 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
         },
       });
       if (answers.spreken.choice !== "ja") return null;
-      // Een aanleiding (Waarneming) gaat vóór Spontane herinnering en Droom: die worden dan niet gekozen.
+      // Een aanleiding (Waarneming, of "onbekend" #92) gaat vóór Spontane herinnering en Droom: die worden dan niet gekozen.
       if (aanleiding) {
         pendingSpontaneousId = undefined;
         pendingDreamId = undefined;
-        // Een nieuw object wordt de eerstvolgende initiatiefbeurt een Kijk-beurt (ADR-0019); "terug" niet.
+        // Een nieuw object wordt de eerstvolgende initiatiefbeurt een Kijk-beurt (ADR-0019); "terug"/"onbekend" niet.
         pendingLook = aanleiding.soort === "nieuw-object";
+        if (aanleiding.soort === "onbekend") {
+          askedName = true;
+          return `Je begint uit jezelf een gesprek: ${aanleidingText(aanleiding)}. Vraag vriendelijk hoe die heet; noemt die een naam, gebruik dan leerKennen. Wil die zijn naam niet geven, dring dan niet aan.`;
+        }
         return `Je begint uit jezelf een gesprek: ${aanleidingText(aanleiding)}. ${
           aanleiding.soort === "terug" ? "Begroet de Gesprekspartner kort, op je eigen manier." : "Reageer daar kort en nieuwsgierig op, op je eigen manier."
         }`;
@@ -1513,5 +1619,5 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     }
   }
 
-  return { bringToLife, wake, sleep, kill, list, backfill, reflect, considerInitiative, hear, forceMood, setMood, setAxes, setFamiliarity, familiarityOf, setVerstand, setVoiceProfile, setArchetype, addMemory, removeMemory };
+  return { bringToLife, wake, sleep, kill, list, backfill, reflect, considerInitiative, hear, forceMood, setMood, setAxes, setFamiliarity, familiarityOf, voiceProfiles, addVoiceProfile, setVerstand, setVoiceProfile, setArchetype, addMemory, removeMemory };
 }

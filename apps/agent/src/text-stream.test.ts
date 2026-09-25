@@ -107,4 +107,21 @@ describe("textStream", () => {
     const chunks = await collect(textStream(gen(events)));
     expect(chunks).toEqual(["Hoi"]);
   });
+
+  it("roept onPersoon aan bij een persoon-event en houdt het event uit de tekst", async () => {
+    const events: BrainEvent[] = [
+      { type: "persoon", personId: 7, naam: "Anna" },
+      { type: "text", delta: "Hoi" },
+    ];
+    const calls: unknown[] = [];
+    const chunks = await collect(textStream(gen(events), { onPersoon: (personId, naam) => calls.push([personId, naam]) }));
+    expect(calls).toEqual([[7, "Anna"]]);
+    expect(chunks).toEqual(["Hoi"]);
+  });
+
+  it("werkt zonder onPersoon zoals voorheen", async () => {
+    const events: BrainEvent[] = [{ type: "persoon", personId: 7, naam: "Anna" }, { type: "text", delta: "Hoi" }];
+    const chunks = await collect(textStream(gen(events)));
+    expect(chunks).toEqual(["Hoi"]);
+  });
 });

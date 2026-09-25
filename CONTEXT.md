@@ -141,3 +141,13 @@ _Avoid_: mode, view-state, display-state (in proza toegestaan, niet als term)
 **Idle-animatie** (fase 2b):
 De continue microbeweging (knipperen, ademhaling, pupilverschuiving, subtiele wenkbrauwbeweging) die in elke Weergavetoestand blijft doorlopen, los van een Emotiekeyframe-wissel — zodat het gezicht nooit stilstaat. Tijdens *spreekt* stuurt de audio van de Dynimo bovendien de mondbeweging.
 _Avoid_: ademhaling (dat is er één onderdeel van), micro-animatie
+
+### Perceptie (fase 3)
+
+**Waarneming**:
+Een goedkoop, continu Type1-event uit de camera: *aanwezig*, *afwezig* of *nieuw object* (een objectklasse die sinds het wakker worden nog niet stabiel in beeld was). Ontstaat in de face-app (MediaPipe) en gaat over het datachannel naar de agent. Wordt nooit bewaard.
+_Avoid_: detectie, event (in proza toegestaan, niet als term)
+
+**Kijken**:
+Eén Type2-call met één camerabeeld erbij. Duur, dus alleen wanneer Type1 zegt dat er gekeken moet worden (op vraag of via de initiatiefcheck) of via de `kijk`-tool als vangnet. Het beeld zit enkel in die ene beurt; wat blijft is het tekstantwoord, en daarmee een gewone Herinnering.
+_Avoid_: vision (in proza toegestaan), zien, snapshot

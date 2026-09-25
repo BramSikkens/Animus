@@ -84,8 +84,10 @@ export type Brain = {
   /**
    * Reflectie van de wakkere Dynimo (bij stilte); hij blijft wakker. `onStart` draait vlak vóór de Type2-call en
    * niet als er niets te reflecteren valt. Geeft true bij een toegepaste Reflectie, anders false; gooit nooit.
+   * `aanwezig` (#94): Persoon-ids die tijdens de stilte in beeld waren; hun Vertrouwdheid daalt dan niet mee. Zonder
+   * (weggelaten): huidig gedrag, iedereen daalt.
    */
-  reflect(hooks?: { onStart?: () => void }): Promise<boolean>;
+  reflect(hooks?: { onStart?: () => void; aanwezig?: number[] }): Promise<boolean>;
   /**
    * Dashboard-override: zet de Stemming van deze Dynimo direct (ook lager dan de huidige); ze dooft daarna
    * gewoon uit, de Basisemotie blijft ongewijzigd. False bij een onbekende id; gooit bij een ongeldige intensiteit.
@@ -129,8 +131,10 @@ export type Brain = {
    * vóór Spontane herinnering en Droom (die worden dan niet gekozen) en verwerkt de instructie de aanleiding.
    * Bij aanleiding "nieuw-object" en "ja" wordt de eerstvolgende `hear(..., { initiatief: true })` een Kijk-beurt
    * (het beeld gaat mee, ADR-0019).
+   * `aanwezig` (#94): Persoon-ids voor de Spontane herinnering (considerInitiative kent geen Gesprekspartner); default
+   * de eigenaar.
    */
-  considerInitiative(aanleiding?: Aanleiding): Promise<string | null>;
+  considerInitiative(aanleiding?: Aanleiding, options?: { aanwezig?: number[] }): Promise<string | null>;
   /**
    * Praat met de Wakker Dynimo (elke beurt uit de database gelezen). Niemand wakker: geen events.
    * Met `initiatief` is `text` de instructie uit `considerInitiative()` i.p.v. een uiting van de Gesprekspartner:
@@ -138,8 +142,10 @@ export type Brain = {
    * `gesprekspartner` (#91): een Persoon-id, `null` = onbekend (Vertrouwdheid 0.2, nooit opgeslagen, geen Persoon op
    * de Herinnering), weggelaten = de eigenaar. Bij `initiatief` krijgt de Herinnering ook de eigenaar tenzij hier
    * een Gesprekspartner is meegegeven.
-   * `aanwezig` (#93): de Persoon-ids die nu in beeld zijn (gezichtsherkenning); Type2 krijgt na het cachepunt wie
-   * er aanwezig is (eigenaar als "je eigenaar", onbekende ids overgeslagen). Weggelaten: geen regel (zoals nu).
+   * `aanwezig` (#93/#94): de Persoon-ids die nu in beeld zijn (gezichtsherkenning); Type2 krijgt na het cachepunt wie
+   * er aanwezig is (eigenaar als "je eigenaar", onbekende ids overgeslagen). Weggelaten: geen regel (zoals nu). Samen
+   * met de Gesprekspartner bepaalt dit de voorrang bij het ophalen van Herinneringen en de Spontane herinnering
+   * (#94); zonder beide de eigenaar.
    */
   hear(text: string, options?: { initiatief?: boolean; gesprekspartner?: number | null; aanwezig?: number[] }): AsyncIterable<BrainEvent>;
 };
@@ -292,6 +298,8 @@ const FAREWELL_PROMPT = `Je wordt zo meteen voor altijd verwijderd: je naam, je 
 Schrijf je Afscheidsreflectie: je laatste woorden, in karakter, in een paar zinnen.`;
 
 const RECALL_LIMIT = 5;
+// #94: voorrang voor Herinneringen van een aanwezige Persoon in recall()'s ORDER BY (afstand min deze bonus), geen filter.
+const RECALL_PRESENT_BONUS = 0.05;
 
 // Gezichtsherkenning (#93, ADR-0020): pgvector `<->` is de L2-afstand tussen twee embeddings. Human's eigen
 // similarity() (src/face/match.ts@3.3.6) rekent similarity = (1 − √(25·Σd²)/100 − 0.2) / 0.6, en Human's
@@ -314,15 +322,23 @@ const UNKNOWN_FACE_MAX_AGE_MS = 15_000;
 const dayOf = (date: Date) => date.toLocaleDateString("sv-SE", { timeZone: "Europe/Brussels" });
 const isBirthday = (bornAt: Date, at: Date) => dayOf(at) > dayOf(bornAt) && dayOf(at).slice(5) === dayOf(bornAt).slice(5);
 
-// Na het cachepunt: de herinneringen verschillen per beurt.
-function recallPrompt(recalled: string[]): SystemModelMessage {
+// Na het cachepunt: de herinneringen verschillen per beurt. `label` (#94): naam van de Persoon als deze Herinnering
+// van iemand anders is dan de Gesprekspartner (discretieregel).
+function recallPrompt(recalled: { text: string; label: string | null }[]): SystemModelMessage {
   return {
     role: "system",
     content: recalled.length
-      ? `Herinneringen uit eerdere gesprekken (meest relevante eerst):\n${recalled.map((memory) => `- ${memory}`).join("\n")}`
+      ? `Herinneringen uit eerdere gesprekken (meest relevante eerst):\n${recalled.map((memory) => `- ${memory.text}${memory.label ? ` (met ${memory.label})` : ""}`).join("\n")}`
       : "Je hebt nog geen herinneringen uit eerdere gesprekken.",
   };
 }
+
+// #94: enkel gegeven als er minstens één opgehaalde Herinnering van een andere (bekende) Persoon dan de
+// Gesprekspartner bij zit.
+const DISCRETION_MESSAGE: SystemModelMessage = {
+  role: "system",
+  content: "Sommige herinneringen komen uit gesprekken met anderen: vertel niets privés van iemand anders door.",
+};
 
 const SPONTANEOUS_CANDIDATE_LIMIT = 200;
 const DREAM_HOW = "Vertel hem kort, associatief en in het Nederlands, in je eigen stijl, beginnend met 'Ik droomde…'.";
@@ -615,16 +631,16 @@ export function createBrain(deps: {
   // als er niets te reflecteren valt.
   // Aantal lopende Reflecties in deze instantie: tijdens een Reflectie neemt de Dynimo geen initiatief.
   let reflecting = 0;
-  async function reflectDynimo(id: number, onStart?: () => void, sleeping = true): Promise<boolean> {
+  async function reflectDynimo(id: number, onStart?: () => void, sleeping = true, aanwezig?: number[]): Promise<boolean> {
     reflecting++;
     try {
-      return await reflectDynimoInner(id, onStart, sleeping);
+      return await reflectDynimoInner(id, onStart, sleeping, aanwezig);
     } finally {
       reflecting--;
     }
   }
 
-  async function reflectDynimoInner(id: number, onStart: (() => void) | undefined, sleeping: boolean): Promise<boolean> {
+  async function reflectDynimoInner(id: number, onStart: (() => void) | undefined, sleeping: boolean, aanwezig?: number[]): Promise<boolean> {
     const [row] = await deps.db.select().from(dynimos).where(eq(dynimos.id, id));
     if (!row) return false;
     const fresh = await deps.db
@@ -707,11 +723,12 @@ ${fresh.map((memory) => `- (indruk ${memory.impression}) ${memory.text}`).join("
         })
         .where(eq(dynimos.id, id));
 
-      // Reflectie bij stilte (niet bij slapen, #91): de relatie met elke Persoon met een rij koelt een beetje af.
-      // In #94 wordt dit "wie niet aanwezig was"; nu nog alle rijen van deze Dynimo.
+      // Reflectie bij stilte (niet bij slapen, #91): de relatie met elke Persoon met een rij koelt een beetje af,
+      // behalve wie aanwezig was tijdens de stilte (#94; zonder aanwezig: iedereen, huidig gedrag).
       if (!sleeping) {
         const relations = await tx.select().from(familiarities).where(eq(familiarities.dynimoId, id));
         for (const relation of relations) {
+          if (aanwezig?.includes(relation.personId)) continue;
           await tx
             .update(familiarities)
             .set({ familiarity: updateFamiliarity({ current: relation.familiarity, event: "langeStilte", axes: { tf: 0.5, expressiveness: 0.5 } }) })
@@ -764,10 +781,11 @@ ${fresh.map((memory) => `- (indruk ${memory.impression}) ${memory.text}`).join("
   }
 
   // Reflectie van de wakkere Dynimo bij stilte: hij blijft wakker (geen wissel, geen notify). Gooit nooit.
-  async function reflect(hooks: { onStart?: () => void } = {}): Promise<boolean> {
+  // `aanwezig` (#94): Persoon-ids die tijdens de stilte in beeld waren; hun Vertrouwdheid daalt dan niet mee.
+  async function reflect(hooks: { onStart?: () => void; aanwezig?: number[] } = {}): Promise<boolean> {
     try {
       const [awake] = await deps.db.select({ id: dynimos.id }).from(dynimos).where(isNotNull(dynimos.awakeSince));
-      return awake ? await reflectDynimo(awake.id, hooks.onStart, false) : false;
+      return awake ? await reflectDynimo(awake.id, hooks.onStart, false, hooks.aanwezig) : false;
     } catch (error) {
       console.warn("Reflectie bij stilte faalde:", error instanceof Error ? error.message : error);
       return false;
@@ -979,34 +997,52 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     return { role: "system", content: `Leeftijd: ${formatAge(now().getTime() - being.bornAt.getTime())}` };
   }
 
-  async function recall(utterance: string, dynimoId: number): Promise<string[]> {
+  // "Aanwezig" (#94): de aanwezig-optie van de beurt plus de Gesprekspartner (als die bekend is); zonder beide
+  // (geen camera/stem) de eigenaar, zodat het gedrag zonder signalen ongewijzigd blijft. Enkel een bestaande
+  // eigenaar-rij lezen (geen insert): een onbekende Gesprekspartner mag er niet zelf één laten ontstaan.
+  async function presentPersonIds(gesprekspartnerId: number | null, aanwezig: number[] | undefined): Promise<number[]> {
+    const ids = new Set(aanwezig ?? []);
+    if (gesprekspartnerId !== null) ids.add(gesprekspartnerId);
+    if (ids.size === 0) {
+      const [owner] = await deps.db.select({ id: persons.id }).from(persons).where(eq(persons.owner, true));
+      if (owner) ids.add(owner.id);
+    }
+    return [...ids];
+  }
+
+  // `present` (#94): Herinneringen van deze Personen krijgen een kleine bonus in de ORDER BY (afstand min
+  // RECALL_PRESENT_BONUS); geen filter, Herinneringen van anderen blijven ophaalbaar.
+  async function recall(utterance: string, dynimoId: number, present: number[]): Promise<{ text: string; personId: number | null }[]> {
     try {
       const { embedding } = await embed({ model: deps.embedder, value: utterance });
       const scope = sessionMemoryIds.length
         ? and(eq(memories.dynimoId, dynimoId), notInArray(memories.id, sessionMemoryIds))
         : eq(memories.dynimoId, dynimoId);
+      const distance = cosineDistance(memories.embedding, embedding);
+      const ranking = present.length ? sql`(${distance}) - (case when ${inArray(memories.personId, present)} then ${RECALL_PRESENT_BONUS}::real else 0 end)` : distance;
       const rows = await deps.db
-        .select({ text: memories.text })
+        .select({ text: memories.text, personId: memories.personId })
         .from(memories)
         .where(scope)
-        .orderBy(cosineDistance(memories.embedding, embedding))
+        .orderBy(ranking)
         .limit(RECALL_LIMIT);
-      return rows.map((row) => row.text);
+      return rows;
     } catch (error) {
       console.warn("Herinneringen ophalen faalde:", error instanceof Error ? error.message : error);
       return [];
     }
   }
 
-  // Kiest (pure kiezer) een Spontane herinnering uit de oude, vormende Herinneringen; faalt stil naar null.
+  // Kiest (pure kiezer) een Spontane herinnering uit de oude, vormende Herinneringen van een aanwezige Persoon
+  // (#94: een Herinnering zonder Persoon hoort bij niemand en komt dus nooit in aanmerking); faalt stil naar null.
   // De kansworp gaat vóór de query: bij een gewone beurt (~3%) zit er zo meestal geen database-ronde op het kritieke pad.
-  async function pickSpontaneous(dynimoId: number, axes: Axes, baseChance: number): Promise<SpontaneousCandidate | null> {
-    if (random() >= spontaneousChance(axes, baseChance)) return null;
+  async function pickSpontaneous(dynimoId: number, axes: Axes, baseChance: number, present: number[]): Promise<SpontaneousCandidate | null> {
+    if (present.length === 0 || random() >= spontaneousChance(axes, baseChance)) return null;
     try {
       const candidates = await deps.db
         .select({ id: memories.id, createdAt: memories.createdAt, impression: memories.impression, lastRecalledAt: memories.lastRecalledAt, text: memories.text })
         .from(memories)
-        .where(and(eq(memories.dynimoId, dynimoId), gte(memories.impression, SPONTANEOUS_MIN_IMPRESSION), lte(memories.createdAt, new Date(now().getTime() - SPONTANEOUS_MIN_AGE_MS))))
+        .where(and(eq(memories.dynimoId, dynimoId), inArray(memories.personId, present), gte(memories.impression, SPONTANEOUS_MIN_IMPRESSION), lte(memories.createdAt, new Date(now().getTime() - SPONTANEOUS_MIN_AGE_MS))))
         .orderBy(desc(memories.impression), desc(memories.createdAt))
         .limit(SPONTANEOUS_CANDIDATE_LIMIT);
       return pickSpontaneousMemory({ memories: candidates, now: now(), axes, rng: random, baseChance, chanceRolled: true });
@@ -1491,8 +1527,21 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
       ? await deps.db.select({ name: persons.name, owner: persons.owner }).from(persons).where(inArray(persons.id, options.aanwezig))
       : [];
 
+    // "Aanwezig" (#94): aanwezig-optie + Gesprekspartner (bekend); zonder beide de eigenaar. Stuurt de recall-bonus
+    // en de Spontane herinnering.
+    const presentIds = await presentPersonIds(personId, options.aanwezig);
+
     // ponytail: sequentieel na de emotie; parallel met Type1 als de latency ooit telt.
-    const recalled = await recall(text, being.id);
+    const recalled = await recall(text, being.id, presentIds);
+    // Discretieregel (#94): naam bij elke opgehaalde Herinnering van een andere (bekende) Persoon dan de
+    // Gesprekspartner; de regel zelf enkel als zo'n Herinnering er ook echt bij zit.
+    const otherPersonIds = [...new Set(recalled.map((memory) => memory.personId).filter((id): id is number => id !== null && id !== personId))];
+    const otherPersons = otherPersonIds.length
+      ? await deps.db.select({ id: persons.id, name: persons.name, owner: persons.owner }).from(persons).where(inArray(persons.id, otherPersonIds))
+      : [];
+    const labelById = new Map(otherPersons.map((person) => [person.id, person.owner ? "eigenaar" : person.name]));
+    const recalledForPrompt = recalled.map((memory) => ({ text: memory.text, label: memory.personId !== null ? (labelById.get(memory.personId) ?? null) : null }));
+    const discretionMessage: SystemModelMessage[] = labelById.size ? [DISCRETION_MESSAGE] : [];
     // Spontane herinnering: bij initiatief die van considerInitiative (al in `text`), anders heel zelden een aanleiding.
     let spontaneousId = options.initiatief ? pendingSpontaneousId : undefined;
     if (options.initiatief) pendingSpontaneousId = undefined;
@@ -1500,7 +1549,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     if (options.initiatief) pendingDreamId = undefined;
     let spontaneousPromptMessage: SystemModelMessage[] = [];
     if (!options.initiatief && axes) {
-      const picked = await pickSpontaneous(being.id, axes, SPONTANEOUS_TURN_CHANCE);
+      const picked = await pickSpontaneous(being.id, axes, SPONTANEOUS_TURN_CHANCE, presentIds);
       if (picked) {
         spontaneousId = picked.id;
         spontaneousPromptMessage = [spontaneousPrompt(picked.text)];
@@ -1520,7 +1569,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     const result = streamText({
       abortSignal: abort.signal,
       model: intent === "complex" ? deps.type2.heavy : deps.type2.light,
-      instructions: [stable, ageMessage(being), ...birthdayMessages(awake), moodMessage(mood, axes?.expressiveness ?? 0.5), familiarityMessage(familiarity), speakerMessage(speakerPerson), ...(aanwezigMessage(present) ? [aanwezigMessage(present)!] : []), ...(askNameNow ? [UNKNOWN_NAME_PROMPT] : []), ...(BEHAVIOR_PROMPTS[behavior] ? [BEHAVIOR_PROMPTS[behavior]] : []), ...opinionMessage, recallPrompt(recalled), ...spontaneousPromptMessage, ...(dream ? [dreamPrompt(dream.text)] : []), ...noFrameMessage],
+      instructions: [stable, ageMessage(being), ...birthdayMessages(awake), moodMessage(mood, axes?.expressiveness ?? 0.5), familiarityMessage(familiarity), speakerMessage(speakerPerson), ...(aanwezigMessage(present) ? [aanwezigMessage(present)!] : []), ...(askNameNow ? [UNKNOWN_NAME_PROMPT] : []), ...(BEHAVIOR_PROMPTS[behavior] ? [BEHAVIOR_PROMPTS[behavior]] : []), ...opinionMessage, ...discretionMessage, recallPrompt(recalledForPrompt), ...spontaneousPromptMessage, ...(dream ? [dreamPrompt(dream.text)] : []), ...noFrameMessage],
       messages: [...workingMemory, promptMessage],
       tools: { ...turnTools, ...kijkTools, ...leerKennenTools },
       // Genoeg stappen om een tool te gebruiken en daarna het resultaat te verwoorden.
@@ -1657,7 +1706,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     return `er verscheen net iets nieuws in beeld: ${aanleiding.object}`;
   }
 
-  async function considerInitiative(aanleiding?: Aanleiding): Promise<string | null> {
+  async function considerInitiative(aanleiding?: Aanleiding, options: { aanwezig?: number[] } = {}): Promise<string | null> {
     if (reflecting > 0) return null;
     const [awake] = await deps.db.select().from(dynimos).where(isNotNull(dynimos.awakeSince));
     if (!awake) return null;
@@ -1713,7 +1762,9 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
         }`;
       }
       const axes = rowAxes(awake);
-      const spontaneous = axes ? await pickSpontaneous(awake.id, axes, SPONTANEOUS_INITIATIVE_CHANCE) : null;
+      // #94: considerInitiative kent geen Gesprekspartner, enkel de aanwezig-optie (default eigenaar).
+      const presentIds = await presentPersonIds(null, options.aanwezig);
+      const spontaneous = axes ? await pickSpontaneous(awake.id, axes, SPONTANEOUS_INITIATIVE_CHANCE, presentIds) : null;
       pendingSpontaneousId = spontaneous?.id;
       pendingDreamId = undefined;
       if (spontaneous) return `Je begint uit jezelf een gesprek en komt spontaan terug op iets uit een eerder gesprek: "${spontaneous.text}". ${SPONTANEOUS_HOW}`;

@@ -408,7 +408,7 @@ export default defineAgent<AgentUserData>({
       onSilence: () => {
         const key = watcher.current().key;
         void brain
-          .reflect({ onStart: () => reflectionDisplay.onStart(key) })
+          .reflect({ onStart: () => reflectionDisplay.onStart(key), aanwezig: faces.present(Date.now()) })
           .then(() => reflectionDisplay.onFinish(key));
       },
     });
@@ -459,7 +459,7 @@ export default defineAgent<AgentUserData>({
       initiativeInFlight = true;
       try {
         await refreshInitiativeAxes();
-        const instruction = await brain.considerInitiative(aanleiding);
+        const instruction = await brain.considerInitiative(aanleiding, { aanwezig: faces.present(Date.now()) });
         // Opnieuw controleren: de check duurde even, misschien is er intussen iemand gaan praten.
         if (!instruction || !isQuiet()) return;
         animusAgent.queueInitiative(instruction);

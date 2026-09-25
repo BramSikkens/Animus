@@ -320,7 +320,10 @@ export default defineAgent<AgentUserData>({
     });
     ctx.addShutdownCallback(async () => initiative.dispose());
 
-    await session.start({ agent: animusAgent, room: ctx.room });
+    // closeOnDisconnect uit: anders sluit de sessie (en stopt de job) zodra de eerste face disconnect, terwijl de room
+    // voor een andere tab blijft bestaan; LiveKit dispatcht enkel bij room-creatie, dus die tab zag dan geen agent.
+    // De job eindigt nu pas met de room; alle timers/watchers ruimen op via de shutdown-callbacks.
+    await session.start({ agent: animusAgent, room: ctx.room, inputOptions: { closeOnDisconnect: false } });
 
     // Volgt de wakkere Dynimo (dashboard-acties komen binnen via Postgres NOTIFY): een wissel breekt het
     // lopende antwoord af (zoals barge-in; de brain-stream sluit via textStream) en zet het gezichtje om.

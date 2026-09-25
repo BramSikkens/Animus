@@ -4,12 +4,16 @@ import {
   generateText,
   isStepCount,
   streamText,
+  tool,
   Output,
   type EmbeddingModel,
   type Experimental_EvaluationModel,
   type LanguageModel,
   type ModelMessage,
   type SystemModelMessage,
+  type ToolModelMessage,
+  type ToolResultPart,
+  type ToolSet,
 } from "ai";
 import { and, asc, cosineDistance, desc, eq, gt, gte, isNotNull, isNull, lte, notInArray, sql } from "drizzle-orm";
 import { z } from "zod";
@@ -386,6 +390,20 @@ async function classify(type1: Experimental_EvaluationModel, text: string, conte
   const kijken = (answers as Record<string, { choice?: string } | undefined>).kijken?.choice === "ja";
 
   return { deltas, indruk, intent, kijken };
+}
+
+// Werkgeheugen bewaart geen beelden (ADR-0019): een kijk-tool-resultaat met content (tekst + beeld) wordt herschreven
+// naar enkel tekst, zodat een beeld nooit méé blijft slepen naar volgende beurten.
+function stripBeelden(messages: ModelMessage[]): ModelMessage[] {
+  return messages.map((message): ModelMessage => {
+    if (message.role !== "tool") return message;
+    const content = (message as ToolModelMessage).content.map((part): ToolResultPart | (typeof part) => {
+      if (part.type !== "tool-result" || part.output.type !== "content") return part;
+      const text = part.output.value.filter((v) => v.type === "text").map((v) => v.text).join(" ");
+      return { ...part, output: { type: "text", value: `${text} (beeld niet bewaard)` } };
+    });
+    return { ...message, content };
+  });
 }
 
 type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
@@ -1099,6 +1117,42 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
       : userMessage;
     const noFrameMessage: SystemModelMessage[] = kijken && !frame ? [{ role: "system", content: "Je kunt nu niets zien: er is geen camerabeeld. Zeg dat eerlijk en verzin niet wat je ziet." }] : [];
 
+    // Kijk-tool (ADR-0019, vangnet): enkel aangeboden als Type1 zelf geen beeld meestuurde (canLook && !kijken); zei
+    // Type1 al ja (ook met een null-frame), dan wordt nooit een tweede keer gekeken. Guard binnen deze beurt: een
+    // tweede aanroep (multi-step) roept lookFrame niet nog eens aan.
+    let kijkGebruikt = false;
+    const kijkTools: ToolSet = canLook && !kijken
+      ? {
+          kijk: tool({
+            description:
+              "Kijkt door je camera en geeft het huidige beeld. Gebruik dit als de Gesprekspartner je iets toont of vraagt wat je ergens van vindt en je daarvoor moet zien.",
+            inputSchema: z.object({}),
+            execute: async (): Promise<{ frame: Frame | null; alGekeken?: boolean }> => {
+              if (kijkGebruikt) return { frame: null, alGekeken: true };
+              kijkGebruikt = true;
+              return {
+                frame: await deps.lookFrame!().catch((error: unknown) => {
+                  console.warn("Frame ophalen faalde:", error instanceof Error ? error.message : error);
+                  return null;
+                }),
+              };
+            },
+            toModelOutput: ({ output }) =>
+              output.alGekeken
+                ? { type: "text", value: "Je hebt deze beurt al gekeken." }
+                : output.frame
+                  ? {
+                      type: "content",
+                      value: [
+                        { type: "text", text: "Dit zie je nu door je camera." },
+                        { type: "file", data: { type: "data", data: output.frame.data }, mediaType: output.frame.mediaType },
+                      ],
+                    }
+                  : { type: "text", value: "Je kunt nu niets zien: er is geen camerabeeld. Zeg dat eerlijk en verzin niet wat je ziet." },
+          }),
+        }
+      : {};
+
     // ponytail: sequentieel na de emotie; parallel met Type1 als de latency ooit telt.
     const recalled = await recall(text, being.id);
     // Spontane herinnering: bij initiatief die van considerInitiative (al in `text`), anders heel zelden een aanleiding.
@@ -1130,7 +1184,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
       model: intent === "complex" ? deps.type2.heavy : deps.type2.light,
       instructions: [stable, ageMessage(being), ...birthdayMessages(awake), moodMessage(mood, axes?.expressiveness ?? 0.5), familiarityMessage(familiarity), ...(BEHAVIOR_PROMPTS[behavior] ? [BEHAVIOR_PROMPTS[behavior]] : []), ...opinionMessage, recallPrompt(recalled), ...spontaneousPromptMessage, ...(dream ? [dreamPrompt(dream.text)] : []), ...noFrameMessage],
       messages: [...workingMemory, promptMessage],
-      tools,
+      tools: { ...tools, ...kijkTools },
       // Genoeg stappen om een tool te gebruiken en daarna het resultaat te verwoorden.
       stopWhen: isStepCount(5),
     });
@@ -1174,7 +1228,11 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
           yield* flushPacer();
           yield { type: "tool-call", toolName: part.toolName, input: part.input };
         }
-        if (part.type === "tool-result") yield { type: "tool-result", toolName: part.toolName, output: part.output };
+        if (part.type === "tool-result") {
+          // Kijk-tool: nooit de camerabytes naar de consument lekken via het BrainEvent.
+          const output = part.toolName === "kijk" ? { gezien: (part.output as { frame: Frame | null }).frame !== null } : part.output;
+          yield { type: "tool-result", toolName: part.toolName, output };
+        }
         if (part.type === "tool-error") {
           const message = part.error instanceof Error ? part.error.message : String(part.error);
           yield { type: "tool-result", toolName: part.toolName, output: { error: message } };
@@ -1190,7 +1248,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
       if (outcome !== "completed") abort.abort();
       // Een mislukte beurt komt nergens in; een onderbroken beurt wel, met wat al gezegd was.
       if (outcome === "completed") {
-        workingMemory.push(userMessage, ...(await result.responseMessages));
+        workingMemory.push(userMessage, ...stripBeelden(await result.responseMessages));
       } else if (outcome === "interrupted" && full) {
         workingMemory.push(userMessage, { role: "assistant", content: full });
       }

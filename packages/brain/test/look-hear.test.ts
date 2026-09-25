@@ -4,7 +4,7 @@ import { simulateReadableStream } from "ai";
 import { eq } from "drizzle-orm";
 import { EMBEDDING_DIMENSIONS, dynimos, memories } from "@animus/db/schema";
 import { EMOTIONS } from "../src/emotion.js";
-import { createBrain, type Frame } from "../src/index.js";
+import { createBrain, type BrainEvent, type Frame } from "../src/index.js";
 import { createTestDb, truncateAll } from "./db.js";
 
 const db = createTestDb();
@@ -59,12 +59,27 @@ const embedder = () =>
     doEmbed: async ({ values }) => ({ embeddings: values.map(() => new Array<number>(EMBEDDING_DIMENSIONS).fill(0)), warnings: [] }),
   });
 
-// Legt het RAW prompt-object vast dat Type2 krijgt.
-function type2() {
-  const prompts: unknown[] = [];
+// Legt het RAW prompt-object én de aangeboden tools vast die Type2 per call krijgt. `steps` scriptet, per call,
+// of Type2 de kijk-tool aanroept ("kijk") of tekst antwoordt ("text"); calls voorbij het script antwoorden tekst.
+function type2(steps: ("kijk" | "text")[] = []) {
+  const calls: { prompt: unknown; tools: unknown }[] = [];
+  let callIndex = 0;
   const model = new MockLanguageModelV4({
     doStream: async (options) => {
-      prompts.push(options.prompt);
+      calls.push({ prompt: options.prompt, tools: options.tools });
+      const step = steps[callIndex] ?? "text";
+      callIndex++;
+      if (step === "kijk") {
+        return {
+          stream: simulateReadableStream({
+            chunks: [
+              { type: "stream-start" as const, warnings: [] },
+              { type: "tool-call" as const, toolCallId: `k${callIndex}`, toolName: "kijk", input: "{}" },
+              { type: "finish" as const, usage: NULL_USAGE, finishReason: { unified: "tool-calls" as const, raw: undefined } },
+            ],
+          }),
+        };
+      }
       return {
         stream: simulateReadableStream({
           chunks: [
@@ -78,7 +93,7 @@ function type2() {
       };
     },
   });
-  return { model, prompts };
+  return { model, calls, get prompts(): unknown[] { return calls.map((c) => c.prompt); } };
 }
 
 async function insertDynimo(extra: Partial<typeof dynimos.$inferInsert> = {}) {
@@ -93,6 +108,12 @@ async function hear(brain: ReturnType<typeof createBrain>, text: string): Promis
   for await (const _ of brain.hear(text)) void _;
 }
 
+async function hearEvents(brain: ReturnType<typeof createBrain>, text: string): Promise<BrainEvent[]> {
+  const events: BrainEvent[] = [];
+  for await (const event of brain.hear(text)) events.push(event);
+  return events;
+}
+
 // Telt afbeeldingen in de user-berichten van het RAW prompt-object: de AI SDK normaliseert een `image`-content-part
 // naar een `file`-part in het prompt dat het model ziet.
 function countImages(prompt: unknown): number {
@@ -101,6 +122,16 @@ function countImages(prompt: unknown): number {
     .filter((m) => m.role === "user")
     .flatMap((m) => (Array.isArray(m.content) ? m.content : []))
     .filter((part: { type?: string }) => part && (part.type === "file" || part.type === "image")).length;
+}
+
+// Diepe telling: loopt het hele prompt-object (ook tool-berichten) af en telt elk object met een `mediaType` die met
+// "image/" begint. Nodig omdat een beeld in een tool-resultaat (kijk-tool) niet in een user-bericht zit.
+function countAllImages(value: unknown): number {
+  if (!value || typeof value !== "object") return 0;
+  const record = value as Record<string, unknown>;
+  const own = typeof record.mediaType === "string" && record.mediaType.startsWith("image/") ? 1 : 0;
+  const children = Array.isArray(value) ? value : Object.values(record);
+  return own + children.reduce((sum: number, child) => sum + countAllImages(child), 0);
 }
 
 describe("Kijken in hear()", () => {
@@ -259,5 +290,94 @@ describe("Kijken in hear()", () => {
     const stored = await db.select({ text: memories.text }).from(memories).where(eq(memories.dynimoId, row.id));
     for (const memory of stored) expect(typeof memory.text).toBe("string");
     expect(stored.some((memory) => memory.text.includes("Wat zie je?"))).toBe(true);
+  });
+});
+
+// Namen van de aangeboden tools op een gegeven call, ongeacht of `tools` ontbreekt.
+function toolNames(call: { tools: unknown } | undefined): string[] {
+  const tools = (call?.tools ?? []) as { name: string }[];
+  return tools.map((t) => t.name);
+}
+
+function brainWith(config: { kijken?: "ja" | "nee"; steps?: ("kijk" | "text")[]; lookFrame?: (() => Promise<Frame | null>) | null } = {}) {
+  const t1 = type1({ kijken: config.kijken });
+  const t2 = type2(config.steps);
+  const brain = createBrain({
+    db,
+    embedder: embedder(),
+    type1: t1.model,
+    type2: { light: t2.model, heavy: t2.model },
+    now: () => now,
+    random: () => 0.99,
+    ...(config.lookFrame === null ? {} : { lookFrame: config.lookFrame ?? (async () => FRAME) }),
+  });
+  return { brain, t1, t2 };
+}
+
+describe("Kijk-tool in hear() (vangnet, ADR-0019)", () => {
+  it("lookFrame aanwezig + kijken=nee: de kijk-tool wordt aangeboden", async () => {
+    await insertDynimo();
+    const { brain, t2 } = brainWith({ kijken: "nee" });
+    await hear(brain, "Hoi");
+    expect(toolNames(t2.calls[0])).toContain("kijk");
+  });
+
+  it("kijken=ja (met frame): de kijk-tool wordt niet aangeboden", async () => {
+    await insertDynimo();
+    const { brain, t2 } = brainWith({ kijken: "ja" });
+    await hear(brain, "Wat zie je?");
+    expect(toolNames(t2.calls[0])).not.toContain("kijk");
+  });
+
+  it("kijken=ja met een null-frame: de kijk-tool wordt niet aangeboden", async () => {
+    await insertDynimo();
+    const { brain, t2 } = brainWith({ kijken: "ja", lookFrame: async () => null });
+    await hear(brain, "Wat zie je?");
+    expect(toolNames(t2.calls[0])).not.toContain("kijk");
+  });
+
+  it("zonder lookFrame-dep: de kijk-tool wordt niet aangeboden", async () => {
+    await insertDynimo();
+    const { brain, t2 } = brainWith({ kijken: "nee", lookFrame: null });
+    await hear(brain, "Wat zie je?");
+    expect(toolNames(t2.calls[0])).not.toContain("kijk");
+  });
+
+  it("Type2 roept kijk aan, frame aanwezig: de tweede stap krijgt precies één beeld en het tool-result-event lekt geen bytes", async () => {
+    await insertDynimo();
+    const { brain, t2 } = brainWith({ kijken: "nee", steps: ["kijk", "text"] });
+    const events = await hearEvents(brain, "Kijk eens");
+    expect(countAllImages(t2.calls[1]!.prompt)).toBe(1);
+    const toolResult = events.find((event): event is Extract<BrainEvent, { type: "tool-result" }> => event.type === "tool-result" && event.toolName === "kijk");
+    expect(toolResult?.output).toEqual({ gezien: true });
+  });
+
+  it("Type2 roept kijk aan, lookFrame geeft null: tool-resultaat is tekst, geen beeld", async () => {
+    await insertDynimo();
+    const { brain, t2 } = brainWith({ kijken: "nee", steps: ["kijk", "text"], lookFrame: async () => null });
+    await hear(brain, "Kijk eens");
+    expect(countAllImages(t2.calls[1]!.prompt)).toBe(0);
+    expect(JSON.stringify(t2.calls[1]!.prompt)).toContain("Je kunt nu niets zien");
+  });
+
+  it("Type2 roept kijk twee keer aan in één beurt: lookFrame wordt precies één keer aangeroepen", async () => {
+    await insertDynimo();
+    const lookFrame = vi.fn(async () => FRAME);
+    const { brain, t2 } = brainWith({ kijken: "nee", steps: ["kijk", "kijk", "text"], lookFrame });
+    await hear(brain, "Kijk nog eens");
+    expect(lookFrame).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(t2.calls[2]!.prompt)).toContain("Je hebt deze beurt al gekeken");
+  });
+
+  it("na een beurt met kijk-tool: de volgende beurt heeft 0 beelden, wel het tool-resultaat als tekst", async () => {
+    await insertDynimo();
+    const { brain, t2 } = brainWith({ kijken: "nee", steps: ["kijk", "text", "text"] });
+    await hear(brain, "Kijk eens");
+    expect(countAllImages(t2.calls[1]!.prompt)).toBe(1);
+
+    await hear(brain, "Oke, dank je");
+    expect(countAllImages(t2.calls[2]!.prompt)).toBe(0);
+    expect(JSON.stringify(t2.calls[2]!.prompt)).toContain("Dit zie je nu door je camera");
+    expect(JSON.stringify(t2.calls[2]!.prompt)).toContain("(beeld niet bewaard)");
   });
 });

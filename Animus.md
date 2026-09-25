@@ -148,14 +148,14 @@ Gebaseerd op `born_at` (kalendertijd sinds genesis) — het robotje veroudert oo
 
 ### Meerdere wezens (fase 2)
 
-Er kunnen meerdere wezens naast elkaar bestaan, elk met een eigen identiteit, geheugen, persoonlijkheid en Drijfveren. Het dashboard wordt de plek om ze te beheren:
+Er kunnen meerdere wezens naast elkaar bestaan, elk met een eigen identiteit, geheugen, persoonlijkheid en Drijfveren. Ze zijn te beheren via het dashboard én via de Galerij, het startscherm van het gezichtje:
 
 | Actie | Betekenis |
 |-------|-----------|
 | **Tot leven wekken** | een nieuw wezen laten ontstaan via de genesis-flow (nieuwe Seed, naam, karakter) |
 | **Wakker maken** | een slapend wezen opstarten; het praat voortaan via het gezichtje |
 | **Laten slapen** | het wakkere wezen gaat slapen; niets gaat verloren |
-| **Doden** | *Verwijderen* zoals hierboven: bevestigde, onomkeerbare actie met Afscheidsreflectie en Grafschrift — nu ook vanuit het dashboard i.p.v. enkel de CLI |
+| **Doden** | *Verwijderen* zoals hierboven: bevestigde, onomkeerbare actie met Afscheidsreflectie en Grafschrift — nu ook vanuit het dashboard en de Galerij i.p.v. enkel de CLI |
 
 - **Eén wezen tegelijk wakker:** wie je wakker maakt, praat met het gezichtje; de anderen slapen. Een ander wezen wakker maken laat het huidige eerst slapen. Past bij één robotlichaam in fase 3.
 - **Volledig gescheiden:** wezens weten niet dat de anderen bestaan en delen niets — geen geheugens, geen Grafschriften (zoals nu al: een nieuw wezen kan het Grafschrift van zijn voorganger niet lezen).
@@ -174,13 +174,13 @@ Type1 doet een periodieke of event-getriggerde check ("is er nu iets de moeite w
 
 ### Dromen
 
-Onderdeel van de bestaande Reflectie-bij-het-slapen (geen apart schema of scheduler): Type2 genereert er een korte, associatieve/surrealistische Droom bij op basis van recente Herinneringen, Persoonlijkheid en Drijfveren (vooral Toekomstdromen, Wensen en Ergernissen). Opslag in een aparte `dreams`-tabel. Wordt zeldzaam (niet elke keer) aangehaald in gesprek om speciaal te blijven. Een Droom overschrijft de Ontwaakstemming die de Reflectie klaarzet enkel als hij intenser is — zelfde regel als een gewone Emotie tegenover de Stemming.
+Onderdeel van de bestaande Reflectie-bij-het-slapen (geen apart schema of scheduler): Type2 genereert er een korte, associatieve/surrealistische Droom bij op basis van recente Herinneringen, Persoonlijkheid en Drijfveren (vooral Toekomstdromen, Wensen en Ergernissen). Opslag in een aparte `dreams`-tabel. Wordt zeldzaam (niet elke keer) aangehaald in gesprek om speciaal te blijven. Een Droom overschrijft de Ontwaakstemming die de Reflectie klaarzet enkel als hij intenser is — de Ontwaakstemming wordt bij het wekken de ruststand met die ene Emotie erboven (zie **Stemming** in [CONTEXT.md](CONTEXT.md)).
 
 ## Emoties & het gezicht
 
 **Emotie als reactie (fase 2):** Type1 bepaalt niet de emotie van de uiting van de gesprekspartner (zoals in fase 1), maar **hoe het wezen zich erbij voelt**, met zijn Drijfveren en persoonlijkheid als context. Zegt iemand neutraal "het regent weer", dan kan een wezen met een afkeer van weerpraat zich verveeld voelen.
 
-**Stemming (fase 2):** een emotie blijft over beurten heen hangen en dooft geleidelijk uit naar de basisemotie van het wezen, i.p.v. elke beurt op nul te beginnen — na een ergernis is het nog even kortaf.
+**Stemming (fase 2):** een emotie blijft over beurten heen hangen en dooft geleidelijk uit naar de ruststand van het wezen (elke Emotie 50, de Basisemotie 65), i.p.v. elke beurt opnieuw te beginnen — na een ergernis is het nog even kortaf. In de weergave golft de Stemming traag rond die ruststand. Zie [ADR-0012](docs/adr/0012-stemming-als-vector.md) en [ADR-0017](docs/adr/0017-stemming-rust-op-50.md).
 
 **Emotie → reactie (fase 2):** de huidige emotie en stemming gaan mee in de Type2-prompt, zodat ze de toon kleuren (een geërgerd wezen antwoordt korter en stugger). In fase 1 ziet Type2 de emotie niet; enkel het gezichtje toont ze.
 
@@ -241,7 +241,7 @@ Twee sporen, te combineren:
 
 **Klein dashboard:** een Next.js-pagina die rechtstreeks connecteert met dezelfde Postgres-database — toont karakterprofiel (kern + geëvolueerd deel), recente geheugens/dromen, huidige emotie/energie, leeftijd, activiteitenlog. Later ook een handmatige "override"-plek (fase 2b) — **emotie forceren** zet de Stemming (die daarna gewoon met de bestaande halfwaardetijd uitdooft, geen apart "gepind"-concept), **herinnering toevoegen** krijgt dezelfde synchrone embed-stap als een normale Herinnering, anders zou hij nooit teruggevonden worden — en het Langfuse-kostendashboard (zie Kostenbeheersing). Vanaf fase 2 ook het beheer van meerdere wezens (zie *Meerdere wezens*).
 
-**Modelwissel-experiment:** een dropdown in het dashboard om het actieve Type2-model tijdens een sessie te wisselen (Claude/Gemini/OpenAI/lokaal), om te observeren hoe het karakter subtiel verschuift per onderliggend model — meteen ook een test of de architectuur écht modelonafhankelijk is. Kost = enkel tijdens bewust testen, geen doorlopende productiekost.
+**Modelwissel-experiment (fase 3):** een dropdown in het dashboard om het actieve Type2-model tijdens een sessie te wisselen (Claude/Gemini/OpenAI/lokaal), om te observeren hoe het karakter subtiel verschuift per onderliggend model — meteen ook een test of de architectuur écht modelonafhankelijk is. Kost = enkel tijdens bewust testen, geen doorlopende productiekost.
 
 ## Kostenbeheersing
 
@@ -287,22 +287,22 @@ Twee sporen, te combineren:
 
 **Fase 1 — computer-prototype:** Type2-brein (wisselbaar via Vercel AI SDK) + genesis-flow (naam/karakter) + basisgeheugen (pgvector) + tools + gezichtje op scherm (React/SVG) + STT/TTS via LiveKit + Type1-router (Jev) voor emotie/turn-taking + dashboard + volledig verwijderen (met grafschrift en afscheidsreflectie — nodig om de genesis-flow herhaald te kunnen testen). Nog geen camera/motoren — puur om de "geest" en het karakter te valideren.
 
-**Fase 2 — uitbreiding op de computer:** volledige feature-set (dromen, verjaardag, nieuwsgierigheid, zelf geluiden, doodle-modus, levendige idle-animatie) + karakterevolutie via de reflectie-loop (basis voor de dromen), inclusief een MBTI-persoonlijkheid met traag verschuivende assen (spraakzaamheid via I/E, initiatief afgeleid van N/P) + Langfuse-kostenmonitoring + handmatige overrides (emotie forceren, herinnering toevoegen/verwijderen) in het dashboard + meerdere wezens, te beheren via het dashboard (tot leven wekken, wakker maken, laten slapen, doden) + Drijfveren (wensen, doelen, toekomstdromen, afkeren, ergernissen) + emotie als reactie van het wezen, met een uitdovende stemming die de toon van Type2 kleurt.
+**Fase 2 — uitbreiding op de computer:** volledige feature-set (dromen, verjaardag, nieuwsgierigheid, zelf geluiden, doodle-modus, levendige idle-animatie) + karakterevolutie via de reflectie-loop (basis voor de dromen), inclusief een MBTI-persoonlijkheid met traag verschuivende assen (spraakzaamheid via I/E, initiatief afgeleid van N/P) + Langfuse-kostenmonitoring (uitgesteld, nog niet gebouwd) + handmatige overrides (emotie forceren, herinnering toevoegen/verwijderen) in het dashboard + meerdere wezens, te beheren via het dashboard (tot leven wekken, wakker maken, laten slapen, doden) + Drijfveren (wensen, doelen, toekomstdromen, afkeren, ergernissen) + emotie als reactie van het wezen, met een uitdovende stemming die de toon van Type2 kleurt.
 
-**Fase 3 — Raspberry Pi + motoren:** Alles porteren naar de Pi, camera + MediaPipe (Type1-perceptie) en multimodale Type2-vision (verschoven uit fase 2: de camera hoort bij de hardware en het hoofdvolggedrag), motoraansturing (johnny-five) gekoppeld aan de tool-laag, hoofdvolggedrag via servo's, schermpje in kiosk-mode voor het gezichtje, ervaringsgeheugen voor fysieke acties, veiligheidslaag (Type1) voor motorbewegingen, privacy-maatregelen (mute-knop, luister-indicator, wake-word), optioneel per-persoon-geheugen (stem/gezicht-herkenning).
+**Fase 3 — Raspberry Pi + motoren:** Alles porteren naar de Pi, camera + MediaPipe (Type1-perceptie) en multimodale Type2-vision (verschoven uit fase 2: de camera hoort bij de hardware en het hoofdvolggedrag), motoraansturing (johnny-five) gekoppeld aan de tool-laag, hoofdvolggedrag via servo's, schermpje in kiosk-mode voor het gezichtje, ervaringsgeheugen voor fysieke acties, veiligheidslaag (Type1) voor motorbewegingen, privacy-maatregelen (mute-knop, luister-indicator, wake-word), optioneel per-persoon-geheugen (stem/gezicht-herkenning), modelwissel-experiment (Type2-model wisselen vanuit het dashboard).
 
 ## Open vragen & nog te beslissen punten
 
 Beslist tijdens de `/grill-with-docs`-sessies (fase 1 en fase 2a) — zie [CONTEXT.md](CONTEXT.md) en `docs/adr/` voor de vastgelegde redenen:
 
 - [x] **Leeftijd:** kalendertijd sinds `born_at`. Zie [ADR-0002](docs/adr/0002-leeftijd-kalendertijd.md).
-- [x] **Wenkbrauwen:** toch behouden, maar enkel voor een subset van emoties (verrast, boos, bang) — de rest blijft neutraal-recht. Zie **Emotiekeyframe** in [CONTEXT.md](CONTEXT.md).
+- [x] **Wenkbrauwen:** toch behouden, maar enkel voor een subset van emoties (verrast, boos, bang, droevig) — de rest blijft recht. Zie **Emotiekeyframe** in [CONTEXT.md](CONTEXT.md).
 - [x] **Verwijderen — "grafschrift":** bewaren, onleesbaar voor de nieuwe robot. Zie [ADR-0003](docs/adr/0003-verwijderen-bewaart-grafschrift.md).
 - [x] **Local-only fallback:** nu niet bouwen (YAGNI) — de Vercel AI SDK-abstractie maakt dit later goedkoop toevoegbaar. Heropenen zodra er een concrete aanleiding is.
 - [x] **Meerdere gebruikers:** uitgesteld naar fase 3 (optioneel) — per-persoon-geheugen is geen vereiste voor fase 2.
 - [x] **Persoonlijkheid — tempo:** maximaal 0,02 per as per Reflectie, en enkel reflecteren als er nieuwe Herinneringen zijn — een letterwissel kost minstens ~10 Reflecties (weken).
 - [x] **Persoonlijkheid — gewicht van verzoeken:** Type1 geeft per uiting een **Indruk** (0–1), bewaard bij de Herinnering; de Reflectie weegt ermee, binnen dezelfde cap.
-- [x] **Stemming — tempo:** tijdgebaseerd, halfwaardetijd 10 minuten, voor alle Dynimo's gelijk. Een nieuwe Emotie vervangt de Stemming als ze intenser is dan de uitgedoofde huidige. Basisemotie per Dynimo, gekozen bij genesis.
+- [x] **Stemming — tempo:** een vector met een waarde per Emotie; Type1-delta's tellen op, elke waarde dooft tijdgebaseerd uit naar haar ruststand (halfwaardetijd 3 minuten, geschaald met reactiviteit). Ruststand 50, Basisemotie 65 (per Dynimo, afgeleid uit de Seed bij genesis). 'Neutraal' is geen Emotie meer. Zie [ADR-0012](docs/adr/0012-stemming-als-vector.md) en [ADR-0017](docs/adr/0017-stemming-rust-op-50.md).
 - [x] **Drijfveren — aantal:** 1–2 per soort bij genesis, maximaal 5 actieve per soort.
 - [x] **Doelen — actief nastreven:** in 2a verandert de status enkel bij Reflectie; actief nastreven hoort bij initiatief (2b).
 - [x] **Meerdere wezens — wisselen:** het lopende antwoord wordt meteen onderbroken, de huidige Dynimo gaat slapen (met Reflectie), daarna wordt de andere wakker.
@@ -312,4 +312,5 @@ Beslist tijdens de `/grill-with-docs`-sessies (fase 1 en fase 2a) — zie [CONTE
 - [x] **Levendigheid/idle-animatie — technische koppeling:** *luisterend*/*spreekt* leunen op LiveKit's ingebouwde `AgentState`/`UserState` ([ADR-0011](docs/adr/0011-weergavetoestand-gemengde-bron.md)); de mondbeweging leest het live volume van de agent-audiotrack via `useTrackVolume`.
 - [x] **Initiatief — technisch:** de agent roept zelf `session.say(...)`/`session.generateReply(...)` aan bij een positieve Type1-trigger, net als de stiltetimer; actieve Doelen tellen mee als triggerbron ("actief nastreven"), zonder nieuw statusmechanisme.
 - [x] **Zelf geluiden — mechanisme:** datachannel-event van de agent, vaste vooraf opgenomen clip per triggersoort in de face-app, geen live audiogeneratie.
-- [ ] **Modelwissel-experiment:** uit `Animus.md` verwijderd wegens niet uitgewerkt/onduidelijk doel; zeg het als dit toch bij fase 2b hoort.
+- [x] **Modelwissel-experiment:** verschoven naar fase 3.
+- [x] **Langfuse-kostenmonitoring:** uitgesteld; het enige nog niet gebouwde onderdeel van fase 2.

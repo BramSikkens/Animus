@@ -82,7 +82,7 @@ Vrije tekst naast het Kernkarakter, die elke Reflectie in kleine stappen herschr
 _Avoid_: groei, nieuw karakter
 
 **Archetype**:
-Een vooringesteld karakterpatroon (bv. schattig wezentje, robot, lieve oude dame, professor) met zes assen, Basisemotie, spreekstijl-instructies voor Type2 en een stemomschrijving. Bij genesis kiest Type2 er één uit een gevarieerd aanbod van vier (of geen); assen en Basisemotie worden daaruit voorgezet. Bewaard bij de Dynimo; in het dashboard te wijzigen, wat assen en Basisemotie opnieuw als startpunt zet — geen pinning, de assen schuiven daarna vrij.
+Een vooringesteld karakterpatroon (bv. schattig wezentje, robot, lieve oude dame, professor) met zes assen, Basisemotie, spreekstijl-instructies voor Type2 en een stemomschrijving. Bij genesis kiest Type2 altijd één uit een gevarieerd aanbod van vier; geeft hij een id buiten het aanbod (onbekend, leeg of niet aangeboden), dan kiest de rng er een aangeboden. Assen en Basisemotie worden daaruit voorgezet. Bestaande Dynimo's met `archetype = null` blijven zoals ze zijn (het dashboard kan er een zetten). Bewaard bij de Dynimo; in het dashboard te wijzigen, wat assen en Basisemotie opnieuw als startpunt zet — geen pinning, de assen schuiven daarna vrij.
 _Avoid_: rol, persona, type (dat is Type1/Type2)
 
 **Persoonlijkheid**:
@@ -127,7 +127,7 @@ _Avoid_: reactie (te vaag), weigeren
 Een kort geschreven geluid ('ha ha', 'pff…', 'hmm…', 'oh!', 'eh…') dat vóór de tekst van een beurt komt zodat TTS het uitspreekt (geen audio tags; werkt met ElevenLabs Flash en Deepgram). Hooguit één per beurt, gekozen door een pure functie (`pickSpeechSound`) uit de dominante Emotie (blij → lach, bang/nieuwsgierig → hmm, verveeld/droevig → zucht, verrast → oh; bij hoge P een aarzeling 'eh…' als de Emotie geen eigen geluid heeft). Kans = basiskans × expressiviteit × waarde van de dominante Emotie; expressiviteit 0, korte antwoorden (<20 tekens), gedrag kort/negeren en herhaling van het vorige geluid geven geen geluid. Werkgeheugen en Herinneringen bewaren de schone tekst zonder geluid. Daarna zet `applyPauses` (`speech-pacing.ts`) per zin een pauzeteken ' … ' in de TTS-tekst, en een tempofactor op `speed`, afhankelijk van de dominante Emotie (zie [ADR-0014](docs/adr/0014-elevenlabs-als-tts.md)); ook dat blijft buiten het geheugen.
 
 **Basisemotie**:
-De Emotie die in de ruststand van de Stemming op 65 staat, terwijl alle andere Emoties op 50 rusten (haar tegenpool, als ze er een heeft, op 35); de Stemming dooft er dus naartoe uit. Bij genesis door Type2 afgeleid uit de Seed (niet uit het net-ontwaakt-zijn) als deel van het temperament, of voorgezet door het gekozen Archetype, en daarna vrijwel onveranderlijk.
+De Emotie die in de ruststand van de Stemming op 65 staat, terwijl alle andere Emoties op 50 rusten (haar tegenpool, als ze er een heeft, op 35); de Stemming dooft er dus naartoe uit. Bij genesis voorgezet door het gekozen Archetype (dat Type2 uit de Seed afleidt) als deel van het temperament, en daarna vrijwel onveranderlijk.
 _Avoid_: default-emotie, rustemotie
 
 **Emotiekeyframe**:

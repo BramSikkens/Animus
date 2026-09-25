@@ -14,6 +14,14 @@ export function rollVerstand(richtwaarde: number, random: () => number): number 
   return Math.min(1, Math.max(0, value));
 }
 
+/** Groei per Reflectie (spec #99): hoogstens +0.02, nooit omlaag; een leeg Verstand blijft leeg (de backfill vult het). */
+export const VERSTAND_GROWTH_LIMIT = 0.02;
+
+export function growVerstand(current: number | null, shift: number): number | null {
+  if (current === null) return null;
+  return Math.min(1, current + Math.min(VERSTAND_GROWTH_LIMIT, Math.max(0, shift)));
+}
+
 /** Zelfde bandgrenzen als de Persoonlijkheidsassen (personality.ts); null (nog te backfillen) valt in het midden. */
 export function verstandBand(verstand: number | null): VerstandBand {
   if (verstand === null) return "midden";

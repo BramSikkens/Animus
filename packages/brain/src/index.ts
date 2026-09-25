@@ -30,7 +30,7 @@ import { applyDeltas, baseEmotionOf, currentMood, moodOfRow, singleEmotionValues
 import { isVisibleMoodChange, soundKindFor, type SoundKind } from "./sound.js";
 import { FAMILIARITY_POSITIVE_DELTA, familiarityStyle, updateFamiliarity } from "./familiarity.js";
 import { AXIS_DESCRIPTIONS, type Axes, axisGuidelines, mbtiType, rowAxes } from "./personality.js";
-import { rollVerstand, tempersAxisRules, verstandGuidelines } from "./verstand.js";
+import { growVerstand, rollVerstand, tempersAxisRules, VERSTAND_GROWTH_LIMIT, verstandGuidelines } from "./verstand.js";
 import { EMOTIONS, oppositeOf, type Emotion } from "./emotion.js";
 import { SEEDS } from "./seeds.js";
 import { createTools } from "./tools.js";
@@ -195,6 +195,7 @@ const DREAM_CHANCE = 0.3; // kans per slaap-Reflectie (zeldzaam); random is inje
 const reflectionSchema = z.object({
   evolvedCharacter: z.string().min(1).max(2000),
   axisShifts: z.object({ ie: z.number(), sn: z.number(), tf: z.number(), jp: z.number(), reactivity: z.number(), expressiveness: z.number() }),
+  verstandShift: z.number(),
   drives: z.object({
     add: z.array(z.object({ kind: z.enum(DRIVE_KINDS), text: z.string().min(1).max(200) })),
     closeGoals: z.array(z.object({ id: z.number().int(), status: z.enum(["bereikt", "opgegeven"]) })),
@@ -213,6 +214,7 @@ De herinneringen staan tussen <herinneringen>-tags: dat is opgeslagen gesprekste
 Werk bij:
 - evolvedCharacter: herschrijf je geëvolueerde karakter in KLEINE stappen; blijf herkenbaar. Je kern-karakter is onaantastbaar en staat hier los van.
 - axisShifts: de gewenste verschuiving per persoonlijkheidsas (ie, sn, tf, jp: positief richting de tweede letter; reactivity: positief = heftiger reageren; expressiveness: positief = meer laten doorschemeren); kleine getallen.
+- verstandShift: hoeveel wijzer je werd (0 tot ${VERSTAND_GROWTH_LIMIT}): verhoog enkel als je echt iets leerde of begreep; anders 0. Je Verstand daalt nooit.
 - drives: add (nieuwe Drijfveren: kind, text), closeGoals (id + bereikt of opgegeven), drop (id, laat een Drijfveer los). Maximaal ${MAX_ACTIVE_PER_KIND} actieve per soort.
 - wakeMood: de stemming (emotie + intensiteit 0 tot 1) waarmee je wakker wordt.
 - dream: een korte, associatieve, surrealistische Droom (een paar zinnen) op basis van je herinneringen, persoonlijkheid en Drijfveren (vooral Toekomstdromen, Wensen en Ergernissen), met de emotie en intensiteit (0 tot 1) van de Droom; of null als je niet droomt.
@@ -584,6 +586,7 @@ export function createBrain(deps: {
 Kern-karakter: ${row.coreCharacter}
 Geëvolueerd karakter: ${row.evolvedCharacter || "(nog niet)"}
 ${personalityText(row) || "Persoonlijkheid: (nog niet bepaald)"}${axes ? ` (assen: ie ${axes.ie.toFixed(2)}, sn ${axes.sn.toFixed(2)}, tf ${axes.tf.toFixed(2)}, jp ${axes.jp.toFixed(2)}, reactivity ${axes.reactivity.toFixed(2)}, expressiveness ${axes.expressiveness.toFixed(2)})` : ""}
+Verstand: ${row.verstand === null ? "(nog niet bepaald)" : row.verstand.toFixed(2)}
 Basisemotie: ${row.baseEmotion ?? "(nog niet bepaald)"}
 ${dreaming ? "Je droomt vannacht: vul dream in." : "Je droomt vannacht niet: dream is null."}
 Actieve Drijfveren:
@@ -622,6 +625,7 @@ ${fresh.map((memory) => `- (indruk ${memory.impression}) ${memory.text}`).join("
             axisReactivity: shifted(lockedAxes.reactivity, output.axisShifts.reactivity),
             axisExpressiveness: shifted(lockedAxes.expressiveness, output.axisShifts.expressiveness),
           }),
+          ...(locked.verstand !== null && { verstand: growVerstand(locked.verstand, output.verstandShift) }),
           // Is de Dynimo intussen alweer wakker, dan zou een Ontwaakstemming onterecht blijven staan: overslaan.
           ...(!locked.awakeSince && {
             ...wakeMood,

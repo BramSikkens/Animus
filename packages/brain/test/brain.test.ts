@@ -2686,6 +2686,7 @@ describe("createBrain", () => {
     const reflection = (over: Record<string, unknown> = {}, driveOps: Record<string, unknown> = {}) => ({
       evolvedCharacter: "Wat rustiger geworden.",
       axisShifts: { ie: 0, sn: 0, tf: 0, jp: 0, reactivity: 0, expressiveness: 0 },
+      verstandShift: 0,
       drives: { ...noOps, ...driveOps },
       wakeMood: { emotion: "kalm", intensity: 0.4 },
       dream: null, // strikte structured output: key verplicht, null = geen Droom
@@ -2864,6 +2865,64 @@ describe("createBrain", () => {
       const row = await rowOf(vero.id);
       expect([row.axisIe, row.axisSn, row.axisTf, row.axisJp]).toEqual([null, null, null, null]);
       expect(row.evolvedCharacter).toBe("Wat rustiger geworden.");
+    });
+
+    it("groeit Verstand hoogstens +0.02 per Reflectie (bij slapen)", async () => {
+      const vero = await insertDynimo({ verstand: 0.5 });
+      await addMemory(vero.id, "iets", 1);
+
+      await brainWith(heavyReturning(reflection({ verstandShift: 1 }))).sleep();
+
+      const row = await rowOf(vero.id);
+      expect(row.verstand).toBeCloseTo(0.52, 5);
+    });
+
+    it("laat een negatieve Verstand-verschuiving ongemoeid", async () => {
+      const vero = await insertDynimo({ verstand: 0.5 });
+      await addMemory(vero.id, "iets", 1);
+
+      await brainWith(heavyReturning(reflection({ verstandShift: -0.3 }))).sleep();
+
+      const row = await rowOf(vero.id);
+      expect(row.verstand).toBeCloseTo(0.5, 5);
+    });
+
+    it("laat een leeg Verstand leeg na een Reflectie", async () => {
+      const vero = await insertDynimo({ verstand: null });
+      await addMemory(vero.id, "iets", 1);
+
+      await brainWith(heavyReturning(reflection({ verstandShift: 0.02 }))).sleep();
+
+      const row = await rowOf(vero.id);
+      expect(row.verstand).toBeNull();
+    });
+
+    it("groeit Verstand ook bij een Reflectie door stilte", async () => {
+      const vero = await insertDynimo({ verstand: 0.5, awakeSince: bornAt });
+      await addMemory(vero.id, "iets", 1);
+
+      await brainWith(heavyReturning(reflection({ verstandShift: 0.02 }))).reflect();
+
+      const row = await rowOf(vero.id);
+      expect(row.verstand).toBeCloseTo(0.52, 5);
+    });
+
+    it("zet het huidige Verstand in de Reflectie-prompt, of '(nog niet bepaald)' als het leeg is", async () => {
+      const vero = await insertDynimo({ verstand: 0.42 });
+      await addMemory(vero.id, "iets", 1);
+      const heavy = heavyReturning(reflection());
+
+      await brainWith(heavy).sleep();
+
+      expect(JSON.stringify(heavy.doGenerateCalls[0]?.prompt)).toContain("Verstand: 0.42");
+
+      const zonder = await insertDynimo({ verstand: null });
+      await addMemory(zonder.id, "iets", 1);
+      const heavyZonder = heavyReturning(reflection());
+
+      await brainWith(heavyZonder).sleep();
+
+      expect(JSON.stringify(heavyZonder.doGenerateCalls[0]?.prompt)).toContain("Verstand: (nog niet bepaald)");
     });
 
     it("voegt een Drijfveer toe", async () => {

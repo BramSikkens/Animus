@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseVerstand, verstandBand } from "../src/verstand.js";
+import { growVerstand, parseVerstand, verstandBand } from "../src/verstand.js";
 
 describe("verstandBand", () => {
   it.each([
@@ -16,6 +16,25 @@ describe("verstandBand", () => {
     [null, "midden"],
   ] as const)("%s valt in band %s", (value, band) => {
     expect(verstandBand(value)).toBe(band);
+  });
+});
+
+describe("growVerstand", () => {
+  it("groeit hoogstens +0.02", () => {
+    expect(growVerstand(0.5, 0.02)).toBeCloseTo(0.52);
+    expect(growVerstand(0.5, 1)).toBeCloseTo(0.52);
+  });
+
+  it("laat een negatieve verschuiving ongemoeid", () => {
+    expect(growVerstand(0.5, -0.3)).toBe(0.5);
+  });
+
+  it("klemt op bovengrens 1", () => {
+    expect(growVerstand(0.99, 0.02)).toBe(1);
+  });
+
+  it("laat een leeg Verstand leeg", () => {
+    expect(growVerstand(null, 0.02)).toBeNull();
   });
 });
 

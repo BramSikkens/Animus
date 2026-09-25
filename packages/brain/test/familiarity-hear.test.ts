@@ -1,7 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { MockEmbeddingModelV4, MockLanguageModelV4, Experimental_EvaluationMockModelV4 } from "ai/test";
 import { simulateReadableStream } from "ai";
-import { eq } from "drizzle-orm";
 import { EMBEDDING_DIMENSIONS, dynimos } from "@animus/db/schema";
 import { EMOTIONS } from "../src/emotion.js";
 import { singleEmotionValues } from "../src/mood.js";
@@ -78,7 +77,6 @@ async function insertDynimo(extra: Partial<typeof dynimos.$inferInsert> = {}) {
     .returning();
   return row!;
 }
-const familiarityOf = async (id: number) => (await db.select().from(dynimos).where(eq(dynimos.id, id)))[0]!.familiarity;
 async function hear(brain: ReturnType<typeof createBrain>, text: string, options?: { initiatief?: boolean }) {
   for await (const _ of brain.hear(text, options)) void _;
 }
@@ -87,7 +85,8 @@ const brainWith = (model: MockLanguageModelV4, blijScore = 4, rng = 0.99) =>
 
 describe("Vertrouwdheid in hear()", () => {
   it("stuurt de bandinstructie mee aan Type2", async () => {
-    await insertDynimo({ familiarity: 0.9 });
+    const row = await insertDynimo();
+    await brainWith(type2().model).setFamiliarity(row.id, 0.9);
     const t2 = type2();
     await hear(brainWith(t2.model), "Hoi");
     expect(t2.prompts[0]).toContain("bijnamen");
@@ -102,29 +101,35 @@ describe("Vertrouwdheid in hear()", () => {
 
   it("laat Vertrouwdheid per beurt groeien", async () => {
     const row = await insertDynimo();
-    await hear(brainWith(type2().model), "Hoi");
-    expect(await familiarityOf(row.id)).toBeGreaterThan(0.2);
+    const brain = brainWith(type2().model);
+    await hear(brain, "Hoi");
+    expect(await brain.familiarityOf(row.id)).toBeGreaterThan(0.2);
   });
 
   it("een spontane uiting (initiatief) telt niet als beurt", async () => {
     const row = await insertDynimo();
-    await hear(brainWith(type2().model), "Zeg iets", { initiatief: true });
-    expect(await familiarityOf(row.id)).toBe(0.2);
+    const brain = brainWith(type2().model);
+    await hear(brain, "Zeg iets", { initiatief: true });
+    expect(await brain.familiarityOf(row.id)).toBe(0.2);
   });
 
   it("een positieve beurt (blij-delta, compliment) laat het meer groeien dan een gewone", async () => {
     const plain = await insertDynimo();
-    await hear(brainWith(type2().model), "Hoi");
-    const plainValue = await familiarityOf(plain.id);
+    const plainBrain = brainWith(type2().model);
+    await hear(plainBrain, "Hoi");
+    const plainValue = await plainBrain.familiarityOf(plain.id);
     await truncateAll(db);
     const happy = await insertDynimo();
-    await hear(brainWith(type2().model, 6), "Wat ben je lief!");
-    expect(await familiarityOf(happy.id)).toBeGreaterThan(plainValue);
+    const happyBrain = brainWith(type2().model, 6);
+    await hear(happyBrain, "Wat ben je lief!");
+    expect(await happyBrain.familiarityOf(happy.id)).toBeGreaterThan(plainValue);
   });
 
   it("een genegeerde beurt laat Vertrouwdheid dalen", async () => {
-    const row = await insertDynimo({ familiarity: 0.5, axisTf: 0, axisReactivity: 1, moodValues: singleEmotionValues("boos", 0.9), moodAt: now });
-    await hear(brainWith(type2().model, 4, 0), "Hallo daar");
-    expect(await familiarityOf(row.id)).toBeLessThan(0.5);
+    const row = await insertDynimo({ axisTf: 0, axisReactivity: 1, moodValues: singleEmotionValues("boos", 0.9), moodAt: now });
+    const brain = brainWith(type2().model, 4, 0);
+    await brain.setFamiliarity(row.id, 0.5);
+    await hear(brain, "Hallo daar");
+    expect(await brain.familiarityOf(row.id)).toBeLessThan(0.5);
   });
 });

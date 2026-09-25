@@ -176,6 +176,13 @@
       "when": 1790363736878,
       "tag": "0024_dynimos_verstand",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1790366861400,
+      "tag": "0025_personen",
+      "breakpoints": true
     }
   ]
 }

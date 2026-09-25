@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { check, date, index, integer, jsonb, pgTable, real, serial, text, timestamp, uniqueIndex, vector } from "drizzle-orm/pg-core";
+import { boolean, check, date, index, integer, jsonb, pgTable, primaryKey, real, serial, text, timestamp, uniqueIndex, vector } from "drizzle-orm/pg-core";
 
 // Meerdere rijen mogelijk: elke rij is een Dynimo.
 export const dynimos = pgTable(
@@ -36,8 +36,6 @@ export const dynimos = pgTable(
     // Reactiviteit (#59): hoe hard emoties bewegen en hoe traag ze uitdoven. Expressiviteit: hoeveel emotie doorschemert.
     axisReactivity: real("axis_reactivity").notNull().default(0.5),
     axisExpressiveness: real("axis_expressiveness").notNull().default(0.5),
-    // Vertrouwdheid (#75): 0–1, hoe vertrouwd de relatie met de Gesprekspartner is; stuurt de toon (zie familiarity.ts).
-    familiarity: real("familiarity").notNull().default(0.2),
     // TTS-stem (model/stemnaam van de actieve spraakprovider). NULL = default van de agent.
     voice: text("voice"),
     // Vrije stembeschrijving (#62), input voor Voice Design (#64). NULL = geen.
@@ -70,10 +68,22 @@ export const dynimos = pgTable(
     check("dynimos_axis_jp_range", sql`${table.axisJp} between 0 and 1`),
     check("dynimos_axis_reactivity_range", sql`${table.axisReactivity} between 0 and 1`),
     check("dynimos_axis_expressiveness_range", sql`${table.axisExpressiveness} between 0 and 1`),
-    check("dynimos_familiarity_range", sql`${table.familiarity} between 0 and 1`),
     check("dynimos_verstand_range", sql`${table.verstand} between 0 and 1`),
     uniqueIndex("dynimos_single_awake_idx").on(sql`(true)`).where(sql`${table.awakeSince} is not null`),
   ],
+);
+
+// Persoon (fase 3, #91): globaal, herkend door alle Dynimo's; de relatie (Vertrouwdheid, Herinneringen) is per
+// Dynimo × Persoon. Eén Persoon is de "eigenaar" (owner); hooguit één rij mag dat zijn.
+export const persons = pgTable(
+  "persons",
+  {
+    id: serial("id").primaryKey(),
+    name: text("name").notNull(),
+    owner: boolean("owner").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex("persons_single_owner_idx").on(sql`(true)`).where(sql`${table.owner}`)],
 );
 
 // Dimensie van OpenAI text-embedding-3-small (ADR-0008): een andere embedding-provider
@@ -88,6 +98,8 @@ export const memories = pgTable(
     dynimoId: integer("dynimo_id")
       .notNull()
       .references(() => dynimos.id, { onDelete: "cascade" }),
+    // Persoon (fase 3, #91): de Gesprekspartner van deze beurt; null bij een onbekende.
+    personId: integer("person_id").references(() => persons.id, { onDelete: "set null" }),
     text: text("text").notNull(),
     embedding: vector("embedding", { dimensions: EMBEDDING_DIMENSIONS }).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
@@ -99,6 +111,24 @@ export const memories = pgTable(
   (table) => [
     index("memories_embedding_idx").using("hnsw", table.embedding.op("vector_cosine_ops")),
     check("memories_impression_range", sql`${table.impression} between 0 and 1`),
+  ],
+);
+
+// Vertrouwdheid (#75/#91) per Dynimo × Persoon: 0–1, hoe vertrouwd de relatie is; stuurt de toon (familiarity.ts).
+export const familiarities = pgTable(
+  "familiarities",
+  {
+    dynimoId: integer("dynimo_id")
+      .notNull()
+      .references(() => dynimos.id, { onDelete: "cascade" }),
+    personId: integer("person_id")
+      .notNull()
+      .references(() => persons.id, { onDelete: "cascade" }),
+    familiarity: real("familiarity").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.dynimoId, table.personId] }),
+    check("familiarities_familiarity_range", sql`${table.familiarity} between 0 and 1`),
   ],
 );
 

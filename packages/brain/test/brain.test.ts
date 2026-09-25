@@ -3478,17 +3478,19 @@ describe("createBrain", () => {
       });
 
       it("laat Vertrouwdheid dalen (Reflectie na lange stilte), maar niet bij slapen", async () => {
-        const vero = await insertDynimo({ familiarity: 0.5 });
+        const vero = await insertDynimo();
+        const brain = brainWith(heavyReturning(reflection()));
+        await brain.setFamiliarity(vero.id, 0.5);
         await addMemory(vero.id, "iets", 1);
 
-        expect(await brainWith(heavyReturning(reflection())).reflect()).toBe(true);
-        const afterSilence = (await rowOf(vero.id)).familiarity;
+        expect(await brain.reflect()).toBe(true);
+        const afterSilence = await brain.familiarityOf(vero.id);
         expect(afterSilence).toBeLessThan(0.5);
         expect(afterSilence).toBeGreaterThanOrEqual(0.05);
 
         await addMemory(vero.id, "nog iets", 1);
         await brainWith(heavyReturning(reflection())).sleep();
-        expect((await rowOf(vero.id)).familiarity).toBe(afterSilence);
+        expect(await brain.familiarityOf(vero.id)).toBe(afterSilence);
       });
 
       it("geeft false zonder throw en schrijft niets bij een falende call of ongeldige output", async () => {
@@ -3762,8 +3764,9 @@ describe("createBrain", () => {
     describe("setFamiliarity", () => {
       it("overschrijft de Vertrouwdheid", async () => {
         const vero = await insertDynimo();
-        expect(await brainWith().setFamiliarity(vero.id, 0.85)).toBe(true);
-        expect((await rowOf(vero.id)).familiarity).toBe(0.85);
+        const brain = brainWith();
+        expect(await brain.setFamiliarity(vero.id, 0.85)).toBe(true);
+        expect(await brain.familiarityOf(vero.id)).toBe(0.85);
       });
 
       it("geeft false bij een onbekende Dynimo", async () => {

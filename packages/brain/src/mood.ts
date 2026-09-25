@@ -15,6 +15,8 @@ export const FALLBACK_BASE: Emotion = "kalm";
  * halveringstijd: een reactieve Dynimo beweegt sterker én dooft langzamer uit, een nuchtere het omgekeerde.
  */
 export const reactivityFactor = (reactivity: number) => 0.05 + 1.9 * reactivity;
+/** Het bereik boven de rust is 50 i.p.v. 100 (ADR-0017); deze schaal herstelt de sterkte die de Type1-delta's vóór de ruststand van 50 hadden. */
+export const DELTA_SCALE = 0.5;
 /** De halveringstijd wordt begrensd: bij r≈0 dooft de Stemming niet absurd snel uit. */
 const halfLifeFactor = (reactivity: number) => Math.min(2.5, Math.max(0.25, reactivityFactor(reactivity)));
 
@@ -26,6 +28,9 @@ export type Mood = { emotion: Emotion; intensity: number; values: MoodValues };
 
 const clamp = (value: number) => Math.min(100, Math.max(0, value));
 const clamp01 = (value: number) => Math.min(1, Math.max(0, value));
+
+/** Intensiteit die het gezicht toont: expressiviteit 0.5 laat haar ongewijzigd, 0 halveert ze (gesloten), 1 maakt ze anderhalf keer zo sterk (geklemd op 1). */
+export const faceIntensity = (intensity: number, expressiveness: number): number => clamp01(intensity * (0.5 + expressiveness));
 
 /** Hoe ver `value` boven de ruststand (REST_LEVEL) staat, als 0..1. De enige sterktemaat (ADR-0017). */
 export const strength = (value: number): number => clamp01((value - REST_LEVEL) / (100 - REST_LEVEL));
@@ -92,7 +97,7 @@ export function applyDeltas(
   reactivity = 0.5,
 ): { mood: Mood; next: StoredMood } {
   const current = currentMood(stored, baseEmotion, now, reactivity);
-  const scale = reactivityFactor(reactivity);
+  const scale = reactivityFactor(reactivity) * DELTA_SCALE;
   if (EMOTIONS.every((emotion) => !deltas[emotion])) return { mood: current, next: stored };
   // Een positieve delta trekt de tegenpool PAIR_PULL van die delta de andere kant op.
   const values = reconcilePairs(

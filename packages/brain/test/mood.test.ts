@@ -3,11 +3,13 @@ import { EMOTIONS, EMOTION_PAIRS } from "../src/emotion.js";
 import {
   applyDeltas,
   BASE_LEVEL,
+  DELTA_SCALE,
   REST_LEVEL,
   reactivityFactor,
   currentMood,
   displayMood,
   displayMoodOfRow,
+  faceIntensity,
   driftOf,
   DRIFT_AMPLITUDE,
   DRIFT_HYSTERESIS,
@@ -82,11 +84,30 @@ describe("currentMood", () => {
   });
 });
 
+describe("deltaschaal (ADR-0017)", () => {
+  const blij = (delta: number, reactivity: number) => applyDeltas(null, "kalm", { blij: delta }, T0, reactivity).mood;
+
+  it("maakt +50 en +100 onderscheidbaar bij reactiviteit 0.5", () => {
+    expect(DELTA_SCALE).toBe(0.5);
+    expect(blij(100, 0.5).values.blij).toBeCloseTo(100);
+    expect(blij(50, 0.5).values.blij).toBeCloseTo(75);
+  });
+
+  it("schaalt een kleine delta bij reactiviteit 1 met reactiviteitsfactor en DELTA_SCALE", () => {
+    expect(blij(20, 1).values.blij).toBeCloseTo(50 + 20 * 1.95 * 0.5);
+  });
+
+  it("geeft bij reactiviteit 0.5 dezelfde sterkte als vroeger: strength = delta/100", () => {
+    expect(strength(blij(50, 0.5).values.blij)).toBeCloseTo(0.5);
+    expect(strength(blij(30, 0.5).values.blij)).toBeCloseTo(0.3);
+  });
+});
+
 describe("applyDeltas", () => {
   it("telt de delta's per emotie op bij de uitgedoofde waarden en slaat ze met het tijdstip op", () => {
     const { mood, next } = applyDeltas(stored({ boos: 80 }), "kalm", { blij: 20, boos: -15 }, after(MOOD_HALF_LIFE_MS));
-    expect(mood.values.blij).toBeCloseTo(70); // rust 50, +20
-    expect(mood.values.boos).toBeCloseTo(50); // 80 -> 65 uitgedoofd, dan -15
+    expect(mood.values.blij).toBeCloseTo(60); // rust 50, +20 * DELTA_SCALE
+    expect(mood.values.boos).toBeCloseTo(57.5); // 80 -> 65 uitgedoofd, dan -15 * DELTA_SCALE
     expect(next?.at).toEqual(after(MOOD_HALF_LIFE_MS));
     expect(next?.values).toEqual(mood.values);
   });
@@ -124,9 +145,9 @@ describe("applyDeltas", () => {
 describe("reactiviteit", () => {
   it("schaalt de Type1-delta's: 0 nauwelijks, 0.5 ongewijzigd, 1 sterk", () => {
     const boos = (reactivity: number) => applyDeltas(null, "kalm", { boos: 40 }, T0, reactivity).mood.values.boos;
-    expect(boos(0.5)).toBeCloseTo(90); // rust 50, +40
-    expect(boos(0)).toBeCloseTo(52);
-    expect(boos(1)).toBeCloseTo(100); // geclampt
+    expect(boos(0.5)).toBeCloseTo(70); // rust 50, +40 * DELTA_SCALE
+    expect(boos(0)).toBeCloseTo(51);
+    expect(boos(1)).toBeCloseTo(89); // rust 50, +40 * 1.95 * DELTA_SCALE
   });
 
   it("dooft langzamer uit bij hoge reactiviteit en sneller bij lage", () => {
@@ -202,19 +223,19 @@ describe("parseMoodValues", () => {
 describe("emotieparen (ADR-0015)", () => {
   it("een positieve delta trekt de tegenpool met 50% van die delta omlaag (blij +30 -> droevig -15)", () => {
     const { mood } = applyDeltas(stored({ droevig: 40 }), "verveeld", { blij: 30 }, T0);
-    expect(mood.values.blij).toBeCloseTo(80); // rust 50, +30
-    expect(mood.values.droevig).toBeCloseTo(20); // 40-15=25, verder afgeremd door de paar-regel (blij+droevig <= 100)
+    expect(mood.values.blij).toBeCloseTo(65); // rust 50, +30 * DELTA_SCALE
+    expect(mood.values.droevig).toBeCloseTo(32.5); // 40 - 15 * DELTA_SCALE; de paar-regel (blij+droevig <= 100) grijpt hier niet meer in
   });
 
   it("werkt ook omgekeerd en voor de andere paren", () => {
-    expect(applyDeltas(stored({ blij: 40 }), "verveeld", { droevig: 20 }, T0).mood.values.blij).toBeCloseTo(30);
-    expect(applyDeltas(stored({ vredig: 40 }), "verveeld", { boos: 20 }, T0).mood.values.vredig).toBeCloseTo(30);
-    expect(applyDeltas(stored({ druk: 40 }), "verveeld", { kalm: 20 }, T0).mood.values.druk).toBeCloseTo(30);
+    expect(applyDeltas(stored({ blij: 40 }), "verveeld", { droevig: 20 }, T0).mood.values.blij).toBeCloseTo(35);
+    expect(applyDeltas(stored({ vredig: 40 }), "verveeld", { boos: 20 }, T0).mood.values.vredig).toBeCloseTo(35);
+    expect(applyDeltas(stored({ druk: 40 }), "verveeld", { kalm: 20 }, T0).mood.values.druk).toBeCloseTo(35);
   });
 
   it("schaalt de tegenpool-trek mee met reactiviteit en clampt op 0", () => {
     // blij expliciet op 0 gehouden (i.p.v. de rust-default), anders klemt blij zelf al op 100 en drukt de paar-regel droevig verder omlaag.
-    expect(applyDeltas(stored({ droevig: 40, blij: 0 }), "verveeld", { blij: 30 }, T0, 1).mood.values.droevig).toBeCloseTo(40 - 15 * reactivityFactor(1));
+    expect(applyDeltas(stored({ droevig: 40, blij: 0 }), "verveeld", { blij: 30 }, T0, 1).mood.values.droevig).toBeCloseTo(40 - 15 * reactivityFactor(1) * DELTA_SCALE);
     expect(applyDeltas(stored({ droevig: 5 }), "verveeld", { blij: 30 }, T0).mood.values.droevig).toBe(0);
   });
 
@@ -224,15 +245,15 @@ describe("emotieparen (ADR-0015)", () => {
 
   it("emoties zonder tegenpool trekken niets", () => {
     const { mood } = applyDeltas(stored({ blij: 40, droevig: 10 }), "verveeld", { bang: 50 }, T0);
-    expect(mood.values).toMatchObject({ blij: 40, droevig: 10, bang: 100 }); // bang: rust 50, +50
+    expect(mood.values).toMatchObject({ blij: 40, droevig: 10, bang: 75 }); // bang: rust 50, +50 * DELTA_SCALE
   });
 
   it("twee hoge waarden van een paar kunnen niet tegelijk bestaan: zelfs bij twee gelijktijdige delta's blijft de som van een paar <= 100", () => {
     const { mood, next } = applyDeltas(stored({}), "verveeld", { blij: 80, droevig: 80 }, T0);
     for (const [a, b] of EMOTION_PAIRS) expect(mood.values[a] + mood.values[b]).toBeLessThanOrEqual(100);
-    // Beide komen (vóór de paar-regel) gelijk uit op 90 (rust 50, +80 min de trek van 40); de paar-regel dwingt er dan één omlaag.
-    expect(mood.values.blij).toBeCloseTo(10);
-    expect(mood.values.droevig).toBeCloseTo(90);
+    // Beide komen (vóór de paar-regel) gelijk uit op 70 (rust 50, +(80 min de trek van 40) * DELTA_SCALE); de paar-regel dwingt er dan één omlaag.
+    expect(mood.values.blij).toBeCloseTo(30);
+    expect(mood.values.droevig).toBeCloseTo(70);
     expect(next?.values).toEqual(mood.values);
   });
 
@@ -362,5 +383,28 @@ describe("displayMoodOfRow (ADR-0017: drift)", () => {
     const row = { id: 7, baseEmotion: "blij", moodValues: null, moodAt: null, axisReactivity: 1 };
     const mood = displayMoodOfRow(row, T0);
     expect(mood).toEqual(displayMood(storedMoodOf(row), "blij", T0, 1, "7"));
+  });
+});
+
+describe("faceIntensity", () => {
+  it("laat de intensiteit ongewijzigd bij de standaard expressiviteit 0.5", () => {
+    expect(faceIntensity(0.6, 0.5)).toBeCloseTo(0.6);
+  });
+
+  it("halveert de intensiteit bij expressiviteit 0 (gesloten)", () => {
+    expect(faceIntensity(0.6, 0)).toBeCloseTo(0.3);
+  });
+
+  it("maakt de intensiteit anderhalf keer zo sterk bij expressiviteit 1, geklemd op 1", () => {
+    expect(faceIntensity(0.4, 1)).toBeCloseTo(0.6);
+    expect(faceIntensity(0.8, 1)).toBe(1);
+  });
+
+  it("laat intensiteit 0 altijd 0 blijven", () => {
+    expect(faceIntensity(0, 1)).toBe(0);
+  });
+
+  it("klemt op minimaal 0", () => {
+    expect(faceIntensity(0.5, -2)).toBe(0);
   });
 });

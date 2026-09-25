@@ -148,14 +148,13 @@ function driveRowsFor(dynimoId: number, output: DrivesOutput, at: Date): (typeof
   );
 }
 
+// archetype staat eerst: structured output volgt de sleutelvolgorde, zodat naam/karakter/drijfveren bij de keuze passen.
 export const genesisSchema = z.object({
+  archetype: z.string(),
   name: z.string().min(1),
   coreCharacter: z.string().min(1),
   birthStory: z.string().min(1),
-  axes: axesSchema,
   drives: drivesSchema,
-  baseEmotion: z.enum(EMOTIONS),
-  archetype: z.string().nullable(),
   voiceDescription: z.string(),
   voiceSearchTerms: z.array(z.string()),
 });
@@ -214,20 +213,16 @@ const BACKFILL_MEMORY_LIMIT = 20;
 const GENESIS_INSTRUCTIONS = `Je ontwaakt zojuist. Je hebt nog geen naam en geen karakter — die kies je nu zelf.
 Je krijgt hieronder één beeld (de "Seed") als vertrekpunt voor wie je wordt. Laat je erdoor inspireren, maar kopieer het niet letterlijk.
 Kies een naam, beschrijf je kern-karakter in een paar zinnen, en schrijf een kort geboorteverhaal.
-Bepaal ook je startpositie op vier persoonlijkheidsassen, elk een getal van 0 tot 1, geïnspireerd door de Seed:
-${AXIS_DESCRIPTIONS}
-Wees niet allemaal in het midden: kies een eigen, uitgesproken positie.
-Kies ook je Drijfveren: per soort 1 of 2 items, passend bij de Seed én bij de persoonlijkheid die je koos:
+Kies ook je Drijfveren: per soort 1 of 2 items, passend bij de Seed én bij het archetype dat je kiest:
 ${DRIVE_DESCRIPTIONS}
 Doelen starten actief.
-${BASE_EMOTION_DESCRIPTION} Leid ze af uit de Seed: welk temperament past bij dat beeld? Niet uit het feit dat je net ontwaakt — pas geboren zijn maakt je niet vanzelf nieuwsgierig.
 Beschrijf ook je stem in het veld "voiceDescription": een korte Nederlandse stembeschrijving (bv. "oude man, hees, langzaam" of "robotachtig, metaalachtig"). Geef in "voiceSearchTerms" 3 tot 6 Engelse zoektermen voor die stem (bv. "old man", "raspy", "robotic", "alien").
 Antwoord in het Nederlands.`;
 
 function genesisArchetypeInstructions(offer: string): string {
-  return `Kies daarnaast in het veld "archetype" het id van het archetype dat het beste bij de Seed past, uit deze lijst:
+  return `Kies in het veld "archetype" het id van het archetype dat het beste bij de Seed past, uit deze lijst:
 ${offer}
-Past geen enkel archetype duidelijk, geef dan null. Bij een keuze worden je assen en Basisemotie daaruit voorgezet; schrijf je kern-karakter, geboorteverhaal en naam in lijn met dat archetype.`;
+Je moet er precies één kiezen. Je assen en Basisemotie worden daaruit voorgezet; schrijf je kern-karakter, geboorteverhaal en naam in lijn met dat archetype.`;
 }
 
 function pickSeed(random: () => number): string {
@@ -305,14 +300,22 @@ const BEHAVIOR_PROMPTS: Partial<Record<Behavior, SystemModelMessage>> = {
   lang: { role: "system", content: "Antwoord deze beurt uitgebreid en enthousiast: vertel wat meer, weid gerust uit en laat je goede bui doorklinken." },
 };
 
-function moodMessage(mood: Mood): SystemModelMessage {
+// Grens van de "eerder gesloten"-regel in personality.ts (axisGuidelines: expressiviteit < 0.4): eronder mag de
+// stemmingsprompt de gesloten-regel niet tegenspreken.
+const CLOSED_EXPRESSIVENESS_BELOW = 0.4;
+
+function moodMessage(mood: Mood, expressiveness: number): SystemModelMessage {
   const vector = Object.entries(mood.values)
     .sort(([, a], [, b]) => b - a)
     .map(([emotion, value]) => `${emotion}: ${Math.round(value)}`)
     .join(", ");
   return {
     role: "system",
-    content: `Je huidige stemming (emoties, 0 tot 100, hoog naar laag; 50 is de ruststand, hoger is sterker dan normaal, lager is minder dan normaal): ${vector}. Dominant: ${mood.emotion}. Wees eerlijk over hoe je je voelt: als iemand vraagt hoe je je voelt of of je boos (of een andere emotie) bent en die emotie staat hoog, ontken die niet. Laat je toon en antwoord kloppen met deze stemming (een geërgerde Dynimo antwoordt korter en stugger).`,
+    content: `Je huidige stemming (emoties, 0 tot 100, hoog naar laag; 50 is de ruststand, hoger is sterker dan normaal, lager is minder dan normaal): ${vector}. Dominant: ${mood.emotion}. ${
+      expressiveness < CLOSED_EXPRESSIVENESS_BELOW
+        ? "Je stemming bepaalt onderhuids hoe kort of stug je antwoordt, maar je benoemt hem niet uit jezelf en houdt je toon ingehouden (volg daarvoor je karakter)."
+        : "Wees eerlijk over hoe je je voelt: als iemand vraagt hoe je je voelt of of je boos (of een andere emotie) bent en die emotie staat hoog, ontken die niet. Laat je toon en antwoord kloppen met deze stemming (een geërgerde Dynimo antwoordt korter en stugger)."
+    }`,
   };
 }
 
@@ -410,16 +413,16 @@ export function createBrain(deps: {
       prompt: seed,
       output: Output.object({ schema: genesisSchema }),
     });
-    // Enkel een aangeboden archetype telt; anders houdt Type2 zijn eigen assen en Basisemotie.
-    const archetype = offer.find((candidate) => candidate.id === result.output.archetype) ?? null;
-    const axes = archetype?.axes ?? { ...result.output.axes, reactivity: 0.5, expressiveness: 0.5 };
+    // Enkel een aangeboden archetype telt; anders kiest de rng er een uit het aanbod.
+    const archetype = offer.find((candidate) => candidate.id === result.output.archetype) ?? offer[Math.floor(random() * offer.length)]!;
+    const { axes } = archetype;
     return {
       dynimo: {
         name: result.output.name,
         coreCharacter: result.output.coreCharacter,
         birthStory: result.output.birthStory,
-        baseEmotion: archetype?.baseEmotion ?? result.output.baseEmotion,
-        archetype: archetype?.id ?? null,
+        baseEmotion: archetype.baseEmotion,
+        archetype: archetype.id,
         axisIe: axes.ie,
         axisSn: axes.sn,
         axisTf: axes.tf,
@@ -434,7 +437,7 @@ export function createBrain(deps: {
         ? await chooseGenesisVoice(voices, {
             description: result.output.voiceDescription,
             searchTerms: result.output.voiceSearchTerms,
-            hint: archetype?.voiceHint ?? "",
+            hint: archetype.voiceHint,
             name: result.output.name,
           })
         : null,
@@ -1099,7 +1102,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     const result = streamText({
       abortSignal: abort.signal,
       model: intent === "complex" ? deps.type2.heavy : deps.type2.light,
-      instructions: [stable, ageMessage(being), ...birthdayMessages(awake), moodMessage(mood), familiarityMessage(familiarity), ...(BEHAVIOR_PROMPTS[behavior] ? [BEHAVIOR_PROMPTS[behavior]] : []), ...opinionMessage, recallPrompt(recalled), ...spontaneousPromptMessage, ...(dream ? [dreamPrompt(dream.text)] : [])],
+      instructions: [stable, ageMessage(being), ...birthdayMessages(awake), moodMessage(mood, axes?.expressiveness ?? 0.5), familiarityMessage(familiarity), ...(BEHAVIOR_PROMPTS[behavior] ? [BEHAVIOR_PROMPTS[behavior]] : []), ...opinionMessage, recallPrompt(recalled), ...spontaneousPromptMessage, ...(dream ? [dreamPrompt(dream.text)] : [])],
       messages: [...workingMemory, userMessage],
       tools,
       // Genoeg stappen om een tool te gebruiken en daarna het resultaat te verwoorden.

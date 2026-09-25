@@ -13,14 +13,16 @@ export type DynimoState = {
   name: string | null;
   /** Opgeslagen TTS-stem van de wakkere Dynimo; null = default (of niemand wakker). */
   voice: string | null;
+  /** Expressiviteit-as van de wakkere Dynimo (0.5 = neutraal, ook als niemand wakker is). */
+  expressiveness: number;
 };
 
 /** Leest vers uit de database (ook de Stemming, die met de tijd uitdooft). */
 export async function readState(brain: Brain): Promise<DynimoState> {
   const awake = (await brain.list()).find((dynimo) => dynimo.awakeSince);
   return awake
-    ? { key: `${awake.id}:${awake.awakeSince!.getTime()}`, display: "wakker", mood: displayMoodOfRow(awake, new Date()), name: awake.name, voice: awake.voice }
-    : { key: "none", display: "slapend", mood: null, name: null, voice: null };
+    ? { key: `${awake.id}:${awake.awakeSince!.getTime()}`, display: "wakker", mood: displayMoodOfRow(awake, new Date()), name: awake.name, voice: awake.voice, expressiveness: awake.axisExpressiveness }
+    : { key: "none", display: "slapend", mood: null, name: null, voice: null, expressiveness: 0.5 };
 }
 
 /**

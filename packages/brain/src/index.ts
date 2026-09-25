@@ -30,7 +30,7 @@ import { applyDeltas, baseEmotionOf, currentMood, moodOfRow, singleEmotionValues
 import { isVisibleMoodChange, soundKindFor, type SoundKind } from "./sound.js";
 import { FAMILIARITY_POSITIVE_DELTA, familiarityStyle, updateFamiliarity } from "./familiarity.js";
 import { AXIS_DESCRIPTIONS, type Axes, axisGuidelines, mbtiType, rowAxes } from "./personality.js";
-import { verstandGuidelines } from "./verstand.js";
+import { tempersAxisRules, verstandGuidelines } from "./verstand.js";
 import { EMOTIONS, oppositeOf, type Emotion } from "./emotion.js";
 import { SEEDS } from "./seeds.js";
 import { createTools } from "./tools.js";
@@ -244,9 +244,9 @@ function pickSeed(random: () => number): string {
   return SEEDS[Math.floor(random() * SEEDS.length)]!;
 }
 
-// Leeg zolang de assen ontbreken (backfill). `verstand` tempert (enkel bij hoog) de sterke tf/jp/sn-regels; enkel
+// Leeg zolang de assen ontbreken (backfill). `tempered` (hoog Verstand) vervangt de sterke tf/jp/sn-regels; enkel
 // buildStableSystemPrompt geeft die mee, de andere aanroepers (Type1-context, considerInitiative, Reflectie) niet.
-function personalityText(row: Dynimo, options?: { verstand?: number | null }): string {
+function personalityText(row: Dynimo, options?: { tempered?: boolean }): string {
   const axes = rowAxes(row);
   if (!axes) return "";
   const rules = axisGuidelines(axes, options);
@@ -255,7 +255,7 @@ function personalityText(row: Dynimo, options?: { verstand?: number | null }): s
 }
 
 function buildStableSystemPrompt(identityRecord: Dynimo, driveRows: readonly DriveRow[]): string {
-  const personalityBlock = personalityText(identityRecord, { verstand: identityRecord.verstand });
+  const personalityBlock = personalityText(identityRecord, { tempered: tempersAxisRules(identityRecord.verstand) });
   const personality = personalityBlock ? `\n${personalityBlock}` : "";
   const verstandRules = verstandGuidelines(identityRecord.verstand);
   const verstand = verstandRules.length ? `\n${verstandRules.join(" ")}` : "";

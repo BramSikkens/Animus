@@ -1,5 +1,4 @@
 // Browser-veilig: geen node-imports. Brein en dashboard delen dit.
-import { verstandBand } from "./verstand.js";
 // Elke as is een getal 0..1 = positie richting de TWEEDE letter: I↔E (1 = E), S↔N (1 = N),
 // T↔F (1 = F), J↔P (1 = P). Vanaf 0.5 telt de tweede letter.
 // Naast de vier MBTI-assen twee losse: reactivity (0 = nuchter, 1 = heftig; schaalt de Stemming, zie mood.ts) en
@@ -124,17 +123,15 @@ const HIGH_VERSTAND_OVERRIDES: Partial<Record<Axis, string>> = {
 };
 
 /** Gedragsrichtlijnen (Nederlands) voor het stabiele deel van de prompt; hoogstens één per as.
- * Met een hoog Verstand (band "hoog" of "sterk-hoog", zie verstand.ts) worden de sterke tf/jp/sn-regels vervangen. */
-export function axisGuidelines(axes: Axes, options?: { verstand?: number | null }): string[] {
-  const band = options ? verstandBand(options.verstand ?? null) : "midden";
-  const tempered = band === "hoog" || band === "sterk-hoog";
+ * Met `tempered` (hoog Verstand, zie verstand.ts) worden de sterke tf/jp/sn-regels vervangen. */
+export function axisGuidelines(axes: Axes, { tempered = false }: { tempered?: boolean } = {}): string[] {
   const lines: string[] = [];
   for (const axis of AXES) {
     const value = axes[axis];
     const [first, second] = GUIDELINES[axis];
     if (value < 0.25) lines.push(first[0]);
     else if (value < 0.4) lines.push(first[1]);
-    else if (value > 0.75) lines.push(tempered && HIGH_VERSTAND_OVERRIDES[axis] ? HIGH_VERSTAND_OVERRIDES[axis]! : second[0]);
+    else if (value > 0.75) lines.push((tempered && HIGH_VERSTAND_OVERRIDES[axis]) || second[0]);
     else if (value > 0.6) lines.push(second[1]);
   }
   return lines;

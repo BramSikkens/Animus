@@ -111,6 +111,21 @@ describe("Verstand in hear()", () => {
     expect(t2.prompts[0]).toContain("Je Verstand is nog heel jong");
   });
 
+  it("laag Verstand geeft de zachte laag-tekst mee aan Type2", async () => {
+    await insertDynimo({ verstand: 0.3 });
+    const t2 = type2();
+    await hear(brainWith(t2.model), "Hoi");
+    expect(t2.prompts[0]).toContain("Je weet nog niet zo veel van de wereld");
+  });
+
+  it("hoog Verstand geeft de zachte hoog-tekst mee, met een mening én een concreet voorbeeld", async () => {
+    await insertDynimo({ verstand: 0.65 });
+    const t2 = type2();
+    await hear(brainWith(t2.model), "Hoi");
+    expect(t2.prompts[0]).toContain("Je bent schrander");
+    expect(t2.prompts[0]).toContain("concreet voorbeeld");
+  });
+
   it("hoog Verstand + sterk F/P/N-assen vervangt de drie strijdige asregels en laat de oude tekst weg", async () => {
     await insertDynimo({ verstand: 0.65, axisTf: 0.9, axisJp: 0.9, axisSn: 0.9 });
     const t2 = type2();

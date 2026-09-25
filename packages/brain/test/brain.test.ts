@@ -477,7 +477,7 @@ describe("createBrain", () => {
     expect(userTexts.some((c) => c.includes("Mislukt"))).toBe(false);
   });
 
-  async function systemAfterHearing(deltas: Record<string, number>): Promise<string> {
+  async function systemAfterHearing(deltas: Record<string, number>, expressiveness?: number): Promise<string> {
     const light = textModel(["Hoi."]);
     const brain = createBrain({
       db,
@@ -488,6 +488,7 @@ describe("createBrain", () => {
       random: () => 0.99, // boven elke gedragskans: geen negeren/kort
     });
     await brain.bringToLife();
+    if (expressiveness !== undefined) await db.update(dynimos).set({ axisExpressiveness: expressiveness });
     for await (const _ of brain.hear("Hoi!")) void _;
     return contentsByRole(light.doStreamCalls[0]?.prompt, "system").join(" ");
   }
@@ -507,6 +508,24 @@ describe("createBrain", () => {
     expect(system).toContain("Wees eerlijk over hoe je je voelt");
     expect(system).toContain("ontken die niet");
     expect(system).toContain("toon en antwoord");
+  });
+
+  it("laat een gesloten Dynimo (expressiviteit < 0.4) zijn stemming niet benoemen, maar geeft Type2 wel de vector", async () => {
+    const system = await systemAfterHearing({ boos: 50 }, 0.2);
+    expect(system).toMatch(/boos: \d+/);
+    expect(system).toContain("Dominant:");
+    expect(system).not.toContain("Wees eerlijk");
+    expect(system).not.toContain("toon en antwoord kloppen");
+    expect(system).toContain("benoemt hem niet uit jezelf");
+  });
+
+  it("houdt de eerlijke stemmingsregel bij expressiviteit 0.5", async () => {
+    expect(await systemAfterHearing({ boos: 50 }, 0.5)).toContain("Wees eerlijk over hoe je je voelt");
+  });
+
+  it("legt de grens van de gesloten stemmingsregel op expressiviteit 0.4", async () => {
+    expect(await systemAfterHearing({ boos: 50 }, 0.39)).toContain("benoemt hem niet uit jezelf");
+    expect(await systemAfterHearing({ boos: 50 }, 0.4)).toContain("Wees eerlijk");
   });
 
   it("levert een mood-event met de effectieve Stemming (Type1-Emotie won van de Basisemotie), vóór de eerste tekst", async () => {

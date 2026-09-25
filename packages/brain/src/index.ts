@@ -300,14 +300,22 @@ const BEHAVIOR_PROMPTS: Partial<Record<Behavior, SystemModelMessage>> = {
   lang: { role: "system", content: "Antwoord deze beurt uitgebreid en enthousiast: vertel wat meer, weid gerust uit en laat je goede bui doorklinken." },
 };
 
-function moodMessage(mood: Mood): SystemModelMessage {
+// Grens van de "eerder gesloten"-regel in personality.ts (axisGuidelines: expressiviteit < 0.4): eronder mag de
+// stemmingsprompt de gesloten-regel niet tegenspreken.
+const CLOSED_EXPRESSIVENESS_BELOW = 0.4;
+
+function moodMessage(mood: Mood, expressiveness: number): SystemModelMessage {
   const vector = Object.entries(mood.values)
     .sort(([, a], [, b]) => b - a)
     .map(([emotion, value]) => `${emotion}: ${Math.round(value)}`)
     .join(", ");
   return {
     role: "system",
-    content: `Je huidige stemming (emoties, 0 tot 100, hoog naar laag; 50 is de ruststand, hoger is sterker dan normaal, lager is minder dan normaal): ${vector}. Dominant: ${mood.emotion}. Wees eerlijk over hoe je je voelt: als iemand vraagt hoe je je voelt of of je boos (of een andere emotie) bent en die emotie staat hoog, ontken die niet. Laat je toon en antwoord kloppen met deze stemming (een geërgerde Dynimo antwoordt korter en stugger).`,
+    content: `Je huidige stemming (emoties, 0 tot 100, hoog naar laag; 50 is de ruststand, hoger is sterker dan normaal, lager is minder dan normaal): ${vector}. Dominant: ${mood.emotion}. ${
+      expressiveness < CLOSED_EXPRESSIVENESS_BELOW
+        ? "Je stemming bepaalt onderhuids hoe kort of stug je antwoordt, maar je benoemt hem niet uit jezelf en houdt je toon ingehouden (volg daarvoor je karakter)."
+        : "Wees eerlijk over hoe je je voelt: als iemand vraagt hoe je je voelt of of je boos (of een andere emotie) bent en die emotie staat hoog, ontken die niet. Laat je toon en antwoord kloppen met deze stemming (een geërgerde Dynimo antwoordt korter en stugger)."
+    }`,
   };
 }
 
@@ -1094,7 +1102,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     const result = streamText({
       abortSignal: abort.signal,
       model: intent === "complex" ? deps.type2.heavy : deps.type2.light,
-      instructions: [stable, ageMessage(being), ...birthdayMessages(awake), moodMessage(mood), familiarityMessage(familiarity), ...(BEHAVIOR_PROMPTS[behavior] ? [BEHAVIOR_PROMPTS[behavior]] : []), ...opinionMessage, recallPrompt(recalled), ...spontaneousPromptMessage, ...(dream ? [dreamPrompt(dream.text)] : [])],
+      instructions: [stable, ageMessage(being), ...birthdayMessages(awake), moodMessage(mood, axes?.expressiveness ?? 0.5), familiarityMessage(familiarity), ...(BEHAVIOR_PROMPTS[behavior] ? [BEHAVIOR_PROMPTS[behavior]] : []), ...opinionMessage, recallPrompt(recalled), ...spontaneousPromptMessage, ...(dream ? [dreamPrompt(dream.text)] : [])],
       messages: [...workingMemory, userMessage],
       tools,
       // Genoeg stappen om een tool te gebruiken en daarna het resultaat te verwoorden.

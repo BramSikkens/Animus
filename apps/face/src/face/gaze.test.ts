@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { facePointer, gazeOffset } from "./gaze.js";
+import { facePointer, gazeOffset, IDLE_PUPIL_WHILE_TRACKING, pupilPosition } from "./gaze.js";
+import { idleOffsets } from "./idle.js";
 
 const base = { viewport: { w: 1000, h: 800 }, faceCenter: { x: 500, y: 400 }, max: 3 };
 
@@ -42,5 +43,22 @@ describe("facePointer", () => {
     const pointer = facePointer({ face: { x: 0.2, y: 0.5 }, viewport });
     const { dx } = gazeOffset({ pointer, viewport, faceCenter: { x: viewport.w / 2, y: viewport.h / 2 }, max: 3 });
     expect(dx).toBeGreaterThan(0);
+  });
+});
+
+describe("pupilPosition", () => {
+  it("blijft bij een stilstaand gevolgd gezicht dicht bij de blikrichting (geen idle-dwaling terug naar het midden)", () => {
+    const viewport = { w: 1280, h: 800 };
+    const target = gazeOffset({ pointer: facePointer({ face: { x: 0.2, y: 0.5 }, viewport }), viewport, faceCenter: { x: 640, y: 400 }, max: 3 });
+    let worst = 0;
+    for (let frame = 60; frame < 60 * 20; frame++) {
+      const x = pupilPosition({ idle: idleOffsets(frame / 60), gaze: target, idleWeight: IDLE_PUPIL_WHILE_TRACKING }).x;
+      worst = Math.max(worst, Math.abs(x - target.dx));
+    }
+    expect(worst).toBeLessThanOrEqual(0.75);
+  });
+
+  it("zonder iets te volgen dwaalt de pupil zoals voorheen", () => {
+    expect(pupilPosition({ idle: { pupilX: 2, pupilY: -1 }, gaze: { dx: 0, dy: 0 }, idleWeight: 1 })).toEqual({ x: 2, y: -1 });
   });
 });

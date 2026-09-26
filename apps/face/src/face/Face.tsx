@@ -3,7 +3,7 @@ import { motion, useAnimationFrame, useMotionValue, useReducedMotion, type Motio
 import type { DisplayState } from "@animus/brain/display";
 import type { Emotion } from "@animus/brain/emotion";
 import { doodlePath } from "./doodle.js";
-import { facePointer, gazeOffset } from "./gaze.js";
+import { facePointer, gazeOffset, IDLE_PUPIL_WHILE_TRACKING, pupilPosition } from "./gaze.js";
 import { idleOffsets } from "./idle.js";
 import { frameForDisplay } from "./interpolate.js";
 import type { Keyframe } from "./keyframes.js";
@@ -170,6 +170,8 @@ export function Face({ doodle = false, display, emotion, intensity, mouthVolume,
   // Muispositie in een ref; useAnimationFrame is de per-frame-throttle (geen extra rAF).
   const pointer = useRef<{ x: number; y: number } | null>(null);
   const gaze = useRef({ dx: 0, dy: 0 });
+  // Afgevlakt, zodat de pupil niet verspringt als er een gezicht (of de muis) verschijnt of verdwijnt.
+  const idleWeight = useRef(1);
   useEffect(() => {
     const onMove = (e: PointerEvent) => { pointer.current = { x: e.clientX, y: e.clientY }; };
     window.addEventListener("pointermove", onMove);
@@ -195,14 +197,16 @@ export function Face({ doodle = false, display, emotion, intensity, mouthVolume,
     const aanwijzer = facePosition?.current
       ? facePointer({ face: facePosition.current, viewport: { w: window.innerWidth, h: window.innerHeight } })
       : pointer.current;
-    const target =
-      reduced || display === "slapend"
-        ? { dx: 0, dy: 0 }
-        : gazeOffset({ pointer: aanwijzer, viewport: { w: window.innerWidth, h: window.innerHeight }, faceCenter: { x: window.innerWidth / 2, y: window.innerHeight / 2 }, max: GAZE_MAX });
+    const tracking = aanwijzer !== null && !reduced && display !== "slapend";
+    const target = tracking
+      ? gazeOffset({ pointer: aanwijzer, viewport: { w: window.innerWidth, h: window.innerHeight }, faceCenter: { x: window.innerWidth / 2, y: window.innerHeight / 2 }, max: GAZE_MAX })
+      : { dx: 0, dy: 0 };
     gaze.current.dx += (target.dx - gaze.current.dx) * GAZE_SMOOTHING;
     gaze.current.dy += (target.dy - gaze.current.dy) * GAZE_SMOOTHING;
-    pupilX.set(o.pupilX + gaze.current.dx);
-    pupilY.set(o.pupilY + gaze.current.dy);
+    idleWeight.current += ((tracking ? IDLE_PUPIL_WHILE_TRACKING : 1) - idleWeight.current) * GAZE_SMOOTHING;
+    const pupil = pupilPosition({ idle: o, gaze: gaze.current, idleWeight: idleWeight.current });
+    pupilX.set(pupil.x);
+    pupilY.set(pupil.y);
     const v = reduced || display !== "luisterend" ? NO_VOICE : (voice?.current ?? NO_VOICE);
     lean.current += (v.lean - lean.current) * LEAN_SMOOTHING;
     eyeScale.set(1 + v.startle * STARTLE_EYE_SCALE + lean.current * LEAN_EYE_SCALE);

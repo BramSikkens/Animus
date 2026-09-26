@@ -21,3 +21,14 @@ export function gazeOffset({ pointer, viewport, faceCenter, max }: { pointer: Po
 export function facePointer({ face, viewport }: { face: Point; viewport: { w: number; h: number } }): Point {
   return { x: (1 - face.x) * viewport.w, y: face.y * viewport.h };
 }
+
+/**
+ * Aandeel van de idle-dwaling (idle.ts, ±2) dat overblijft terwijl de ogen iets volgen. Volledig bovenop de blik
+ * (bereik ±3) dwaalde de pupil tot bijna het midden terug en leek hij weg te kijken van wie hij volgt.
+ */
+export const IDLE_PUPIL_WHILE_TRACKING = 0.25;
+
+/** Pupilpositie: de (per `idleWeight` gedempte) idle-dwaling plus de afgevlakte blikrichting. */
+export function pupilPosition({ idle, gaze, idleWeight }: { idle: { pupilX: number; pupilY: number }; gaze: { dx: number; dy: number }; idleWeight: number }): Point {
+  return { x: idle.pupilX * idleWeight + gaze.dx, y: idle.pupilY * idleWeight + gaze.dy };
+}

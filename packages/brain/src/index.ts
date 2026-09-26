@@ -82,6 +82,7 @@ export type Brain = {
   /**
    * Vult ontbrekende eigenschappen (nu: Persoonlijkheidsassen) van bestaande Dynimo's aan met één Type2-call
    * per Dynimo. Idempotent; een fout bij één Dynimo laat die rij ongemoeid. Geeft het aantal bijgewerkte rijen.
+   * Meldt "kenmerken:<id>" op het toestandskanaal per bijgewerkte rij (#111).
    */
   backfill(): Promise<number>;
   /**
@@ -104,8 +105,10 @@ export type Brain = {
   setVoiceProfile(id: number, profile: { voice: string | null; description: string | null }): Promise<boolean>;
   /** Dashboard-override: zet de Vertrouwdheid van de eigenaar (0–1). False bij een onbekende id. */
   setFamiliarity(id: number, familiarity: number): Promise<boolean>;
-  /** Dashboard: Vertrouwdheid van `personId` (default eigenaar) met deze Dynimo; 0.2 zonder rij (#91). */
+  /** Dashboard: Vertrouwdheid van `personId` (default eigenaar) met deze Dynimo; 0.2 zonder rij (#91). Leest de eigenaar enkel, maakt hem nooit aan (#111). */
   familiarityOf(dynimoId: number, personId?: number): Promise<number>;
+  /** Naam van `personId` (default eigenaar), of null zonder rij; één lichte query, maakt de eigenaar nooit aan (#111). */
+  personName(personId?: number): Promise<string | null>;
   /** Alle Stemprofielen (Eagle-export) van elke Persoon; nooit audio zelf (#92). */
   voiceProfiles(): Promise<{ personId: number; profile: Uint8Array }[]>;
   /** Voegt een Stemprofiel toe voor `personId`; houdt er hoogstens 5 (oudste eerst weg), in één transactie (#92). */
@@ -184,8 +187,16 @@ export type Brain = {
 // Serialiseert alle wissels van Wakker/Slapend tussen instanties en processen.
 const WAKE_LOCK_KEY = 7_142_001;
 
-/** Postgres NOTIFY-kanaal voor toestandswijzigingen. De payload stuurt de consument (dynimo-watch.ts `routeNotifyPayload`): "mood:", "voice:", "persons:" en "kenmerken:" verversen enkel dat deel; elke andere payload (wakker/slapend/gedood/genesis) laat de wakkere Dynimo opnieuw lezen. */
+/** Postgres NOTIFY-kanaal voor toestandswijzigingen. De payload stuurt de consument (dynimo-watch.ts `routeNotifyPayload`): STATE_PREFIXES verversen enkel dat deel; elke andere payload (wakker/slapend/gedood/genesis) laat de wakkere Dynimo opnieuw lezen. */
 export const STATE_CHANNEL = "animus_state";
+
+/** Payload-prefixen op STATE_CHANNEL (#111): producer (dit bestand) en consument (dynimo-watch.ts `routeNotifyPayload`) delen deze, i.p.v. losse string-literals. */
+export const STATE_PREFIXES = {
+  mood: "mood:",
+  voice: "voice:",
+  persons: "persons:",
+  kenmerken: "kenmerken:",
+} as const;
 
 const axesSchema = z.object({
   ie: z.number().min(0).max(1),
@@ -887,11 +898,16 @@ ${fresh.map((memory) => `- (indruk ${memory.impression}) ${memory.text}`).join("
           .returning();
         activeById.set(inserted!.id, inserted!);
       }
+      // Assen/Verstand (en bij stilte de Vertrouwdheid) schuiven hierboven; het gezichtje ververst zijn kenmerken (#111).
+      // ponytail: meldt ook als een shift toevallig 0 uitkomt (bv. axisShifts allemaal 0) — een overbodige melding
+      // is onschuldig, een gemiste is niet.
+      await notifyStateChange(tx, `${STATE_PREFIXES.kenmerken}${id}`);
       return true;
     });
   }
 
-  // Reflectie van de wakkere Dynimo bij stilte: hij blijft wakker (geen wissel, geen notify). Gooit nooit.
+  // Reflectie van de wakkere Dynimo bij stilte: hij blijft wakker (geen wissel), maar meldt "kenmerken:<id>" als
+  // assen/Verstand/Vertrouwdheid verschuiven (#111). Gooit nooit.
   // `aanwezig` (#94): Persoon-ids die tijdens de stilte in beeld waren; hun Vertrouwdheid daalt dan niet mee.
   async function reflect(hooks: { onStart?: () => void; aanwezig?: number[] } = {}): Promise<boolean> {
     try {
@@ -1089,7 +1105,11 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
           console.warn(`Backfill faalde voor ${listed.name}:`, error instanceof Error ? error.message : error);
         }
       }
-      if (changed) updatedRows++;
+      // Assen/Verstand/Basisemotie vullen hierboven de kenmerken aan; het gezichtje ververst ze (#111).
+      if (changed) {
+        updatedRows++;
+        await notifyStateChange(deps.db, `${STATE_PREFIXES.kenmerken}${listed.id}`);
+      }
     }
     return updatedRows;
   }
@@ -1259,7 +1279,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
         .where(eq(dynimos.id, id))
         .returning({ id: dynimos.id });
       // Payload "kenmerken:", zie notifyStateChange.
-      if (updated.length > 0) await notifyStateChange(tx, `kenmerken:${id}`);
+      if (updated.length > 0) await notifyStateChange(tx, `${STATE_PREFIXES.kenmerken}${id}`);
       return updated.length > 0;
     });
   }
@@ -1335,7 +1355,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
       const result = await tx.update(persons).set({ name: parsed.data }).where(eq(persons.id, id)).returning({ id: persons.id });
       // Payload "kenmerken:" zonder id (geen Dynimo-specifieke wijziging): de Vertrouwdheid-naam in het gezichtje kan
       // van deze Persoon zijn, ongeacht welke Dynimo wakker is.
-      if (result.length > 0) await notifyStateChange(tx, "kenmerken:");
+      if (result.length > 0) await notifyStateChange(tx, STATE_PREFIXES.kenmerken);
       return result.length > 0;
     });
   }
@@ -1396,7 +1416,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
       await tx.delete(persons).where(eq(persons.id, removeId));
       if (remove.owner) await tx.update(persons).set({ owner: true }).where(eq(persons.id, keepId));
       // Payload "persons:" (zoals "mood:"/"voice:"): de agent herlaadt zijn Stemprofielen en gezichten (#95).
-      await notifyStateChange(tx, "persons:");
+      await notifyStateChange(tx, STATE_PREFIXES.persons);
       return true;
     });
   }
@@ -1413,7 +1433,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     return deps.db.transaction(async (tx) => {
       const result = await tx.delete(persons).where(eq(persons.id, id)).returning({ id: persons.id });
       if (result.length === 0) return false;
-      await notifyStateChange(tx, "persons:");
+      await notifyStateChange(tx, STATE_PREFIXES.persons);
       return true;
     });
   }
@@ -1428,7 +1448,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     await deps.db.transaction(async (tx) => {
       await tx.delete(faceEmbeddings).where(eq(faceEmbeddings.personId, id));
       await tx.delete(voiceProfilesTable).where(eq(voiceProfilesTable.personId, id));
-      await notifyStateChange(tx, "persons:");
+      await notifyStateChange(tx, STATE_PREFIXES.persons);
     });
     return true;
   }
@@ -1467,13 +1487,30 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     // aborted-toestand laten (elke volgende statement, ook de notify, zou dan alsnog falen).
     const ok = await upsertFamiliarity(id, await getOwnerId(), familiarity);
     // Payload "kenmerken:", zie notifyStateChange.
-    if (ok) await notifyStateChange(deps.db, `kenmerken:${id}`);
+    if (ok) await notifyStateChange(deps.db, `${STATE_PREFIXES.kenmerken}${id}`);
     return ok;
   }
 
-  /** Vertrouwdheid voor het dashboard: van `personId` (default eigenaar) met deze Dynimo, 0.2 zonder rij. */
+  /** Eigenaar-id zonder aan te maken (#111): enkel lezen, null zonder rij. */
+  async function ownerIdReadOnly(): Promise<number | null> {
+    const [existing] = await deps.db.select({ id: persons.id }).from(persons).where(eq(persons.owner, true));
+    return existing?.id ?? null;
+  }
+
+  /** Vertrouwdheid voor het dashboard: van `personId` (default eigenaar) met deze Dynimo, 0.2 zonder rij. Leest de eigenaar enkel (#111). */
   async function familiarityOf(dynimoId: number, personId?: number): Promise<number> {
-    return familiarityRow(dynimoId, personId ?? (await getOwnerId()));
+    const resolvedId = personId ?? (await ownerIdReadOnly());
+    if (resolvedId === null) return FAMILIARITY_DEFAULT;
+    return familiarityRow(dynimoId, resolvedId);
+  }
+
+  /** Naam van `personId` (default eigenaar), of null zonder rij; één lichte query, maakt de eigenaar nooit aan (#111). */
+  async function personName(personId?: number): Promise<string | null> {
+    const [row] =
+      personId !== undefined
+        ? await deps.db.select({ name: persons.name }).from(persons).where(eq(persons.id, personId))
+        : await deps.db.select({ name: persons.name }).from(persons).where(eq(persons.owner, true));
+    return row?.name ?? null;
   }
 
   async function voiceProfiles(): Promise<{ personId: number; profile: Uint8Array }[]> {
@@ -1568,7 +1605,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     return deps.db.transaction(async (tx) => {
       const updated = await tx.update(dynimos).set({ verstand }).where(eq(dynimos.id, id)).returning({ id: dynimos.id });
       // Payload "kenmerken:", zie notifyStateChange.
-      if (updated.length > 0) await notifyStateChange(tx, `kenmerken:${id}`);
+      if (updated.length > 0) await notifyStateChange(tx, `${STATE_PREFIXES.kenmerken}${id}`);
       return updated.length > 0;
     });
   }
@@ -1594,7 +1631,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
         .where(eq(dynimos.id, id))
         .returning({ id: dynimos.id });
       // Payload "kenmerken:", zie notifyStateChange.
-      if (updated.length > 0) await notifyStateChange(tx, `kenmerken:${id}`);
+      if (updated.length > 0) await notifyStateChange(tx, `${STATE_PREFIXES.kenmerken}${id}`);
       return updated.length > 0;
     });
   }
@@ -1603,7 +1640,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     return deps.db.transaction(async (tx) => {
       const updated = await tx.update(dynimos).set({ voice, voiceDescription: description }).where(eq(dynimos.id, id)).returning({ id: dynimos.id });
       // Payload "voice:" laat de agent enkel de stem verversen, zonder het lopende antwoord af te breken.
-      if (updated.length > 0) await notifyStateChange(tx, `voice:${id}`);
+      if (updated.length > 0) await notifyStateChange(tx, `${STATE_PREFIXES.voice}${id}`);
       return updated.length > 0;
     });
   }
@@ -1616,7 +1653,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
         .where(eq(dynimos.id, id))
         .returning({ id: dynimos.id });
       // Payload "mood:" laat de agent enkel het gezichtje verversen, zonder het lopende antwoord af te breken.
-      if (updated.length > 0) await notifyStateChange(tx, `mood:${id}`);
+      if (updated.length > 0) await notifyStateChange(tx, `${STATE_PREFIXES.mood}${id}`);
       return updated.length > 0;
     });
   }
@@ -2208,6 +2245,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     setAxes,
     setFamiliarity,
     familiarityOf,
+    personName,
     voiceProfiles,
     addVoiceProfile,
     recognizeFaces,

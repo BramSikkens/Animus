@@ -32,6 +32,18 @@ describe("routeNotifyPayload", () => {
     expect(check).not.toHaveBeenCalled();
   });
 
+  it("routeert \"persons:\" naar onPersons én onKenmerken (naam ná samenvoegen, #111), mét onNotify", () => {
+    const check = vi.fn();
+    const onNotify = vi.fn();
+    const onPersons = vi.fn();
+    const onKenmerken = vi.fn();
+    routeNotifyPayload("persons:", { check, onNotify, onPersons, onKenmerken });
+    expect(onPersons).toHaveBeenCalledOnce();
+    expect(onKenmerken).toHaveBeenCalledOnce();
+    expect(onNotify).toHaveBeenCalledOnce();
+    expect(check).not.toHaveBeenCalled();
+  });
+
   it("valt terug op check() voor elke andere melding", () => {
     const check = vi.fn();
     const onNotify = vi.fn();

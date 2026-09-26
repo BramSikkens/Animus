@@ -202,6 +202,36 @@ describe("Personen in hear() (#91)", () => {
     expect(await brain.familiarityOf(vero.id, anna.id)).toBe(0.2);
   });
 
+  it("familiarityOf zonder personId leest de eigenaar enkel, maakt hem nooit aan (#111)", async () => {
+    const vero = await insertDynimo();
+    const brain = brainWith(type2().model);
+
+    expect(await brain.familiarityOf(vero.id)).toBe(0.2);
+
+    expect(await db.select().from(persons)).toHaveLength(0);
+  });
+
+  it("personName geeft de naam van personId in één lichte query (#111)", async () => {
+    const anna = await insertPerson("Anna");
+    const brain = brainWith(type2().model);
+    expect(await brain.personName(anna.id)).toBe("Anna");
+  });
+
+  it("personName valt zonder personId terug op de eigenaar, zonder die aan te maken (#111)", async () => {
+    const brain = brainWith(type2().model);
+
+    expect(await brain.personName()).toBeNull();
+
+    expect(await db.select().from(persons)).toHaveLength(0);
+  });
+
+  it("personName geeft de eigenaar-naam als die al bestaat (#111)", async () => {
+    await db.insert(persons).values({ name: "eigenaar", owner: true });
+    const brain = brainWith(type2().model);
+
+    expect(await brain.personName()).toBe("eigenaar");
+  });
+
   it("hear met een Persoon: de Herinnering heeft die person_id; Vertrouwdheid groeit voor die Persoon, niet voor de eigenaar", async () => {
     const vero = await insertDynimo();
     const anna = await insertPerson("Anna");

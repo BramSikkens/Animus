@@ -1913,6 +1913,35 @@ describe("createBrain", () => {
       expect(row?.axisIe).toBeCloseTo(0.9);
     });
 
+    it("meldt \"kenmerken:<id>\" op het toestandskanaal als backfill iets aanvult (#111)", async () => {
+      // Assen/Basisemotie/Drijfveer al aanwezig: enkel de Verstand-stap (geen Type2-call) heeft iets te doen.
+      const legacy = await insertLegacy("Lumi", { axisIe: 0.5, axisSn: 0.5, axisTf: 0.5, axisJp: 0.5, verstand: null });
+      const client = postgres(databaseUrl(TEST_DB_NAME), { onnotice: () => {} });
+      const received: string[] = [];
+      await client.listen(STATE_CHANNEL, (payload) => received.push(payload));
+      try {
+        expect(await brainWith(unusedModel()).backfill()).toBe(1);
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        expect(received).toEqual([`kenmerken:${legacy.id}`]);
+      } finally {
+        await client.end();
+      }
+    });
+
+    it("meldt niets als backfill niets aanvult (Dynimo al compleet)", async () => {
+      await insertLegacy("Lumi", { axisIe: 0.5, axisSn: 0.5, axisTf: 0.5, axisJp: 0.5 });
+      const client = postgres(databaseUrl(TEST_DB_NAME), { onnotice: () => {} });
+      const received: string[] = [];
+      await client.listen(STATE_CHANNEL, (payload) => received.push(payload));
+      try {
+        expect(await brainWith(unusedModel()).backfill()).toBe(0);
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        expect(received).toEqual([]);
+      } finally {
+        await client.end();
+      }
+    });
+
     it("werkt een pratende instantie meteen bij: de persoonlijkheid komt in de volgende beurt zonder herstart", async () => {
       await insertLegacy("Lumi", { awakeSince: bornAt });
       const light = new MockLanguageModelV4({ doStream: [textStream("Hoi."), textStream("Hallo.")] });
@@ -3615,6 +3644,22 @@ describe("createBrain", () => {
         expect(row.axisIe).toBeCloseTo(0.52, 5);
         expect(row.awakeSince).toEqual(bornAt);
         expect([row.wakeMoodEmotion, row.wakeMoodIntensity]).toEqual([null, null]); // blijft wakker: geen Ontwaakstemming
+      });
+
+      it("meldt \"kenmerken:<id>\" op het toestandskanaal als de assen/Verstand verschuiven (#111)", async () => {
+        const vero = await insertDynimo({ awakeSince: bornAt });
+        await addMemory(vero.id, "iets", 1, 0.9);
+        const heavy = heavyReturning(reflection({ axisShifts: { ie: 0.3, sn: 0, tf: 0, jp: 0, reactivity: 0, expressiveness: 0 } }));
+        const client = postgres(databaseUrl(TEST_DB_NAME), { onnotice: () => {} });
+        const received: string[] = [];
+        await client.listen(STATE_CHANNEL, (payload) => received.push(payload));
+        try {
+          expect(await brainWith(heavy).reflect()).toBe(true);
+          await new Promise((resolve) => setTimeout(resolve, 150));
+          expect(received).toEqual([`kenmerken:${vero.id}`]);
+        } finally {
+          await client.end();
+        }
       });
 
       it("laat Vertrouwdheid dalen (Reflectie na lange stilte), maar niet bij slapen", async () => {

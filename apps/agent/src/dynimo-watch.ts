@@ -1,5 +1,5 @@
 import postgres from "postgres";
-import { STATE_CHANNEL, type Brain, type Dynimo } from "@animus/brain";
+import { STATE_CHANNEL, STATE_PREFIXES, type Brain, type Dynimo } from "@animus/brain";
 import type { DisplayState } from "@animus/brain/display";
 import { displayMoodOfRow, type Mood } from "@animus/brain/mood";
 
@@ -35,7 +35,7 @@ export type NotifyHandlers = {
   onMood?: () => void;
   /** De stem van een Dynimo is gewijzigd (dashboard, payload "voice:<id>"). */
   onVoice?: () => void;
-  /** Personen zijn samengevoegd/verwijderd/opnieuw geleerd (dashboard, payload "persons:", #95): biometrie is verouderd. */
+  /** Personen zijn samengevoegd/verwijderd/opnieuw geleerd (dashboard, payload "persons:", #95): biometrie is verouderd; ververst ook de kenmerken, want een naamswijziging na samenvoegen moet zichtbaar worden (#111). */
   onPersons?: () => void;
   /** Assen/Verstand/archetype/Vertrouwdheid gewijzigd (dashboard, payload "kenmerken:<id>" of "kenmerken:"): ververs enkel de kenmerken. */
   onKenmerken?: () => void;
@@ -49,11 +49,15 @@ export type NotifyHandlers = {
  */
 export function routeNotifyPayload(payload: string, handlers: NotifyHandlers): void {
   // Zoals "mood:": enkel het gezichtje ververst zijn kenmerken, geen wissel of Galerij-update als bijwerking.
-  if (payload.startsWith("mood:")) return void handlers.onMood?.();
-  if (payload.startsWith("kenmerken:")) return void handlers.onKenmerken?.();
+  if (payload.startsWith(STATE_PREFIXES.mood)) return void handlers.onMood?.();
+  if (payload.startsWith(STATE_PREFIXES.kenmerken)) return void handlers.onKenmerken?.();
   handlers.onNotify?.();
-  if (payload.startsWith("voice:")) return void handlers.onVoice?.();
-  if (payload.startsWith("persons:")) return void handlers.onPersons?.();
+  if (payload.startsWith(STATE_PREFIXES.voice)) return void handlers.onVoice?.();
+  if (payload.startsWith(STATE_PREFIXES.persons)) {
+    handlers.onPersons?.();
+    // Naamswijziging na samenvoegen (#111): de Vertrouwdheid-naam in het gezichtje kan verouderd zijn.
+    return void handlers.onKenmerken?.();
+  }
   return void handlers.check();
 }
 

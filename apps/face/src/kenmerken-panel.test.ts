@@ -12,12 +12,16 @@ const base: KenmerkenMessage = {
 };
 
 describe("kenmerkenPanel", () => {
-  it("combineert archetype en basisemotie tot één label", () => {
-    expect(kenmerkenPanel(base).label).toBe("professor · nieuwsgierig");
+  it("combineert de archetype-naam (niet het id) en basisemotie tot één label (#111)", () => {
+    expect(kenmerkenPanel(base).label).toBe("Professor · nieuwsgierig");
   });
 
   it("toont enkel de basisemotie zonder archetype", () => {
     expect(kenmerkenPanel({ ...base, archetype: null }).label).toBe("nieuwsgierig");
+  });
+
+  it("valt terug op het ruwe id bij een onbekend archetype", () => {
+    expect(kenmerkenPanel({ ...base, archetype: "bestaat-niet" }).label).toBe("bestaat-niet · nieuwsgierig");
   });
 
   it("geeft elke as met poollabels en waarde, in AXES-volgorde", () => {

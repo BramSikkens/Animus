@@ -1,3 +1,4 @@
+import { getArchetype } from "@animus/brain/archetypes";
 import type { KenmerkenMessage } from "@animus/brain/kenmerken";
 import { AXES, AXIS_POLES, type Axis } from "@animus/brain/personality";
 
@@ -16,8 +17,10 @@ export type KenmerkenPanel = {
 /** Opmaak voor het kenmerkenpaneel (#105): archetype + basisemotie als label, assen/Verstand met poollabels (null → midden). */
 export function kenmerkenPanel(message: KenmerkenMessage): KenmerkenPanel {
   const vertrouwdheid = message.vertrouwdheid;
+  // Archetype-naam i.p.v. het id (#111); onbekend id (bv. verouderd) valt terug op het ruwe id.
+  const archetypeNaam = message.archetype ? (getArchetype(message.archetype)?.name ?? message.archetype) : null;
   return {
-    label: message.archetype ? `${message.archetype} · ${message.basisemotie}` : message.basisemotie,
+    label: archetypeNaam ? `${archetypeNaam} · ${message.basisemotie}` : message.basisemotie,
     assen: AXES.map((axis) => ({ axis, links: AXIS_POLES[axis][0], rechts: AXIS_POLES[axis][1], value: message.assen[axis] ?? 0.5 })),
     verstand: message.verstand ?? 0.5,
     kernkarakter: message.kernkarakter,

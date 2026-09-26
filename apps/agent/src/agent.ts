@@ -197,19 +197,33 @@ export default defineAgent<AgentUserData>({
       if (watcher) publish(DISPLAY_TOPIC, { state: effectiveDisplay(watcher.current()) });
     });
     // Weergavetoestand plus, bij wakker, de HUIDIGE Stemming (vers gelezen), zodat het gezichtje na wekken direct klopt.
-    const publishState = async (): Promise<void> => {
+    // Enkel wat vervaagt (#111): de 5s-ronde gebruikt alleen dit, niet de kenmerken (die vragen een aparte, tragere lezing).
+    const publishMood = async (): Promise<void> => {
       try {
         const state = await readState(brain);
         publish(DISPLAY_TOPIC, { state: effectiveDisplay(state), name: state.name });
         publish(EMOTION_TOPIC, withFaceExpressiveness(emotionMessageFor(state.mood), state.expressiveness));
-        // Kenmerken (#105): met de Gesprekspartner van de laatst afgelopen beurt (of de eigenaar zonder beurt).
-        const vertrouwdheid = state.row
-          ? await vertrouwdheidFor({ familiarityOf: brain.familiarityOf, listPersons: brain.listPersons }, state.row.id, lastGesprekspartner)
-          : { onbekend: true as const };
-        publish(KENMERKEN_TOPIC, kenmerkenMessageFor(state.row, vertrouwdheid));
       } catch (error) {
         console.error("Toestand publiceren faalde:", error instanceof Error ? error.message : error);
       }
+    };
+    // Kenmerken (#105/#111): met de Gesprekspartner van de laatst afgelopen beurt (of de eigenaar zonder beurt).
+    // Ververst bij NOTIFY ("kenmerken:"/"persons:"), na een beurt en via een trage verversing (~60s) — niet elke 5s.
+    const publishKenmerken = async (): Promise<void> => {
+      try {
+        const state = await readState(brain);
+        const vertrouwdheid = state.row
+          ? await vertrouwdheidFor({ familiarityOf: brain.familiarityOf, personName: brain.personName }, state.row.id, lastGesprekspartner)
+          : { onbekend: true as const };
+        publish(KENMERKEN_TOPIC, kenmerkenMessageFor(state.row, vertrouwdheid));
+      } catch (error) {
+        console.error("Kenmerken publiceren faalde:", error instanceof Error ? error.message : error);
+      }
+    };
+    // Alles (start/wissel/eerste publicatie na een nieuwe deelnemer): de face-app kent de toestand dan nog niet.
+    const publishState = async (): Promise<void> => {
+      await publishMood();
+      await publishKenmerken();
     };
 
     // Galerij: alle levende Dynimo's (naam, wakker) voor het startscherm van het gezichtje.
@@ -297,7 +311,9 @@ export default defineAgent<AgentUserData>({
       cameraActive: () => frames.hasCamera(),
       onBeurtAfgelopen: (gesprekspartner) => {
         lastGesprekspartner = gesprekspartner;
-        void publishState();
+        // Enkel kenmerken (Vertrouwdheid) en Galerij (#111): de Stemming zelf gaat al live via onMoodValues.
+        void publishKenmerken();
+        void publishGallery();
       },
     });
     const isQuiet = (): boolean =>
@@ -394,8 +410,13 @@ export default defineAgent<AgentUserData>({
     watcher = await watchDynimos({
       databaseUrl,
       brain,
-      onMood: () => void publishState(),
-      onKenmerken: () => void publishState(),
+      onMood: () => void publishMood(),
+      // Assen/Verstand/Vertrouwdheid gewijzigd (ook "persons:", #111 criterium 3): kenmerken ververst, én de
+      // gecachete assen (Expressiviteit voor gezicht én TTS), zodat die niet tussen oud en nieuw springen.
+      onKenmerken: () => {
+        void publishKenmerken();
+        void refreshInitiativeAxes().catch(() => {});
+      },
       onNotify: () => void publishGallery(),
       onVoice: () =>
         void readState(brain)
@@ -436,19 +457,24 @@ export default defineAgent<AgentUserData>({
     void publishState();
     void publishGallery();
     // De Stemming dooft uit met de tijd: periodiek opnieuw publiceren laat de balken meelopen (enkel bij wakker + face).
+    // Enkel wat vervaagt (#111): kenmerken/Galerij hebben hun eigen, tragere ronde hieronder.
     const republisher = createStateRepublisher({
       intervalMs: 5000,
       isActive: () => watcher.current().key !== "none" && ctx.room.remoteParticipants.size > 0,
-      publish: () => void publishState(),
+      publish: () => void publishMood(),
     });
     republisher.start();
-    const galleryRepublisher = createStateRepublisher({
-      intervalMs: 5000,
+    // Trage verversing (~60s, #111) als vangnet: kenmerken/Galerij veranderen zelden buiten NOTIFY/een beurt om.
+    const slowRepublisher = createStateRepublisher({
+      intervalMs: 60_000,
       isActive: () => ctx.room.remoteParticipants.size > 0,
-      publish: () => void publishGallery(),
+      publish: () => {
+        void publishGallery();
+        void publishKenmerken();
+      },
     });
-    galleryRepublisher.start();
-    ctx.addShutdownCallback(async () => galleryRepublisher.dispose());
+    slowRepublisher.start();
+    ctx.addShutdownCallback(async () => slowRepublisher.dispose());
     ctx.addShutdownCallback(async () => republisher.dispose());
     silence.arm();
     void refreshInitiativeAxes().catch(() => {});

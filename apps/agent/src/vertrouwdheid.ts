@@ -3,7 +3,8 @@ import type { Gesprekspartner } from "@animus/brain/perception";
 
 export type VertrouwdheidDeps = {
   familiarityOf: (dynimoId: number, personId?: number) => Promise<number>;
-  listPersons: () => Promise<{ id: number; name: string; owner: boolean }[]>;
+  /** Eén lichte query: naam van `personId` (default eigenaar), null zonder rij; maakt de eigenaar nooit aan (#111). */
+  personName: (personId?: number) => Promise<string | null>;
 };
 
 /**
@@ -13,9 +14,6 @@ export type VertrouwdheidDeps = {
 export async function vertrouwdheidFor(deps: VertrouwdheidDeps, dynimoId: number, gesprekspartner: Gesprekspartner): Promise<Vertrouwdheid> {
   if (gesprekspartner.soort === "onbekend") return { onbekend: true };
   const personId = gesprekspartner.soort === "persoon" ? gesprekspartner.personId : undefined;
-  const waarde = await deps.familiarityOf(dynimoId, personId);
-  const persons = await deps.listPersons();
-  const resolvedId = personId ?? persons.find((p) => p.owner)?.id;
-  const person = persons.find((p) => p.id === resolvedId);
-  return person ? { naam: person.name, waarde } : { onbekend: true };
+  const [waarde, naam] = await Promise.all([deps.familiarityOf(dynimoId, personId), deps.personName(personId)]);
+  return naam ? { naam, waarde } : { onbekend: true };
 }

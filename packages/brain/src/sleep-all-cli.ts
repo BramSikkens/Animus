@@ -4,6 +4,7 @@ import { createDb, migrate } from "@animus/db";
 import { dynimos } from "@animus/db/schema";
 import { createBrain } from "./index.js";
 import { EMBEDDING_MODEL, loadType2Config, TYPE1_MODEL, type2Catalog } from "./config.js";
+import { createJobQueue } from "./jobs.js";
 
 try {
   process.loadEnvFile(fileURLToPath(new URL("../../../.env", import.meta.url)));
@@ -14,11 +15,13 @@ try {
 // Bij het opstarten van Animus (`pnpm dev`) slapen alle Dynimo's: wekken doet de gebruiker via het dashboard.
 async function main(): Promise<void> {
   const db = createDb(process.env.DATABASE_URL ?? "postgres://animus:animus@localhost:5433/animus");
+  // Reflectie via de wachtrij (#125): enkel inplannen, de worker voert 'm uit.
+  const jobs = createJobQueue({ connection: process.env.REDIS_URL ?? "redis://localhost:6379" });
   try {
     await migrate(db);
     try {
       // Via de brain: de vorige wakkere Dynimo krijgt zo zijn Reflectie voor het slapen.
-      const brain = createBrain({ db, type1: TYPE1_MODEL, type2: loadType2Config(), type2Catalog: type2Catalog(), embedder: EMBEDDING_MODEL });
+      const brain = createBrain({ db, type1: TYPE1_MODEL, type2: loadType2Config(), type2Catalog: type2Catalog(), embedder: EMBEDDING_MODEL, jobs });
       await brain.sleep();
     } catch (error) {
       // Geen modelconfig (of de call faalde): dev mag nooit breken, dus terugval op direct slapen zonder Reflectie.
@@ -27,6 +30,7 @@ async function main(): Promise<void> {
     // Idempotent vangnet: ook na een geslaagde brain.sleep() staat niemand meer wakker.
     await db.update(dynimos).set({ awakeSince: null }).where(isNotNull(dynimos.awakeSince));
   } finally {
+    await jobs.close();
     await db.$client.end();
   }
 }

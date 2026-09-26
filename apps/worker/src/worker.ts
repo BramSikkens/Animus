@@ -5,18 +5,32 @@ try {
   // .env is optioneel: de omgevingsvariabelen kunnen ook al gezet zijn (bv. via shell/CI).
 }
 
+import { createBrain } from "@animus/brain";
+import { EMBEDDING_MODEL, loadType2Config, TYPE1_MODEL, type2Catalog } from "@animus/brain/config";
 import { startWorker } from "@animus/brain/jobs";
+import { createDb, migrate } from "@animus/db";
 
 const redisUrl = process.env.REDIS_URL ?? "redis://localhost:6379";
+const databaseUrl = process.env.DATABASE_URL ?? "postgres://animus:animus@localhost:5433/animus";
 
-// ponytail: nog geen handlers, dus nog geen brain-instantie nodig — #125 voegt die toe zodra de eerste
-// echte job (reflectie/herinnering/backfill) een brain nodig heeft.
-const worker = startWorker({ connection: redisUrl, handlers: {} });
+const db = createDb(databaseUrl);
+await migrate(db);
+
+// Geen `jobs`-dep hier (#125): de worker voért de reflectie-jobs zelf uit i.p.v. ze in te plannen.
+const brain = createBrain({ db, type1: TYPE1_MODEL, type2: loadType2Config(), type2Catalog: type2Catalog(), embedder: EMBEDDING_MODEL });
+
+const worker = startWorker({
+  connection: redisUrl,
+  handlers: {
+    reflectie: (payload) => brain.runReflection(payload.dynimoId, payload),
+  },
+});
 
 console.log("[worker] klaar");
 
 async function shutdown(): Promise<void> {
   await worker.close();
+  await db.$client.end();
   process.exit(0);
 }
 

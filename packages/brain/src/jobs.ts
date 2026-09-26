@@ -3,9 +3,13 @@ import { Redis as IORedis } from "ioredis";
 
 export const QUEUE_NAME = "animus";
 
-// ponytail: "ping" is het enige jobtype, puur om de wachtrij-fundering (queue, worker, retries) te bewijzen.
-// De echte jobs (reflectie, herinnering, backfill) volgen in #125–#127; dit type verdwijnt/wordt dan aangevuld.
-export type JobPayloads = { ping: { value: number } };
+// ponytail: "ping" blijft naast de echte jobs staan, puur om de wachtrij-fundering (queue, worker, retries) te
+// bewijzen in jobs.test.ts. Herinnering/backfill volgen in #126–#127.
+export type JobPayloads = {
+  ping: { value: number };
+  /** Reflectie van één Dynimo (#125): bij slapen/wisselen (sleeping: true) of bij stilte (sleeping: false). */
+  reflectie: { dynimoId: number; sleeping: boolean; aanwezig?: number[] };
+};
 
 export const DEFAULT_JOB_OPTIONS: JobsOptions = {
   attempts: 5,
@@ -17,6 +21,9 @@ export const DEFAULT_JOB_OPTIONS: JobsOptions = {
 function connect(connection: string): IORedis {
   return new IORedis(connection, { maxRetriesPerRequest: null });
 }
+
+/** Enkel `enqueue`, zoals `createBrain`'s `jobs`-dep hem gebruikt (inplannen, nooit de queue zelf beheren). */
+export type JobEnqueue = ReturnType<typeof createJobQueue>["enqueue"];
 
 export function createJobQueue({ connection, prefix }: { connection: string; prefix?: string }) {
   const redis = connect(connection);
@@ -56,6 +63,12 @@ export function startWorker({
     },
     { connection: redis, prefix },
   );
+
+  // Definitief gefaald (geen pogingen meer over): loggen, verder breekt niets (ADR-0022).
+  worker.on("failed", (job, error) => {
+    if (!job || job.attemptsMade < (job.opts.attempts ?? 1)) return;
+    console.warn(`Job "${job.name}" (${job.id}) definitief mislukt:`, error instanceof Error ? error.message : error);
+  });
 
   return {
     async close(): Promise<void> {

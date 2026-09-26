@@ -1,5 +1,5 @@
 import { Queue, QueueEvents } from "bullmq";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createJobQueue, QUEUE_NAME, startWorker } from "../src/jobs.js";
 
 const REDIS_URL = process.env.REDIS_URL ?? process.env.TEST_REDIS_URL ?? "redis://localhost:6379";
@@ -73,5 +73,66 @@ describe("jobs", () => {
 
     expect(result).toEqual({ pong: 10 });
     expect(attempts).toBe(2);
+  });
+
+  it("logt een job die definitief faalt (na de laatste poging) via console.warn", async () => {
+    const prefix = `animus_test_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    const queue = createJobQueue({ connection: REDIS_URL, prefix });
+    const worker = startWorker({
+      connection: REDIS_URL,
+      prefix,
+      handlers: {
+        ping: async () => {
+          throw new Error("blijft falen");
+        },
+      },
+    });
+    const queueEvents = new QueueEvents(QUEUE_NAME, { connection: { url: REDIS_URL }, prefix });
+    await queueEvents.waitUntilReady();
+    cleanup.push(() => queueEvents.close());
+    cleanup.push(() => worker.close());
+    cleanup.push(() => queue.close());
+    cleanup.push(() => obliterate(prefix));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const job = await queue.enqueue("ping", { value: 1 }, { attempts: 1 });
+    await expect(job.waitUntilFinished(queueEvents)).rejects.toThrow();
+    await new Promise((resolve) => setTimeout(resolve, 150)); // worker's eigen "failed"-event kan later komen dan queueEvents
+
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(new RegExp(`ping.*${job.id}`)), expect.stringContaining("blijft falen"));
+    warn.mockRestore();
+  });
+
+  it("dedupliceert: een tweede enqueue met dezelfde deduplication-id terwijl de eerste nog loopt roept de handler één keer aan", async () => {
+    const prefix = `animus_test_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    const queue = createJobQueue({ connection: REDIS_URL, prefix });
+    let calls = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const worker = startWorker({
+      connection: REDIS_URL,
+      prefix,
+      handlers: {
+        reflectie: async () => {
+          calls += 1;
+          await gate;
+        },
+      },
+    });
+    const queueEvents = new QueueEvents(QUEUE_NAME, { connection: { url: REDIS_URL }, prefix });
+    await queueEvents.waitUntilReady();
+    cleanup.push(() => queueEvents.close());
+    cleanup.push(() => worker.close());
+    cleanup.push(() => queue.close());
+    cleanup.push(() => obliterate(prefix));
+
+    const first = await queue.enqueue("reflectie", { dynimoId: 1, sleeping: true }, { deduplication: { id: "reflectie:1" } });
+    await new Promise((resolve) => setTimeout(resolve, 150)); // laat de worker de eerste job oppikken
+    await queue.enqueue("reflectie", { dynimoId: 1, sleeping: true }, { deduplication: { id: "reflectie:1" } });
+    release();
+    await first.waitUntilFinished(queueEvents);
+    await new Promise((resolve) => setTimeout(resolve, 150)); // een eventuele tweede uitvoering de kans geven
+
+    expect(calls).toBe(1);
   });
 });

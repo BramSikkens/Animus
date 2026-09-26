@@ -18,6 +18,7 @@ import { z } from "zod";
 import type { Db } from "@animus/db";
 import { dreams, drives, dynimos, epitaphs, faceEmbeddings, familiarities, memories, persons, settings, voiceProfiles as voiceProfilesTable } from "@animus/db/schema";
 import type { Type2Catalog } from "./config.js";
+import type { JobEnqueue } from "./jobs.js";
 import { formatAge } from "./age.js";
 import { archetypeOfferText, getArchetype, pickOffer } from "./archetypes.js";
 import { drivesPromptBlock, isActiveDrive, type DriveRow } from "./drives.js";
@@ -166,6 +167,19 @@ export type Brain = {
    */
   reflect(hooks?: { onStart?: () => void; aanwezig?: number[] }): Promise<boolean>;
   /**
+   * Voert de Reflectie van één Dynimo echt uit (#125: door de worker aangeroepen, buiten deze brain-instantie om
+   * ingepland). Meldt "reflectie:start:<id>" op het toestandskanaal vlak vóór de Type2-call, en (enkel als die
+   * start-melding gebeurde) in een finally "reflectie:einde:<id>" — ook als de call faalt. Gooit door bij een fout
+   * (i.t.t. `reflect()`/`reflectAll()`, die nooit gooien): BullMQ moet de job dan als mislukt zien en herkansen.
+   */
+  runReflection(dynimoId: number, options: { sleeping: boolean; aanwezig?: number[] }): Promise<void>;
+  /**
+   * Meldt van buitenaf (#125: de agent op basis van een NOTIFY van de worker) dat een Reflectie van deze Dynimo
+   * start (`running: true`) of eindigt (`running: false`). Werkt dezelfde teller bij als reflectDynimo() intern
+   * gebruikt, zodat considerInitiative() ook een Reflectie die in een ander proces (de worker) draait respecteert.
+   */
+  noteReflection(dynimoId: number, running: boolean): void;
+  /**
    * Dashboard-override: zet de Stemming van deze Dynimo direct (ook lager dan de huidige); ze dooft daarna
    * gewoon uit, de Basisemotie blijft ongewijzigd. False bij een onbekende id; gooit bij een ongeldige intensiteit.
    */
@@ -269,6 +283,8 @@ export const STATE_PREFIXES = {
   voice: "voice:",
   persons: "persons:",
   kenmerken: "kenmerken:",
+  /** Reflectie-voortgang (#125): "reflectie:start:<id>" / "reflectie:einde:<id>", gemeld door de worker (runReflection). */
+  reflectie: "reflectie:",
 } as const;
 
 export function createBrain(deps: {
@@ -290,6 +306,13 @@ export function createBrain(deps: {
   lookFrame?: () => Promise<Frame | null>;
   /** Drempel (L2-afstand, pgvector `<->`) voor een "zekere" gezichtsmatch (#93); default afgeleid, zie DEFAULT_FACE_MATCH_DISTANCE. */
   faceMatchDistance?: number;
+  /**
+   * Achtergrondtaken via de wachtrij (#125, ADR-0022). Aanwezig: reflectAll()/reflect() plannen een reflectie-job
+   * in i.p.v. zelf te reflecteren en wachten er niet op. Ontbreekt deze: exact het huidige gedrag (rechtstreeks
+   * reflecteren) — zo blijven tests en CLI's zonder Redis werken. De worker geeft dit nooit mee: die voert de job
+   * juist zelf uit via runReflection().
+   */
+  jobs?: { enqueue: JobEnqueue };
 }): Brain {
   const now = deps.now ?? (() => new Date());
   const random = deps.random ?? Math.random;
@@ -486,12 +509,15 @@ export function createBrain(deps: {
   }
 
   // Reflectie na de wissel (de wissel zelf is dan al gecommit en genotificeerd). Een fout mag het slapen niet breken.
+  // Met `deps.jobs` (#125): enkel inplannen (dedup per Dynimo), de worker voert 'm uit — hier dus geen Type2-call.
   async function reflectAll(ids: number[]): Promise<void> {
     for (const id of ids) {
       try {
-        await reflectDynimo(id);
+        if (deps.jobs) await deps.jobs.enqueue("reflectie", { dynimoId: id, sleeping: true }, { deduplication: { id: `reflectie:${id}` } });
+        else await reflectDynimo(id);
       } catch (error) {
-        console.warn(`Reflectie faalde voor Dynimo ${id}:`, error instanceof Error ? error.message : error);
+        const what = deps.jobs ? "inplannen" : "";
+        console.warn(`Reflectie${what ? ` ${what}` : ""} faalde voor Dynimo ${id}:`, error instanceof Error ? error.message : error);
       }
     }
   }
@@ -501,7 +527,7 @@ export function createBrain(deps: {
   // Lopende Reflecties per Dynimo-id (#114): enkel díe Dynimo neemt tijdens zijn eigen Reflectie geen initiatief,
   // niet de hele instantie (anders blokkeert de slaap-Reflectie van A het initiatief van B).
   const reflecting = new Map<number, number>();
-  async function reflectDynimo(id: number, onStart?: () => void, sleeping = true, aanwezig?: number[]): Promise<boolean> {
+  async function reflectDynimo(id: number, onStart?: () => void | Promise<void>, sleeping = true, aanwezig?: number[]): Promise<boolean> {
     reflecting.set(id, (reflecting.get(id) ?? 0) + 1);
     try {
       return await reflectDynimoInner(id, onStart, sleeping, aanwezig);
@@ -512,7 +538,7 @@ export function createBrain(deps: {
     }
   }
 
-  async function reflectDynimoInner(id: number, onStart: (() => void) | undefined, sleeping: boolean, aanwezig?: number[]): Promise<boolean> {
+  async function reflectDynimoInner(id: number, onStart: (() => void | Promise<void>) | undefined, sleeping: boolean, aanwezig?: number[]): Promise<boolean> {
     const [row] = await deps.db.select().from(dynimos).where(eq(dynimos.id, id));
     if (!row) return false;
     const fresh = await deps.db
@@ -539,7 +565,7 @@ export function createBrain(deps: {
     // De brain dobbelt, het model krijgt enkel de uitkomst. Alleen bij slapen: bij stilte blijft de Dynimo wakker.
     const dreaming = sleeping && random() < DREAM_CHANCE;
 
-    onStart?.();
+    await onStart?.();
     const { output } = await generateText({
       model: (await activeType2()).heavy.model,
       instructions: REFLECTION_INSTRUCTIONS,
@@ -659,14 +685,63 @@ ${fresh.map((memory) => `- (indruk ${memory.impression}) ${memory.text}`).join("
   // Reflectie van de wakkere Dynimo bij stilte: hij blijft wakker (geen wissel), maar meldt "kenmerken:<id>" als
   // assen/Verstand/Vertrouwdheid verschuiven (#111). Gooit nooit.
   // `aanwezig` (#94): Persoon-ids die tijdens de stilte in beeld waren; hun Vertrouwdheid daalt dan niet mee.
+  // Met `deps.jobs` (#125): plant enkel een reflectie-job in (zelfde dedup-id als reflectAll) en geeft meteen true
+  // terug; `hooks.onStart` is dan zinloos (de Type2-call gebeurt pas later, in de worker) en wordt genegeerd.
   async function reflect(hooks: { onStart?: () => void; aanwezig?: number[] } = {}): Promise<boolean> {
     try {
       const [awake] = await deps.db.select({ id: dynimos.id }).from(dynimos).where(isNotNull(dynimos.awakeSince));
-      return awake ? await reflectDynimo(awake.id, hooks.onStart, false, hooks.aanwezig) : false;
+      if (!awake) return false;
+      if (deps.jobs) {
+        await deps.jobs.enqueue(
+          "reflectie",
+          { dynimoId: awake.id, sleeping: false, aanwezig: hooks.aanwezig },
+          { deduplication: { id: `reflectie:${awake.id}` } },
+        );
+        return true;
+      }
+      return await reflectDynimo(awake.id, hooks.onStart, false, hooks.aanwezig);
     } catch (error) {
       console.warn("Reflectie bij stilte faalde:", error instanceof Error ? error.message : error);
       return false;
     }
+  }
+
+  // Voert de Reflectie echt uit (#125): door de worker aangeroepen. Meldt start/einde op het toestandskanaal (de
+  // agent luistert daar al, dynimo-watch.ts `routeNotifyPayload`); "einde" enkel als "start" ook gemeld is (anders
+  // valt er niets te reflecteren, zie reflectDynimoInner). Gooit door bij een fout (i.t.t. reflect()): BullMQ herkanst.
+  async function runReflection(id: number, options: { sleeping: boolean; aanwezig?: number[] }): Promise<void> {
+    let started = false;
+    try {
+      await reflectDynimo(
+        id,
+        async () => {
+          started = true;
+          await notifyStateChange(deps.db, `${STATE_PREFIXES.reflectie}start:${id}`).catch((error) =>
+            console.warn("Reflectie start melden faalde:", error instanceof Error ? error.message : error),
+          );
+        },
+        options.sleeping,
+        options.aanwezig,
+      );
+    } finally {
+      if (started) {
+        await notifyStateChange(deps.db, `${STATE_PREFIXES.reflectie}einde:${id}`).catch((error) =>
+          console.warn("Reflectie einde melden faalde:", error instanceof Error ? error.message : error),
+        );
+      }
+    }
+  }
+
+  // Van buitenaf (#125: de agent op basis van een NOTIFY van de worker) bijwerken van dezelfde teller die
+  // reflectDynimo() intern gebruikt, zodat considerInitiative() ook een Reflectie in een ander proces respecteert.
+  function noteReflection(id: number, running: boolean): void {
+    if (running) {
+      reflecting.set(id, (reflecting.get(id) ?? 0) + 1);
+      return;
+    }
+    const left = (reflecting.get(id) ?? 0) - 1;
+    if (left > 0) reflecting.set(id, left);
+    else reflecting.delete(id);
   }
 
   // Per-Dynimo sessiestaat: mag niet doorsijpelen naar een ander (of nieuw) wezen.
@@ -2000,6 +2075,8 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     list,
     backfill,
     reflect,
+    runReflection,
+    noteReflection,
     considerInitiative,
     hear,
     settled,

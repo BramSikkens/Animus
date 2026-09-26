@@ -165,6 +165,9 @@ importers:
       '@animus/brain':
         specifier: workspace:*
         version: link:../../packages/brain
+      '@animus/db':
+        specifier: workspace:*
+        version: link:../../packages/db
     devDependencies:
       '@types/node':
         specifier: 26.6.2

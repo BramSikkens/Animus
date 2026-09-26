@@ -276,6 +276,31 @@ describe("considerInitiative(): Reflectie", () => {
   });
 });
 
+describe("noteReflection() (#125): initiatief-blokkade van buitenaf melden, bv. door de worker)", () => {
+  it("blokkeert het initiatief van Dynimo A en heft de blokkade na noteReflection(A, false) weer op", async () => {
+    const dynimoA = await insertDynimo();
+    const type1 = initiativeType1({ spreken: "ja" });
+    const brain = brainWith(type1.model);
+
+    brain.noteReflection(dynimoA.id, true);
+    expect(await brain.considerInitiative()).toBeNull();
+
+    brain.noteReflection(dynimoA.id, false);
+    expect(await brain.considerInitiative()).not.toBeNull();
+  });
+
+  it("blokkeert het initiatief van Dynimo B niet als enkel A genoteerd is", async () => {
+    const dynimoA = await insertDynimo({ awakeSince: null }); // A: slaapt, enkel om zijn id te reserveren
+    const dynimoB = await insertDynimo({ name: "Wies", awakeSince: new Date(bornAt.getTime() + 1000) });
+    const type1 = initiativeType1({ spreken: "ja" });
+    const brain = brainWith(type1.model);
+
+    brain.noteReflection(dynimoA.id, true);
+
+    expect(await brain.considerInitiative()).not.toBeNull(); // B is wakker, A's blokkade raakt B niet
+  });
+});
+
 describe("considerInitiative(): Doelen en robuustheid", () => {
   it("gooit nooit: een falende Type1 geeft null", async () => {
     await insertDynimo();

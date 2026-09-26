@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { createDb, migrate } from "@animus/db";
 import { createBrain, formatAge } from "./index.js";
 import { EMBEDDING_MODEL, loadType2Config, TYPE1_MODEL, type2Catalog } from "./config.js";
+import { createJobQueue } from "./jobs.js";
 
 try {
   process.loadEnvFile(fileURLToPath(new URL("../../../.env", import.meta.url)));
@@ -15,7 +16,9 @@ async function main(): Promise<void> {
   const db = createDb(databaseUrl);
   await migrate(db);
 
-  const brain = createBrain({ db, type1: TYPE1_MODEL, type2: loadType2Config(), type2Catalog: type2Catalog(), embedder: EMBEDDING_MODEL });
+  // Reflectie via de wachtrij (#125): enkel inplannen, de worker voert 'm uit.
+  const jobs = createJobQueue({ connection: process.env.REDIS_URL ?? "redis://localhost:6379" });
+  const brain = createBrain({ db, type1: TYPE1_MODEL, type2: loadType2Config(), type2Catalog: type2Catalog(), embedder: EMBEDDING_MODEL, jobs });
   const awake = (await brain.list()).find((dynimo) => dynimo.awakeSince);
 
   if (awake) {
@@ -48,6 +51,7 @@ async function main(): Promise<void> {
     }
     rl.prompt();
   }
+  await jobs.close();
   await db.$client.end();
 }
 

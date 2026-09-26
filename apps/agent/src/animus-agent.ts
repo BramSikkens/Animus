@@ -24,6 +24,17 @@ class BrainPlaceholderLLM extends llm.LLM {
   }
 }
 
+export type AnimusAgentOptions = {
+  brain: Brain;
+  room: JobContext["room"];
+  onUtterance: () => void;
+  onMoodValues: (values: EmotionMessage["values"]) => void;
+  getExpressiveness?: () => number;
+  speaker?: { speakerId: SpeakerId; audio: ReturnType<typeof createSpeakerAudio> };
+  faces: ReturnType<typeof createFaces>;
+  onBeurtAfgelopen?: (gesprekspartner: number | null | undefined) => void;
+};
+
 export class AnimusAgent extends voice.Agent {
   readonly #brain: Brain;
   readonly #room: JobContext["room"];
@@ -41,16 +52,7 @@ export class AnimusAgent extends voice.Agent {
   // vorige nog loopt (die kan de profiler intern al hebben afgerond en losgelaten).
   #enrolling = false;
 
-  constructor(
-    brain: Brain,
-    room: JobContext["room"],
-    onUtterance: () => void,
-    onMoodValues: (values: EmotionMessage["values"]) => void,
-    getExpressiveness: () => number = () => 0.5,
-    speaker: { speakerId: SpeakerId; audio: ReturnType<typeof createSpeakerAudio> } | undefined,
-    faces: ReturnType<typeof createFaces>,
-    onBeurtAfgelopen: (gesprekspartner: number | null | undefined) => void = () => {},
-  ) {
+  constructor({ brain, room, onUtterance, onMoodValues, getExpressiveness = () => 0.5, speaker, faces, onBeurtAfgelopen = () => {} }: AnimusAgentOptions) {
     // instructions is verplicht op voice.Agent, maar onbenut: llmNode hieronder draait i.p.v. het
     // ingebouwde LLM-pad de brein-kern.
     super({ instructions: "Animus", llm: new BrainPlaceholderLLM() });

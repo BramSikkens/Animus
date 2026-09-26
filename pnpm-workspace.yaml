@@ -3,3 +3,8 @@ packages:
   - "apps/*"
 allowBuilds:
   esbuild: true
+# #118: transitieve versies met hoge audit-meldingen (via @livekit/agents-plugin-livekit); sharp gelijk aan de
+# directe versie van de agent haalt ook de dubbele libvips-waarschuwing weg.
+overrides:
+  sharp: 0.35.4
+  adm-zip: 0.6.1

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { ChatContext, ToolContext, type JobContext } from "@livekit/agents";
 import type { Brain, BrainEvent } from "@animus/brain";
 import { createFaces } from "./faces.js";
-import { AnimusAgent } from "./animus-agent.js";
+import { AnimusAgent, type AnimusAgentOptions } from "./animus-agent.js";
 import type { SpeakerId } from "./speaker-id.js";
 
 async function* gen(events: BrainEvent[]): AsyncGenerator<BrainEvent> {
@@ -22,7 +22,7 @@ describe("AnimusAgent.llmNode", () => {
     const faces = createFaces();
     faces.record(null, Date.now(), 1); // onbekend gezicht in beeld -> gesprekspartner start als null (onbekend)
     const reported: (number | null | undefined)[] = [];
-    const agent = new AnimusAgent(brain, room, () => {}, () => {}, () => 0.5, undefined, faces, (g: number | null | undefined) => reported.push(g));
+    const agent = new AnimusAgent({ brain, room, onUtterance: () => {}, onMoodValues: () => {}, faces, onBeurtAfgelopen: (g: number | null | undefined) => reported.push(g) });
 
     const stream = agent.llmNode(chatCtxWith("Ik ben Anna"), ToolContext.empty());
     for await (const _chunk of (await stream)!) {
@@ -43,8 +43,8 @@ describe("AnimusAgent.llmNode", () => {
     } as unknown as Brain;
     const room = { localParticipant: undefined } as unknown as JobContext["room"];
     const speakerId = { identify: () => null, enroll: async () => enrollStatus, reload: async () => {}, dispose: () => {} } satisfies SpeakerId;
-    const audio = { drain: () => new Int16Array(16) } as unknown as NonNullable<ConstructorParameters<typeof AnimusAgent>[5]>["audio"];
-    const agent = new AnimusAgent(brain, room, () => {}, () => {}, () => 0.5, { speakerId, audio }, createFaces());
+    const audio = { drain: () => new Int16Array(16) } as unknown as NonNullable<AnimusAgentOptions["speaker"]>["audio"];
+    const agent = new AnimusAgent({ brain, room, onUtterance: () => {}, onMoodValues: () => {}, speaker: { speakerId, audio }, faces: createFaces() });
     const turn = async (text: string): Promise<void> => {
       for await (const _chunk of (await agent.llmNode(chatCtxWith(text), ToolContext.empty()))!) {
         // uitlezen

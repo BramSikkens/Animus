@@ -1,3 +1,5 @@
 # Verwijderen bewaart een grafschrift-archief
 
 Bij volledige verwijdering van het `identity`-record kan gekozen worden tussen een harde wis zonder sporen, of het bewaren van een klein archief (naam, leeftijd, laatste woorden) voor de eigenaar. We bewaren een "grafschrift"-archief, apart van de identity- en geheugentabellen, onleesbaar voor het nieuwe wezen dat na verwijdering via de genesis-flow ontstaat. Verwijderen is onomkeerbaar — zonder archief kan het "leven" van een specifieke Animus nooit meer teruggehaald worden. Het grafschrift dient puur de eigenaar en beïnvloedt de nieuwe genesis-flow op geen enkele manier.
+
+**Bijgewerkt.** De Galerij van het gezichtje toont de recentste Grafschriften aan de room; de agent leest daarvoor de tabel rechtstreeks, het brein nog steeds nooit.

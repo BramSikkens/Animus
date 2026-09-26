@@ -184,7 +184,7 @@ export type Brain = {
 // Serialiseert alle wissels van Wakker/Slapend tussen instanties en processen.
 const WAKE_LOCK_KEY = 7_142_001;
 
-/** Postgres NOTIFY-kanaal voor toestandswijzigingen (wakker/slapend/gedood); de payload is enkel informatief. */
+/** Postgres NOTIFY-kanaal voor toestandswijzigingen. De payload stuurt de consument (dynimo-watch.ts `routeNotifyPayload`): "mood:", "voice:", "persons:" en "kenmerken:" verversen enkel dat deel; elke andere payload (wakker/slapend/gedood/genesis) laat de wakkere Dynimo opnieuw lezen. */
 export const STATE_CHANNEL = "animus_state";
 
 const axesSchema = z.object({

@@ -277,18 +277,27 @@ export default defineAgent<AgentUserData>({
       // Zeer blij: vaker eigen initiatief (behavior.ts).
       initiativeMoodFactor = awake && initiativeAxes ? initiativeFactor(moodOfRow(awake, new Date()).values, initiativeAxes) : 1;
     };
-    const animusAgent = new AnimusAgent(brain, ctx.room, () => {
-      silence.reset();
-      initiative.reset();
-      reflectionDisplay.onUtterance();
-    }, (values) => {
-      // Expressiviteit uit de gecachete assen (refresh bij start, wissel en initiatief-check).
-      const expressiveness = initiativeAxes?.expressiveness ?? 0.5;
-      // Tempo per Emotie (#70) via speed; de afronding in applyTtsEmotion voorkomt extra websocket-herstarts.
-      applyTtsEmotion(speechProvider(process.env), tts, withPacingSpeed(voiceSettingsFor({ values, expressiveness }), pacingFor({ values, expressiveness }).speedFactor));
-    }, () => initiativeAxes?.expressiveness ?? 0.5, speakerRecognition, faces, (gesprekspartner) => {
-      lastGesprekspartner = gesprekspartner;
-      void publishState();
+    const animusAgent = new AnimusAgent({
+      brain,
+      room: ctx.room,
+      onUtterance: () => {
+        silence.reset();
+        initiative.reset();
+        reflectionDisplay.onUtterance();
+      },
+      onMoodValues: (values) => {
+        // Expressiviteit uit de gecachete assen (refresh bij start, wissel en initiatief-check).
+        const expressiveness = initiativeAxes?.expressiveness ?? 0.5;
+        // Tempo per Emotie (#70) via speed; de afronding in applyTtsEmotion voorkomt extra websocket-herstarts.
+        applyTtsEmotion(speechProvider(process.env), tts, withPacingSpeed(voiceSettingsFor({ values, expressiveness }), pacingFor({ values, expressiveness }).speedFactor));
+      },
+      getExpressiveness: () => initiativeAxes?.expressiveness ?? 0.5,
+      speaker: speakerRecognition,
+      faces,
+      onBeurtAfgelopen: (gesprekspartner) => {
+        lastGesprekspartner = gesprekspartner;
+        void publishState();
+      },
     });
     const isQuiet = (): boolean =>
       (session.agentState === "idle" || session.agentState === "listening") && session.userState !== "speaking" && perception.isPresent();

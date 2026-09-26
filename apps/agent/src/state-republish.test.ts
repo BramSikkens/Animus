@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createStateRepublisher, emotionMessageFor, withFaceExpressiveness } from "./state-republish.js";
+import type { Dynimo } from "@animus/brain";
+import { createStateRepublisher, emotionMessageFor, kenmerkenMessageFor, withFaceExpressiveness } from "./state-republish.js";
 
 describe("createStateRepublisher", () => {
   beforeEach(() => vi.useFakeTimers());
@@ -58,5 +59,39 @@ describe("withFaceExpressiveness", () => {
 
   it("laat de reset (geen Stemming) ongewijzigd", () => {
     expect(withFaceExpressiveness(emotionMessageFor(null), 1)).toEqual({ emotion: "kalm", intensity: 0 });
+  });
+});
+
+describe("kenmerkenMessageFor", () => {
+  const row = {
+    archetype: "professor",
+    baseEmotion: "nieuwsgierig",
+    coreCharacter: "Rustig en nieuwsgierig.",
+    axisIe: 0.2,
+    axisSn: 0.8,
+    axisTf: null,
+    axisJp: 0.6,
+    axisReactivity: 0.5,
+    axisExpressiveness: 0.7,
+    verstand: 0.9,
+  } as Pick<Dynimo, "archetype" | "baseEmotion" | "coreCharacter" | "axisIe" | "axisSn" | "axisTf" | "axisJp" | "axisReactivity" | "axisExpressiveness" | "verstand">;
+
+  it("geeft null zonder wakkere Dynimo, zodat het paneel verdwijnt", () => {
+    expect(kenmerkenMessageFor(null, { onbekend: true })).toBeNull();
+  });
+
+  it("zet een Dynimo-rij en Vertrouwdheid om in een KenmerkenMessage", () => {
+    expect(kenmerkenMessageFor(row, { naam: "Bram", waarde: 0.6 })).toEqual({
+      archetype: "professor",
+      basisemotie: "nieuwsgierig",
+      assen: { ie: 0.2, sn: 0.8, tf: null, jp: 0.6, reactivity: 0.5, expressiveness: 0.7 },
+      verstand: 0.9,
+      kernkarakter: "Rustig en nieuwsgierig.",
+      vertrouwdheid: { naam: "Bram", waarde: 0.6 },
+    });
+  });
+
+  it("valt terug op de standaard Basisemotie als baseEmotion (nog) leeg is", () => {
+    expect(kenmerkenMessageFor({ ...row, baseEmotion: null }, { onbekend: true })?.basisemotie).toBe("kalm");
   });
 });

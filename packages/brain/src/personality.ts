@@ -26,6 +26,13 @@ export const AXIS_LETTERS: Record<MbtiAxis, readonly [string, string]> = {
   jp: ["J", "P"],
 };
 
+/** Poollabels (links, rechts) voor alle zes assen, voor het gezichtje (#105). */
+export const AXIS_POLES: Record<Axis, readonly [string, string]> = {
+  ...AXIS_LETTERS,
+  reactivity: ["nuchter", "reactief"],
+  expressiveness: ["gesloten", "expressief"],
+};
+
 /** De uitleg van de assen, voor de genesis- en backfill-prompts. */
 export const AXIS_DESCRIPTIONS = `ie: 0 = sterk introvert (kort, in zichzelf gekeerd), 1 = sterk extravert (spraakzaam, naar buiten gericht);
 sn: 0 = concreet en praktisch, 1 = associatief en fantasierijk;

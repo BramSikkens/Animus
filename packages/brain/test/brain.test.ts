@@ -3769,6 +3769,20 @@ describe("createBrain", () => {
         const vero = await insertDynimo();
         expect(await brainWith().setAxes(vero.id + 999, { ie: 0.1, sn: 0.9, tf: 0.3, jp: 0.7, reactivity: 0.5, expressiveness: 0.5 })).toBe(false);
       });
+
+      it("meldt de wijziging op het toestandskanaal, zodat het gezichtje de kenmerken ververst", async () => {
+        const vero = await insertDynimo();
+        const client = postgres(databaseUrl(TEST_DB_NAME), { onnotice: () => {} });
+        const received: string[] = [];
+        await client.listen(STATE_CHANNEL, (payload) => received.push(payload));
+        try {
+          await brainWith().setAxes(vero.id, { ie: 0.1, sn: 0.9, tf: 0.3, jp: 0.7, reactivity: 0.5, expressiveness: 0.5 });
+          await new Promise((resolve) => setTimeout(resolve, 150));
+          expect(received).toEqual([`kenmerken:${vero.id}`]);
+        } finally {
+          await client.end();
+        }
+      });
     });
 
     describe("setFamiliarity", () => {
@@ -3782,6 +3796,20 @@ describe("createBrain", () => {
       it("geeft false bij een onbekende Dynimo", async () => {
         const vero = await insertDynimo();
         expect(await brainWith().setFamiliarity(vero.id + 999, 0.5)).toBe(false);
+      });
+
+      it("meldt de wijziging op het toestandskanaal, zodat het gezichtje de kenmerken ververst", async () => {
+        const vero = await insertDynimo();
+        const client = postgres(databaseUrl(TEST_DB_NAME), { onnotice: () => {} });
+        const received: string[] = [];
+        await client.listen(STATE_CHANNEL, (payload) => received.push(payload));
+        try {
+          await brainWith().setFamiliarity(vero.id, 0.85);
+          await new Promise((resolve) => setTimeout(resolve, 150));
+          expect(received).toEqual([`kenmerken:${vero.id}`]);
+        } finally {
+          await client.end();
+        }
       });
     });
 
@@ -3815,6 +3843,41 @@ describe("createBrain", () => {
         expect(await brainWith().setArchetype(vero.id + 999, "professor")).toBe(false);
         expect(await brainWith().setArchetype(vero.id, "bestaat-niet")).toBe(false);
         expect((await rowOf(vero.id)).archetype).toBeNull();
+      });
+
+      it("meldt de wijziging op het toestandskanaal, zodat het gezichtje de kenmerken ververst", async () => {
+        const vero = await insertDynimo();
+        const client = postgres(databaseUrl(TEST_DB_NAME), { onnotice: () => {} });
+        const received: string[] = [];
+        await client.listen(STATE_CHANNEL, (payload) => received.push(payload));
+        try {
+          await brainWith().setArchetype(vero.id, "professor");
+          await new Promise((resolve) => setTimeout(resolve, 150));
+          expect(received).toEqual([`kenmerken:${vero.id}`]);
+        } finally {
+          await client.end();
+        }
+      });
+    });
+
+    describe("setVerstand", () => {
+      it("meldt de wijziging op het toestandskanaal, zodat het gezichtje de kenmerken ververst", async () => {
+        const vero = await insertDynimo();
+        const client = postgres(databaseUrl(TEST_DB_NAME), { onnotice: () => {} });
+        const received: string[] = [];
+        await client.listen(STATE_CHANNEL, (payload) => received.push(payload));
+        try {
+          await brainWith().setVerstand(vero.id, 0.7);
+          await new Promise((resolve) => setTimeout(resolve, 150));
+          expect(received).toEqual([`kenmerken:${vero.id}`]);
+        } finally {
+          await client.end();
+        }
+      });
+
+      it("geeft false bij een onbekende Dynimo", async () => {
+        const vero = await insertDynimo();
+        expect(await brainWith().setVerstand(vero.id + 999, 0.7)).toBe(false);
       });
     });
 

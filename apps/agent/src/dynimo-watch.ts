@@ -1,5 +1,5 @@
 import postgres from "postgres";
-import { STATE_CHANNEL, type Brain } from "@animus/brain";
+import { STATE_CHANNEL, type Brain, type Dynimo } from "@animus/brain";
 import type { DisplayState } from "@animus/brain/display";
 import { displayMoodOfRow, type Mood } from "@animus/brain/mood";
 
@@ -15,33 +15,59 @@ export type DynimoState = {
   voice: string | null;
   /** Expressiviteit-as van de wakkere Dynimo (0.5 = neutraal, ook als niemand wakker is). */
   expressiveness: number;
+  /** Volledige rij van de wakkere Dynimo (kenmerken, #105); null als niemand wakker is. */
+  row: Dynimo | null;
 };
 
 /** Leest vers uit de database (ook de Stemming, die met de tijd uitdooft). */
 export async function readState(brain: Brain): Promise<DynimoState> {
   const awake = (await brain.list()).find((dynimo) => dynimo.awakeSince);
   return awake
-    ? { key: `${awake.id}:${awake.awakeSince!.getTime()}`, display: "wakker", mood: displayMoodOfRow(awake, new Date()), name: awake.name, voice: awake.voice, expressiveness: awake.axisExpressiveness }
-    : { key: "none", display: "slapend", mood: null, name: null, voice: null, expressiveness: 0.5 };
+    ? { key: `${awake.id}:${awake.awakeSince!.getTime()}`, display: "wakker", mood: displayMoodOfRow(awake, new Date()), name: awake.name, voice: awake.voice, expressiveness: awake.axisExpressiveness, row: awake }
+    : { key: "none", display: "slapend", mood: null, name: null, voice: null, expressiveness: 0.5, row: null };
 }
 
-/**
- * Luistert (Postgres LISTEN/NOTIFY) naar toestandswijzigingen van de Dynimo's en roept `onChange` aan
- * zodra de wakkere Dynimo verandert. Eigen connectie, los van de brain-verbinding.
- */
-export async function watchDynimos(options: {
-  databaseUrl: string;
-  brain: Brain;
-  onChange: (state: DynimoState) => void;
+/** Handlers voor `routeNotifyPayload`, hergebruikt als de STATE_CHANNEL-opties van `watchDynimos`. */
+export type NotifyHandlers = {
+  /** Niet in `watchDynimos`' eigen opties: enkel `routeNotifyPayload` gebruikt dit (elke overige melding). */
+  check: () => void;
   /** Een Stemming is van buitenaf gezet (dashboard-override, payload "mood:<id>"): ververs enkel het gezichtje. */
   onMood?: () => void;
   /** De stem van een Dynimo is gewijzigd (dashboard, payload "voice:<id>"). */
   onVoice?: () => void;
   /** Personen zijn samengevoegd/verwijderd/opnieuw geleerd (dashboard, payload "persons:", #95): biometrie is verouderd. */
   onPersons?: () => void;
-  /** Elke toestandsmelding behalve Stemming (wakker/slapend/genesis/gedood/stem/personen): ververst bv. de Galerij. */
+  /** Assen/Verstand/archetype/Vertrouwdheid gewijzigd (dashboard, payload "kenmerken:<id>" of "kenmerken:"): ververs enkel de kenmerken. */
+  onKenmerken?: () => void;
+  /** Elke toestandsmelding behalve Stemming/kenmerken (wakker/slapend/genesis/gedood/stem/personen): ververst bv. de Galerij. */
   onNotify?: () => void;
-}): Promise<{ current: () => DynimoState; close: () => Promise<void> }> {
+};
+
+/**
+ * Bepaalt, puur op de payload-tekst, welke handler(s) een STATE_CHANNEL-melding oproept. Losstaand van
+ * `watchDynimos` getest, zonder een echte Postgres-verbinding nodig te hebben.
+ */
+export function routeNotifyPayload(payload: string, handlers: NotifyHandlers): void {
+  // Zoals "mood:": enkel het gezichtje ververst zijn kenmerken, geen wissel of Galerij-update als bijwerking.
+  if (payload.startsWith("mood:")) return void handlers.onMood?.();
+  if (payload.startsWith("kenmerken:")) return void handlers.onKenmerken?.();
+  handlers.onNotify?.();
+  if (payload.startsWith("voice:")) return void handlers.onVoice?.();
+  if (payload.startsWith("persons:")) return void handlers.onPersons?.();
+  return void handlers.check();
+}
+
+/**
+ * Luistert (Postgres LISTEN/NOTIFY) naar toestandswijzigingen van de Dynimo's en roept `onChange` aan
+ * zodra de wakkere Dynimo verandert. Eigen connectie, los van de brain-verbinding.
+ */
+export async function watchDynimos(
+  options: Omit<NotifyHandlers, "check"> & {
+    databaseUrl: string;
+    brain: Brain;
+    onChange: (state: DynimoState) => void;
+  },
+): Promise<{ current: () => DynimoState; close: () => Promise<void> }> {
   const listener = postgres(options.databaseUrl, { max: 1, onnotice: () => {} });
   let last: DynimoState | undefined;
   // Serialiseren: snel opeenvolgende meldingen mogen elkaar niet inhalen.
@@ -65,17 +91,7 @@ export async function watchDynimos(options: {
 
   // Eerst luisteren, dán lezen: een wissel tussen lezen en luisteren gaat anders verloren. `onlisten` draait
   // bij elke (her)verbinding, zodat meldingen tijdens een onderbreking alsnog opgemerkt worden.
-  await listener.listen(
-    STATE_CHANNEL,
-    (payload: string) => {
-      if (payload.startsWith("mood:")) return options.onMood?.();
-      options.onNotify?.();
-      if (payload.startsWith("voice:")) return options.onVoice?.();
-      if (payload.startsWith("persons:")) return options.onPersons?.();
-      return void check();
-    },
-    check,
-  );
+  await listener.listen(STATE_CHANNEL, (payload: string) => routeNotifyPayload(payload, { ...options, check }), check);
   await check();
 
   return {

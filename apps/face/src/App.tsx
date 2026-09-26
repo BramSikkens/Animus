@@ -16,6 +16,8 @@ import { DISPLAY_STATES, DISPLAY_TOPIC, isDisplayState, type DisplayState } from
 import { GALLERY_TOPIC, justWoken, parseGalleryMessage, screenFor, selectionLost, type GalleryBeing, type GalleryGrave, type GalleryMessage } from "@animus/brain/gallery";
 import { Gallery, useSendCommand } from "./Gallery.js";
 import { EMOTION_TOPIC, EMOTIONS, isEmotion, type Emotion, type EmotionMessage } from "@animus/brain/emotion";
+import { isKenmerkenMessage, KENMERKEN_TOPIC, type KenmerkenMessage } from "@animus/brain/kenmerken";
+import { kenmerkenPanel } from "./kenmerken-panel.js";
 import { doodleActive } from "./face/doodle.js";
 import { isSoundKind, SOUND_TOPIC } from "@animus/brain/sound";
 import { clipUrl } from "./sound.js";
@@ -106,6 +108,23 @@ function DisplayListener({ onDisplay, onName }: { onDisplay: (state: DisplayStat
       }
     } catch (error) {
       console.error("Display-event kon niet verwerkt worden:", error instanceof Error ? error.message : error);
+    }
+  });
+  return null;
+}
+
+// Decodeert kenmerken-berichten van de agent (KenmerkenMessage op KENMERKEN_TOPIC, #105); `null` (niemand wakker)
+// laat het paneel verdwijnen.
+function KenmerkenListener({ onKenmerken }: { onKenmerken: (message: KenmerkenMessage | null) => void }) {
+  useDataChannel(KENMERKEN_TOPIC, (msg) => {
+    if (!msg.from?.isAgent) return;
+    try {
+      const payload: unknown = JSON.parse(new TextDecoder().decode(msg.payload));
+      if (payload === null) onKenmerken(null);
+      else if (isKenmerkenMessage(payload)) onKenmerken(payload);
+      else console.error("Kenmerken-event heeft onverwachte vorm:", payload);
+    } catch (error) {
+      console.error("Kenmerken-event kon niet verwerkt worden:", error instanceof Error ? error.message : error);
     }
   });
   return null;
@@ -297,12 +316,51 @@ function Screens({ view, onSelect, onBack }: { view: ReturnType<typeof screenFor
   );
 }
 
+// Kenmerken (#105): archetype/basisemotie, de zes assen, Verstand en Vertrouwdheid, onder de emotiebalkjes.
+function KenmerkenPanel({ kenmerken }: { kenmerken: KenmerkenMessage }) {
+  const { label, assen, verstand, kernkarakter, vertrouwdheidLabel, vertrouwdheidWaarde } = kenmerkenPanel(kenmerken);
+  return (
+    <ul className="kenmerken-panel" aria-label="Kenmerken">
+      <li>
+        <span className="label">{label}</span>
+        {assen.map(({ axis, links, rechts, value }) => (
+          <div key={axis} className="item">
+            <div className="poles">
+              <span>{links}</span>
+              <span>{rechts}</span>
+            </div>
+            <div className="bar" role="meter" aria-valuemin={0} aria-valuemax={1} aria-valuenow={value}>
+              <div className="marker" style={{ left: `${value * 100}%` }} />
+            </div>
+          </div>
+        ))}
+        <div className="item">
+          <span>Verstand</span>
+          <div className="bar fill" role="meter" aria-valuemin={0} aria-valuemax={1} aria-valuenow={verstand}>
+            <div style={{ width: `${verstand * 100}%` }} />
+          </div>
+        </div>
+        <div className="item">
+          <span>{vertrouwdheidLabel}</span>
+          {vertrouwdheidWaarde !== null && (
+            <div className="bar fill" role="meter" aria-valuemin={0} aria-valuemax={1} aria-valuenow={vertrouwdheidWaarde}>
+              <div style={{ width: `${vertrouwdheidWaarde * 100}%` }} />
+            </div>
+          )}
+        </div>
+        <span className="kernkarakter">{kernkarakter}</span>
+      </li>
+    </ul>
+  );
+}
+
 export function App() {
   const [session, setSession] = useState<TokenSession | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [emotionState, setEmotionState] = useState<EmotionState>(NEUTRAL_STATE);
   const [displayState, setDisplayState] = useState<DisplayState>(DEFAULT_DISPLAY);
   const [name, setName] = useState<string | null>(null);
+  const [kenmerken, setKenmerken] = useState<KenmerkenMessage | null>(null);
   const [beings, setBeings] = useState<GalleryBeing[] | null>(null);
   const [graves, setGraves] = useState<GalleryGrave[]>([]);
   const [connected, setConnected] = useState(false);
@@ -368,6 +426,7 @@ export function App() {
     setEmotionState(NEUTRAL_STATE);
     setDisplayState(DEFAULT_DISPLAY);
     setName(null);
+    setKenmerken(null);
     setBeings(null);
     setGraves([]);
     setMouthVolume(0);
@@ -414,21 +473,26 @@ export function App() {
       <Face doodle={doodle} display={displayState} emotion={emotionState.emotion} intensity={emotionState.intensity} mouthVolume={mouthVolume} values={emotionState.values} lastUserText={userText} voice={voice} facePosition={facePosition} />
 
       {name && <p className="dynimo-name">{name}</p>}
-      {emotionState.values && (
-        <ul className="emotion-bars" aria-label="Emoties">
-          {emotionBarGroups(emotionState.values).map((group) => (
-            <li key={group[0]!.emotion}>
-              {group.map(({ emotion, value }) => (
-                <div key={emotion} className="item">
-                  <span>{emotion}</span>
-                  <div className="bar" role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(value)}>
-                    <div style={{ width: `${value}%` }} />
-                  </div>
-                </div>
+      {(emotionState.values || kenmerken) && (
+        <div className="right-panel">
+          {emotionState.values && (
+            <ul className="emotion-bars" aria-label="Emoties">
+              {emotionBarGroups(emotionState.values).map((group) => (
+                <li key={group[0]!.emotion}>
+                  {group.map(({ emotion, value }) => (
+                    <div key={emotion} className="item">
+                      <span>{emotion}</span>
+                      <div className="bar" role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(value)}>
+                        <div style={{ width: `${value}%` }} />
+                      </div>
+                    </div>
+                  ))}
+                </li>
               ))}
-            </li>
-          ))}
-        </ul>
+            </ul>
+          )}
+          {kenmerken && <KenmerkenPanel kenmerken={kenmerken} />}
+        </div>
       )}
       </>}
 
@@ -456,6 +520,7 @@ export function App() {
           >
             <EmotionListener onEmotion={onEmotion} />
             <DisplayListener onDisplay={onDisplay} onName={setName} />
+            <KenmerkenListener onKenmerken={setKenmerken} />
             <UserTextListener onText={setUserText} />
             <MouthVolumeListener onVolume={setMouthVolume} />
             <VoiceReactionListener reaction={voice} />

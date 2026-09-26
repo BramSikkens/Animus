@@ -331,6 +331,12 @@ Schrijf je Afscheidsreflectie: je laatste woorden, in karakter, in een paar zinn
 const RECALL_LIMIT = 5;
 // #94: voorrang voor Herinneringen van een aanwezige Persoon in recall()'s ORDER BY (afstand min deze bonus), geen filter.
 const RECALL_PRESENT_BONUS = 0.05;
+// #110: eerst de RECALL_CANDIDATES dichtste kandidaten via de HNSW-index, dan pas de bonus toepassen — ruim boven
+// RECALL_LIMIT zodat de bonus nog kan herschikken zonder de index-scan te missen.
+// ponytail: vaste grens — een Herinnering van een aanwezige Persoon die buiten deze top 40 valt, komt niet meer
+// omhoog door de bonus (kon dat vóór #110 wel, over álle Herinneringen). Optrekken als de bonus groter wordt of
+// Herinneringen dicht bij elkaar clusteren.
+const RECALL_CANDIDATES = 40;
 
 // Gezichtsherkenning (#93, ADR-0020): pgvector `<->` is de L2-afstand tussen twee embeddings. Human's eigen
 // similarity() (src/face/match.ts@3.3.6) rekent similarity = (1 − √(25·Σd²)/100 − 0.2) / 0.6, en Human's
@@ -1085,14 +1091,26 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
         ? and(eq(memories.dynimoId, dynimoId), notInArray(memories.id, sessionMemoryIds))
         : eq(memories.dynimoId, dynimoId);
       const distance = cosineDistance(memories.embedding, embedding);
-      const ranking = present.length ? sql`(${distance}) - (case when ${inArray(memories.personId, present)} then ${RECALL_PRESENT_BONUS}::real else 0 end)` : distance;
-      const rows = await deps.db
-        .select({ text: memories.text, personId: memories.personId })
-        .from(memories)
-        .where(scope)
-        .orderBy(ranking)
-        .limit(RECALL_LIMIT);
-      return rows;
+      // Kandidaten via de HNSW-index (`ORDER BY afstand LIMIT n`, iterative scan aan zodat de WHERE-filter
+      // niet te weinig rijen oplevert); pas ná die indexscan herrangschikken met de aanwezig-bonus (#110).
+      return await deps.db.transaction(async (tx) => {
+        await tx.execute(sql`set local hnsw.iterative_scan = relaxed_order`);
+        const candidates = tx.$with("recall_candidates").as(
+          tx
+            .select({ text: memories.text, personId: memories.personId, distance: distance.as("distance") })
+            .from(memories)
+            .where(scope)
+            .orderBy(distance)
+            .limit(RECALL_CANDIDATES),
+        );
+        // `+ 0` (i.p.v. kaal `candidates.distance`): relaxed_order levert de kandidaten slechts bij benadering
+        // gesorteerd; een letterlijk gelijke ORDER BY-expressie laat de planner de binnenste sortering soms
+        // doorgeven zonder de buitenste te herhalen. Deze expressie dwingt een echte herordening af.
+        const ranking = present.length
+          ? sql`(${candidates.distance}) - (case when ${inArray(candidates.personId, present)} then ${RECALL_PRESENT_BONUS}::real else 0 end)`
+          : sql`(${candidates.distance}) + 0`;
+        return tx.with(candidates).select({ text: candidates.text, personId: candidates.personId }).from(candidates).orderBy(ranking).limit(RECALL_LIMIT);
+      });
     } catch (error) {
       console.warn("Herinneringen ophalen faalde:", error instanceof Error ? error.message : error);
       return [];

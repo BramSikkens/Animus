@@ -102,14 +102,18 @@ export const persons = pgTable(
 
 // Stemprofielen (#92): Eagle-profiel per Persoon, hoogstens 5 (oudste wordt vervangen, zie addVoiceProfile).
 // Nooit audio zelf, enkel het geëxporteerde profiel (art. 9 AVG, ADR-0020).
-export const voiceProfiles = pgTable("voice_profiles", {
-  id: serial("id").primaryKey(),
-  personId: integer("person_id")
-    .notNull()
-    .references(() => persons.id, { onDelete: "cascade" }),
-  profile: bytea("profile").notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+export const voiceProfiles = pgTable(
+  "voice_profiles",
+  {
+    id: serial("id").primaryKey(),
+    personId: integer("person_id")
+      .notNull()
+      .references(() => persons.id, { onDelete: "cascade" }),
+    profile: bytea("profile").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("voice_profiles_person_id_idx").on(table.personId)],
+);
 
 // Gezichts-embeddings (#93): Human's face.embedding (faceres-model), hoogstens 5 per Persoon (zie recognizeFaces).
 // Nooit beelden zelf (art. 9 AVG, ADR-0020).
@@ -125,7 +129,7 @@ export const faceEmbeddings = pgTable(
     embedding: vector("embedding", { dimensions: FACE_EMBEDDING_DIMENSIONS }).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [index("face_embeddings_embedding_idx").using("hnsw", table.embedding.op("vector_l2_ops"))],
+  (table) => [index("face_embeddings_embedding_idx").using("hnsw", table.embedding.op("vector_l2_ops")), index("face_embeddings_person_id_idx").on(table.personId)],
 );
 
 // Dimensie van OpenAI text-embedding-3-small (ADR-0008): een andere embedding-provider
@@ -152,6 +156,10 @@ export const memories = pgTable(
   },
   (table) => [
     index("memories_embedding_idx").using("hnsw", table.embedding.op("vector_cosine_ops")),
+    // #110: (dynimo_id, created_at) dekt Reflectie/Spontane-herinnering (filter op dynimo_id, sorteren/grenzen op
+    // created_at); person_id apart voor de aanwezig-/Spontane-queries die op Persoon filteren.
+    index("memories_dynimo_id_created_at_idx").on(table.dynimoId, table.createdAt),
+    index("memories_person_id_idx").on(table.personId),
     check("memories_impression_range", sql`${table.impression} between 0 and 1`),
   ],
 );
@@ -170,6 +178,8 @@ export const familiarities = pgTable(
   },
   (table) => [
     primaryKey({ columns: [table.dynimoId, table.personId] }),
+    // #110: de samengestelde PK dekt person_id niet als eerste kolom; een lookup op person_id alleen heeft dus een eigen index nodig.
+    index("familiarities_person_id_idx").on(table.personId),
     check("familiarities_familiarity_range", sql`${table.familiarity} between 0 and 1`),
   ],
 );

@@ -13,13 +13,14 @@ Dit is het softwareprototype, dat op je eigen computer draait. Later volgt een p
 | `apps/agent` | LiveKit-agent: spraak in en uit (VAD, STT, TTS), stem- en gezichtsherkenning, en het brein in-process |
 | `apps/face` | Het gezichtje (Vite + React): ogen, mond en wenkbrauwen, Galerij van Dynimo's, perceptie in de browser (MediaPipe, Human) |
 | `apps/dashboard` | Beheer (Next.js): Dynimo's, Herinneringen, Personen samenvoegen, stemmen |
+| `apps/worker` | Voert achtergrondtaken uit (BullMQ + Redis, zie [ADR-0022](docs/adr/0022-bullmq-redis-voor-achtergrondtaken.md)) |
 
 Architectuurbeslissingen staan in [docs/adr](docs/adr).
 
 ## Vereisten
 
 - Node.js 23 of nieuwer en [pnpm](https://pnpm.io) 10
-- Docker (voor PostgreSQL/pgvector en een lokale LiveKit-server)
+- Docker (voor PostgreSQL/pgvector, Redis en een lokale LiveKit-server)
 - API-sleutels: minstens één LLM-provider (OpenAI of Anthropic) en de Vercel AI Gateway voor Type1; optioneel Deepgram (STT), ElevenLabs (TTS) en Picovoice (stemherkenning)
 
 ## Opstarten
@@ -40,7 +41,7 @@ Download eenmalig de modellen voor de turn-detectie van de agent:
 pnpm agent:download
 ```
 
-Start alles (databank en LiveKit via Docker, daarna agent, gezichtje en dashboard):
+Start alles (databank, Redis en LiveKit via Docker, daarna agent, worker, gezichtje en dashboard):
 
 ```bash
 pnpm dev

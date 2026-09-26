@@ -12,6 +12,7 @@
     "./familiarity": "./src/familiarity.ts",
     "./display": "./src/display.ts",
     "./gallery": "./src/gallery.ts",
+    "./jobs": "./src/jobs.ts",
     "./kenmerken": "./src/kenmerken.ts",
     "./perception": "./src/perception.ts",
     "./personality": "./src/personality.ts",
@@ -40,7 +41,9 @@
     "@ai-sdk/openai": "4.0.73",
     "@animus/db": "workspace:*",
     "ai": "7.0.112",
+    "bullmq": "5.81.5",
     "drizzle-orm": "0.45.3",
+    "ioredis": "5.11.1",
     "zod": "4.6.5"
   },
   "devDependencies": {

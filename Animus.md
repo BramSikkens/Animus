@@ -272,7 +272,7 @@ Twee sporen, te combineren:
 | Database | PostgreSQL + pgvector |
 | ORM | Drizzle |
 | Embeddings | OpenAI `text-embedding-3-small` |
-| Achtergrondtaken | Fase 1/2: simpele node-cron-taak; BullMQ + Redis pas vanaf fase 3 (retries/backoff/meerdere workers) |
+| Achtergrondtaken | Fase 1/2: simpele node-cron-taak; vanaf fase 3 BullMQ + Redis (retries/backoff/meerdere workers), `apps/worker`. Zie [ADR-0022](docs/adr/0022-bullmq-redis-voor-achtergrondtaken.md) |
 | Gezichtje | React + SVG + Framer Motion (+ Flubber voor vorm-morphing) |
 | Realtime signaal brein→gezicht | LiveKit data channel |
 | Dashboard | Next.js (zelfde DB) |

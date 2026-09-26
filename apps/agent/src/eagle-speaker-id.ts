@@ -12,7 +12,7 @@ export type EagleSpeakerIdDeps = {
 };
 
 // Een enroll()-aanroep zonder voltooiing na zoveel beurten: de inschrijving wordt losgelaten (reset + release) en
-// begint bij de eerstvolgende enroll() voor dezelfde Persoon gewoon opnieuw, i.p.v. voor altijd "bezig" te blijven.
+// meldt "opgegeven", zodat de aanroeper stopt met deze Persoon als inschrijvend te behandelen (#107).
 const MAX_ENROLL_TURNS_WITHOUT_COMPLETION = 10;
 
 /**
@@ -85,6 +85,7 @@ export function createEagleSpeakerId(deps: EagleSpeakerIdDeps): SpeakerId {
         entry.profiler.reset();
         entry.profiler.release();
         enrollments.delete(personId);
+        return "opgegeven";
       }
       return "bezig";
     },

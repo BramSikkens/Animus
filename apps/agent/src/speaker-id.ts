@@ -1,10 +1,10 @@
 /**
  * Smalle interface voor stemherkenning (ADR-0020, #92): `identify` per uiting, `enroll` bouwt een profiel op tot
- * "klaar". Achter deze interface zit nu Eagle (eagle-speaker-id.ts); sherpa-onnx kan haar vervangen.
+ * "klaar", of geeft het na te veel beurten "opgegeven". Achter deze interface zit nu Eagle (eagle-speaker-id.ts); sherpa-onnx kan haar vervangen.
  */
 export type SpeakerId = {
   identify(pcm: Int16Array): { personId: number; score: number } | null;
-  enroll(personId: number, pcm: Int16Array): Promise<"bezig" | "klaar">;
+  enroll(personId: number, pcm: Int16Array): Promise<"bezig" | "klaar" | "opgegeven">;
   reload(): Promise<void>;
   dispose(): void;
 };

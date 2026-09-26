@@ -382,14 +382,23 @@ export default defineAgent<AgentUserData>({
       onMood: () => void publishState(),
       onKenmerken: () => void publishState(),
       onNotify: () => void publishGallery(),
-      onVoice: () => void readState(brain).then((state) => applyVoice(state.voice)).catch(() => {}),
-      // Personen samengevoegd/verwijderd/opnieuw geleerd (#95): Stemprofielen en de gezien-bijhouding zijn verouderd.
+      onVoice: () =>
+        void readState(brain)
+          .then((state) => applyVoice(state.voice))
+          .catch((error: unknown) => console.warn("Stem herladen faalde:", error instanceof Error ? error.message : error)),
+      // Personen samengevoegd/verwijderd/opnieuw geleerd (#95): Stemprofielen, de gezien-bijhouding en een lopende
+      // stem-inschrijving (#107: de Persoon kan weg zijn) zijn verouderd.
       onPersons: () => {
-        void speakerRecognition?.speakerId.reload().catch(() => {});
+        animusAgent.cancelEnrollment();
+        void speakerRecognition?.speakerId
+          .reload()
+          .catch((error: unknown) => console.warn("Stemprofielen herladen faalde:", error instanceof Error ? error.message : error));
         faces.reset();
       },
       onChange: (state) => {
         applyVoice(state.voice);
+        // Wissel of slapen (#107): een lopende stem-inschrijving hoort bij het vorige gesprek.
+        animusAgent.cancelEnrollment();
         // Een wissel beëindigt het reflecterende gezicht; een lopende Reflectie mag doorlopen maar publiceert
         // dan niets meer (sleutel-guard in reflectionDisplay).
         reflectionDisplay.onSwitch();

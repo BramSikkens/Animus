@@ -266,6 +266,17 @@ describe("Personen in hear() (#91)", () => {
     expect(await db.select().from(familiarities)).toHaveLength(0);
   });
 
+  it("hear met een intussen verwijderde Persoon: de Herinnering wordt opgeslagen zonder Persoon i.p.v. te verdwijnen (#107)", async () => {
+    const vero = await insertDynimo();
+    const brain = brainWith(type2().model);
+
+    await hear(brain, "Hoi", { gesprekspartner: 999_999 });
+
+    const rows = await db.select().from(memories).where(eq(memories.dynimoId, vero.id));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.personId).toBeNull();
+  });
+
   it("zonder Gesprekspartner gedraagt alles zich als nu (eigenaar)", async () => {
     const vero = await insertDynimo();
     const brain = brainWith(type2().model);

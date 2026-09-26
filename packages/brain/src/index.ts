@@ -532,6 +532,17 @@ function stripBeelden(messages: ModelMessage[]): ModelMessage[] {
 
 type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 
+/** Constraint-naam bij een FK-violation (23503; "" als die naam ontbreekt), anders undefined. Drizzle wikkelt de Postgres-fout in; code/constraint_name zitten op de fout zelf of op `cause` (zie ook page.tsx). */
+function violatedForeignKey(error: unknown): string | undefined {
+  const { code, constraint_name: constraint, cause } = error as {
+    code?: string;
+    constraint_name?: string;
+    cause?: { code?: string; constraint_name?: string };
+  };
+  if ((code ?? cause?.code) !== "23503") return undefined;
+  return constraint ?? cause?.constraint_name ?? "";
+}
+
 export function createBrain(deps: {
   db: Db;
   type1: Experimental_EvaluationModel;
@@ -1100,7 +1111,16 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
   async function remember(memoryText: string, dynimoId = current?.id, impression = 0.5, personId: number | null = null): Promise<boolean> {
     if (dynimoId === undefined) return false;
     try {
-      const id = await insertMemory(memoryText, dynimoId, impression, personId);
+      let id: number;
+      try {
+        id = await insertMemory(memoryText, dynimoId, impression, personId);
+      } catch (error) {
+        // #107: de Gesprekspartner is intussen verwijderd/samengevoegd; de Herinnering dan zonder Persoon bewaren.
+        // Bewust niet bij unknownSessionMemoryIds: ze hoorde bij een bekende Persoon, niet bij een latere leerKennen.
+        if (personId === null || violatedForeignKey(error) !== "memories_person_id_persons_id_fk") throw error;
+        console.warn(`Herinnering zonder Persoon opgeslagen: Persoon ${personId} bestaat niet (meer).`);
+        id = await insertMemory(memoryText, dynimoId, impression, null);
+      }
       sessionMemoryIds.push(id);
       // #92: apart bijgehouden zodat leerKennen precies de onbekende-Herinneringen van déze sessie kan koppelen.
       if (personId === null) unknownSessionMemoryIds.push(id);
@@ -1342,15 +1362,8 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
         .onConflictDoUpdate({ target: [familiarities.dynimoId, familiarities.personId], set: { familiarity } });
       return true;
     } catch (error) {
-      // Drizzle wikkelt de Postgres-fout in; code/constraint_name zitten op de fout zelf of op `cause` (zie ook page.tsx).
-      const { code, constraint_name: constraint, cause } = error as {
-        code?: string;
-        constraint_name?: string;
-        cause?: { code?: string; constraint_name?: string };
-      };
-      const errorCode = code ?? cause?.code;
-      const errorConstraint = constraint ?? cause?.constraint_name;
-      if (errorCode !== "23503") throw error;
+      const errorConstraint = violatedForeignKey(error);
+      if (errorConstraint === undefined) throw error;
       if (errorConstraint === "familiarities_dynimo_id_dynimos_id_fk") return false;
       console.warn(`Vertrouwdheid niet opgeslagen: Persoon ${personId} bestaat niet (meer).`);
       return true;

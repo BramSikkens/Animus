@@ -69,6 +69,11 @@ export class AnimusAgent extends voice.Agent {
     this.#pendingInitiative = instruction;
   }
 
+  /** Wist de lopende stem-inschrijving (#107): bij `persons:`, een wissel van Dynimo of slapen is ze niet meer geldig. */
+  cancelEnrollment(): void {
+    this.#enrollingPersonId = undefined;
+  }
+
   override async llmNode(chatCtx: ChatContext, _toolCtx: ToolContext): Promise<ReadableStream<string> | null> {
     const isUserMessage = (item: ChatContext["items"][number]): item is ChatMessage =>
       item.type === "message" && item.role === "user";
@@ -121,7 +126,9 @@ export class AnimusAgent extends voice.Agent {
         this.#speaker!.speakerId
           .enroll(enrollingPersonId, pcm)
           .then((status) => {
-            if (status === "klaar") this.#enrollingPersonId = undefined;
+            // Klaar of opgegeven (#107): niet meer inschrijvend. Enkel als het nog dezelfde inschrijving is (intussen
+            // gewist of een nieuwe Persoon leren kennen mag deze late afloop niet overschrijven).
+            if (status !== "bezig" && this.#enrollingPersonId === enrollingPersonId) this.#enrollingPersonId = undefined;
           })
           .catch((error: unknown) => console.warn("Stemprofiel opbouwen faalde:", error instanceof Error ? error.message : error))
           .finally(() => {

@@ -10,6 +10,8 @@ export type TextStreamOptions = {
   onMood?: (mood: EmotionMessage) => void;
   /** Aangeroepen zodra een `kijk`-event voorbijkomt: er ging deze beurt een camerabeeld naar Type2. */
   onLook?: () => void;
+  /** Aangeroepen bij een `persoon`-event: net iemand leren kennen (leerKennen), #92. */
+  onPersoon?: (personId: number, naam: string) => void;
 };
 
 /**
@@ -53,6 +55,10 @@ export function textStream(events: AsyncIterable<BrainEvent>, options?: TextStre
         }
         if (result.value.type === "kijk") {
           options?.onLook?.();
+          continue;
+        }
+        if (result.value.type === "persoon") {
+          options?.onPersoon?.(result.value.personId, result.value.naam);
           continue;
         }
         // tool-* event: overslaan, volgende event proberen.

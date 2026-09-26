@@ -1,9 +1,11 @@
 import { useEffect } from "react";
 import { FaceDetector, ObjectDetector, FilesetResolver } from "@mediapipe/tasks-vision";
 import { useLocalParticipant } from "@livekit/components-react";
-import { PERCEPTION_TOPIC, type Waarneming } from "@animus/brain/perception";
+import { encodeEmbedding, PERCEPTION_TOPIC, type Waarneming } from "@animus/brain/perception";
 import { createPresence } from "./presence.js";
 import { createObjectTracker } from "./objects.js";
+import { createFaceSendRule } from "./face-send.js";
+import { embed } from "./face-embeddings.js";
 import type { VideoBox } from "./overlay.js";
 
 // Zelfde @mediapipe/tasks-vision-versie als in package.json (`pnpm ls @mediapipe/tasks-vision`).
@@ -17,6 +19,7 @@ const OBJECT_MIN_SCORE = 0.6;
 const OBJECT_STABLE_MS = 1000;
 // Ruim boven OBJECT_STABLE_MS: wat bij het wakker worden al stabiel in beeld staat (bureau, stoel) telt zo zeker als "al gezien".
 const OBJECT_WARMUP_MS = 3000;
+const FACE_SEND_INTERVAL_MS = 3000; // ADR-0020: niet per frame, bij verschijnen en daarna om de paar seconden.
 
 /** Laatste detecties + de videobron zelf, voor de KijkSnapshot (#88): hergebruikt de detecties uit de tick, geen extra detectorcall. */
 export type VisionSnapshot = {
@@ -53,6 +56,8 @@ export function useWaarnemingen({
     let interval: ReturnType<typeof setInterval> | undefined;
     const presence = createPresence({ debounceMs: PRESENCE_DEBOUNCE_MS });
     const objects = createObjectTracker({ minScore: OBJECT_MIN_SCORE, stableMs: OBJECT_STABLE_MS, warmupMs: OBJECT_WARMUP_MS });
+    const faceSendRule = createFaceSendRule({ intervalMs: FACE_SEND_INTERVAL_MS });
+    let embedding = false; // in-flight-guard: embed() is async, nooit overlappend aanroepen
     const publish = (message: Waarneming): void => {
       localParticipant
         .publishData(new TextEncoder().encode(JSON.stringify(message)), { reliable: true, topic: PERCEPTION_TOPIC })
@@ -100,6 +105,22 @@ export function useWaarnemingen({
           const waarneming = presence.update(detections.length > 0, t);
           if (waarneming) publish({ soort: waarneming });
           if (waarneming === "afwezig" && facePosition) facePosition.current = null;
+
+          // Gezichts-embeddings (#93): nooit per frame, enkel bij verschijnen en daarna elke FACE_SEND_INTERVAL_MS.
+          // faceSendRule.update() draait elke tick (anders schuift zijn interval-klok op zodra een embed in-flight
+          // is); enkel het STARTEN van een nieuwe embed()-aanroep wordt overgeslagen zolang de vorige nog loopt.
+          const shouldSendFaces = faceSendRule.update(detections.length, t);
+          if (shouldSendFaces && !embedding) {
+            embedding = true;
+            void embed(video)
+              .then((embeddings) => {
+                if (cancelled) return; // opgeruimd terwijl embed() liep: niet meer publiceren
+                for (const face of embeddings) publish({ soort: "gezicht", embedding: encodeEmbedding(face), aantal: embeddings.length });
+              })
+              .finally(() => {
+                embedding = false;
+              });
+          }
 
           const box = facePosition ? detections[0]?.boundingBox : undefined;
           if (box && video.videoWidth > 0 && video.videoHeight > 0) {

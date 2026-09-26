@@ -4,11 +4,11 @@ import { formatAge } from "@animus/brain/age";
 import { displayMoodOfRow, moodOfRow } from "@animus/brain/mood";
 import { DRIVE_KINDS, DRIVE_LABELS, type DriveKind } from "@animus/brain/drives";
 import { ARCHETYPES, getArchetype } from "@animus/brain/archetypes";
-import { familiarityStyle } from "@animus/brain/familiarity";
+import { FAMILIARITY_DEFAULT, familiarityStyle } from "@animus/brain/familiarity";
 import { AXES, AXIS_LABELS, AXIS_LETTERS, MBTI_AXES, mbtiType, rowAxes } from "@animus/brain/personality";
 import { verstandBand } from "@animus/brain/verstand";
 import { speechProvider, voicesFor } from "@animus/brain/voice";
-import { dreams, drives, dynimos, epitaphs, memories } from "@animus/db/schema";
+import { dreams, drives, dynimos, epitaphs, familiarities, memories, persons } from "@animus/db/schema";
 import { db } from "../lib/db";
 import { ActionForm } from "./action-form";
 import { VoiceCatalog } from "./voice-catalog";
@@ -54,7 +54,13 @@ async function loadDashboard() {
         .limit(RECENT_DREAMS_LIMIT),
     ),
   );
-  return { dynimoRows, recentMemories, recentDreams, epitaphRows, drivesByDynimo };
+  // Vertrouwdheid (#91) is verhuisd naar Dynimo × Persoon; het dashboard toont die van de eigenaar, 0.2 zonder rij.
+  const [owner] = await db.select({ id: persons.id }).from(persons).where(eq(persons.owner, true));
+  const ownerFamiliarityRows = owner
+    ? await db.select({ dynimoId: familiarities.dynimoId, familiarity: familiarities.familiarity }).from(familiarities).where(eq(familiarities.personId, owner.id))
+    : [];
+  const familiarityByDynimo = new Map(ownerFamiliarityRows.map((row) => [row.dynimoId, row.familiarity]));
+  return { dynimoRows, recentMemories, recentDreams, epitaphRows, drivesByDynimo, familiarityByDynimo };
 }
 
 export default async function DashboardPage() {
@@ -74,7 +80,7 @@ export default async function DashboardPage() {
       </main>
     );
   }
-  const { dynimoRows, recentMemories, recentDreams, epitaphRows, drivesByDynimo } = data;
+  const { dynimoRows, recentMemories, recentDreams, epitaphRows, drivesByDynimo, familiarityByDynimo } = data;
   const provider = speechProvider(process.env);
   const voices = voicesFor(provider);
   // Catalogus alleen bij ElevenLabs; bij een API-fout melden en de vaste lijst tonen.
@@ -90,6 +96,9 @@ export default async function DashboardPage() {
   return (
     <main>
       <h1>Animus — dashboard</h1>
+      <p>
+        <a href="/personen">Personen beheren →</a>
+      </p>
 
       <section>
         <h2>Dynimo&apos;s</h2>
@@ -98,6 +107,7 @@ export default async function DashboardPage() {
           <ul>
             {dynimoRows.map((dynimo, index) => {
               const awake = dynimo.awakeSince !== null;
+              const familiarity = familiarityByDynimo.get(dynimo.id) ?? FAMILIARITY_DEFAULT;
               const axes = rowAxes(dynimo);
               // Enkel de wakkere Dynimo heeft een levende Stemming.
               const mood = awake ? displayMoodOfRow(dynimo, new Date()) : null;
@@ -119,7 +129,7 @@ export default async function DashboardPage() {
                   <p>Archetype: {getArchetype(dynimo.archetype)?.name ?? "geen"}</p>
                   <p>Basisemotie: {dynimo.baseEmotion ?? "nog niet bepaald"}</p>
                   <p>
-                    Vertrouwdheid: {familiarityStyle(dynimo.familiarity).band} ({dynimo.familiarity.toFixed(2)})
+                    Vertrouwdheid: {familiarityStyle(familiarity).band} ({familiarity.toFixed(2)})
                   </p>
                   <p>
                     Verstand: {dynimo.verstand === null ? "(leeg)" : `${verstandBand(dynimo.verstand)} (${dynimo.verstand.toFixed(2)})`}
@@ -207,7 +217,7 @@ export default async function DashboardPage() {
                   <ActionForm action={setFamiliarity} label="Vertrouwdheid zetten" pendingLabel="Zet…" id={dynimo.id}>
                     <label className="slider">
                       Vertrouwdheid
-                      <input name="familiarity" type="range" min={0} max={1} step={0.01} defaultValue={dynimo.familiarity} />
+                      <input name="familiarity" type="range" min={0} max={1} step={0.01} defaultValue={familiarity} />
                     </label>
                   </ActionForm>
                   <ActionForm action={setVerstand} label="Verstand zetten" pendingLabel="Zet…" id={dynimo.id}>

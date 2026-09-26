@@ -44,6 +44,9 @@ importers:
       '@livekit/rtc-node':
         specifier: 0.13.35
         version: 0.13.35
+      '@picovoice/eagle-node':
+        specifier: 3.0.1
+        version: 3.0.1
       postgres:
         specifier: 3.4.9
         version: 3.4.9
@@ -112,6 +115,9 @@ importers:
       '@mediapipe/tasks-vision':
         specifier: 1.0.1
         version: 1.0.1
+      '@vladmandic/human':
+        specifier: 3.3.6
+        version: 3.3.6
       livekit-client:
         specifier: 2.22.3
         version: 2.22.3(@types/dom-mediacapture-record@1.0.22)
@@ -1416,6 +1422,11 @@ packages:
   '@oxc-project/types@0.150.0':
     resolution: {integrity: sha512-rDS5/31E9HfPl/CIzGrn0DOlvBbXFseQ5URJ9sYMfstbKLD/c6Gm9vmRzRGDdAXyOIL4zmO37lc9RIwYqVruZw==}
 
+  '@picovoice/eagle-node@3.0.1':
+    resolution: {integrity: sha512-AIukWElUQbQudy+IuMa04jQOH+WwscLKOdnYLCm2//zlqveSJhXwTuKFU1zwj30S/m2FJvlZiUZL5bxoIXKC3w==}
+    engines: {node: '>=18.0.0'}
+    cpu: ['!ia32', '!mips', '!ppc', '!ppc64']
+
   '@pinojs/redact@0.4.0':
     resolution: {integrity: sha512-k2ENnmBugE/rzQfEcdWHcCY+/FM3VLzH9cYEsbdsoqrvzAKRhUZeRNhAZvB8OitQJ1TBed3yqWtdjzS6wJKBwg==}
 
@@ -1640,6 +1651,10 @@ packages:
 
   '@vitest/spy@5.0.1':
     resolution: {integrity: sha512-rbto/mF/SGERxEgYOek7Xm6B9b+y+mVoo+f4b2LymYO8zM1b7uB5nHuhVMTP2hxdzgxvGiZYGxGIaMvL5y180Q==}
+
+  '@vladmandic/human@3.3.6':
+    resolution: {integrity: sha512-Nr5mPfq1gQ+uKeXY5uM3Fj8UxvF5CEh2s6txM5wRThqaW0mF9huooOuZSrT8hhGho0hGaXLFdAwfD/2+teCv6A==}
+    engines: {node: '>=14.0.0'}
 
   '@workflow/serde@4.1.0':
     resolution: {integrity: sha512-pav4F2BoirECWR7Nf1TKt+2eETcBj7jj4cBefQ8VXQCA6NPkaKeLfj/zMgi+3zYV5ZIBT4GuUiphsj0/b9hPQQ==}
@@ -3636,6 +3651,8 @@ snapshots:
 
   '@oxc-project/types@0.150.0': {}
 
+  '@picovoice/eagle-node@3.0.1': {}
+
   '@pinojs/redact@0.4.0': {}
 
   '@protobufjs/aspromise@1.1.2': {}
@@ -3771,6 +3788,8 @@ snapshots:
       vite: 8.3.0(@types/node@26.6.2)(esbuild@0.28.2)(tsx@4.23.15)
 
   '@vitest/spy@5.0.1': {}
+
+  '@vladmandic/human@3.3.6': {}
 
   '@workflow/serde@4.1.0': {}
 

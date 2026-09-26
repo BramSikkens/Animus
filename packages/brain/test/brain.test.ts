@@ -2,7 +2,7 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { MockEmbeddingModelV4, MockLanguageModelV4, Experimental_EvaluationMockModelV4 } from "ai/test";
 import { simulateReadableStream } from "ai";
 import { eq, isNotNull } from "drizzle-orm";
-import { EMBEDDING_DIMENSIONS, dreams, drives, dynimos, epitaphs, memories } from "@animus/db/schema";
+import { EMBEDDING_DIMENSIONS, dreams, drives, dynimos, epitaphs, memories, persons } from "@animus/db/schema";
 import postgres from "postgres";
 import { EMOTIONS } from "../src/emotion.js";
 import { moodOfRow, singleEmotionValues, type MoodValues } from "../src/mood.js";
@@ -3478,17 +3478,19 @@ describe("createBrain", () => {
       });
 
       it("laat Vertrouwdheid dalen (Reflectie na lange stilte), maar niet bij slapen", async () => {
-        const vero = await insertDynimo({ familiarity: 0.5 });
+        const vero = await insertDynimo();
+        const brain = brainWith(heavyReturning(reflection()));
+        await brain.setFamiliarity(vero.id, 0.5);
         await addMemory(vero.id, "iets", 1);
 
-        expect(await brainWith(heavyReturning(reflection())).reflect()).toBe(true);
-        const afterSilence = (await rowOf(vero.id)).familiarity;
+        expect(await brain.reflect()).toBe(true);
+        const afterSilence = await brain.familiarityOf(vero.id);
         expect(afterSilence).toBeLessThan(0.5);
         expect(afterSilence).toBeGreaterThanOrEqual(0.05);
 
         await addMemory(vero.id, "nog iets", 1);
         await brainWith(heavyReturning(reflection())).sleep();
-        expect((await rowOf(vero.id)).familiarity).toBe(afterSilence);
+        expect(await brain.familiarityOf(vero.id)).toBe(afterSilence);
       });
 
       it("geeft false zonder throw en schrijft niets bij een falende call of ongeldige output", async () => {
@@ -3620,6 +3622,16 @@ describe("createBrain", () => {
       it("geeft false en bewaart niets bij een onbekende Dynimo", async () => {
         expect(await brainWith().addMemory(999, "De kat heet Pluis")).toBe(false);
         expect(await db.select().from(memories)).toHaveLength(0);
+      });
+
+      it("koppelt de Herinnering aan de eigenaar (reviewfix #94)", async () => {
+        const vero = await insertDynimo();
+
+        await brainWith().addMemory(vero.id, "De kat heet Pluis");
+
+        const [memory] = await db.select().from(memories).where(eq(memories.dynimoId, vero.id));
+        const owner = (await db.select().from(persons).where(eq(persons.owner, true)))[0]!;
+        expect(memory!.personId).toBe(owner.id);
       });
 
       // ADD-APPEND
@@ -3762,8 +3774,9 @@ describe("createBrain", () => {
     describe("setFamiliarity", () => {
       it("overschrijft de Vertrouwdheid", async () => {
         const vero = await insertDynimo();
-        expect(await brainWith().setFamiliarity(vero.id, 0.85)).toBe(true);
-        expect((await rowOf(vero.id)).familiarity).toBe(0.85);
+        const brain = brainWith();
+        expect(await brain.setFamiliarity(vero.id, 0.85)).toBe(true);
+        expect(await brain.familiarityOf(vero.id)).toBe(0.85);
       });
 
       it("geeft false bij een onbekende Dynimo", async () => {

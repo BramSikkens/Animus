@@ -37,7 +37,9 @@ export async function watchDynimos(options: {
   onMood?: () => void;
   /** De stem van een Dynimo is gewijzigd (dashboard, payload "voice:<id>"). */
   onVoice?: () => void;
-  /** Elke toestandsmelding behalve Stemming (wakker/slapend/genesis/gedood/stem): ververst bv. de Galerij. */
+  /** Personen zijn samengevoegd/verwijderd/opnieuw geleerd (dashboard, payload "persons:", #95): biometrie is verouderd. */
+  onPersons?: () => void;
+  /** Elke toestandsmelding behalve Stemming (wakker/slapend/genesis/gedood/stem/personen): ververst bv. de Galerij. */
   onNotify?: () => void;
 }): Promise<{ current: () => DynimoState; close: () => Promise<void> }> {
   const listener = postgres(options.databaseUrl, { max: 1, onnotice: () => {} });
@@ -68,7 +70,9 @@ export async function watchDynimos(options: {
     (payload: string) => {
       if (payload.startsWith("mood:")) return options.onMood?.();
       options.onNotify?.();
-      return payload.startsWith("voice:") ? options.onVoice?.() : void check();
+      if (payload.startsWith("voice:")) return options.onVoice?.();
+      if (payload.startsWith("persons:")) return options.onPersons?.();
+      return void check();
     },
     check,
   );

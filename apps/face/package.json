@@ -12,6 +12,7 @@
     "@animus/brain": "workspace:*",
     "@livekit/components-react": "2.9.24",
     "@mediapipe/tasks-vision": "1.0.1",
+    "@vladmandic/human": "3.3.6",
     "livekit-client": "2.22.3",
     "motion": "13.4.2",
     "react": "19.3.0",

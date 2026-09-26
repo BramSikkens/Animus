@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { createBrain, defaultVoiceDeps, type Brain } from "@animus/brain";
 import { DISPLAY_TOPIC, type DisplayMessage, type DisplayState } from "@animus/brain/display";
 import { COMMAND_TOPIC, GALLERY_TOPIC, type GalleryMessage } from "@animus/brain/gallery";
-import { isWaarneming, LOOK_TOPIC, PERCEPTION_TOPIC, type Aanleiding } from "@animus/brain/perception";
+import { decodeEmbedding, isWaarneming, LOOK_TOPIC, PERCEPTION_TOPIC, type Aanleiding } from "@animus/brain/perception";
 import { SOUND_TOPIC, type SoundMessage } from "@animus/brain/sound";
 import { EMOTION_TOPIC, type EmotionMessage } from "@animus/brain/emotion";
 import { initiativeFactor } from "@animus/brain/behavior";
@@ -39,6 +39,11 @@ import { createInitiativeTimer, initiativeIntervalMs, parseInitiativeMinutes } f
 import { createPerception, parseLookCooldownMinutes, parseReturnAfterMinutes } from "./perception.js";
 import { createReflectionDisplay } from "./reflection-display.js";
 import { createSilenceTimer, parseSilenceMinutes } from "./silence-timer.js";
+import { createEagleSpeakerId } from "./eagle-speaker-id.js";
+import { decideGesprekspartner, shouldOverrideGesprekspartner } from "./gesprekspartner.js";
+import { createFaces, parseFaceMatchDistance } from "./faces.js";
+import { parseSpeakerMatchThreshold, type SpeakerId } from "./speaker-id.js";
+import { createSpeakerAudio } from "./speaker-audio.js";
 import { voiceSettingsFor } from "@animus/brain/voice-emotion";
 import { pacingFor, withPacingSpeed } from "@animus/brain/speech-pacing";
 import { applyTtsEmotion, applyTtsVoice } from "./tts-voice.js";
@@ -109,9 +114,25 @@ class AnimusAgent extends voice.Agent {
   readonly #onUtterance: () => void;
   readonly #onMoodValues: (values: EmotionMessage["values"]) => void;
   readonly #getExpressiveness: () => number;
+  readonly #speaker: { speakerId: SpeakerId; audio: ReturnType<typeof createSpeakerAudio> } | undefined;
+  readonly #faces: ReturnType<typeof createFaces>;
   #pendingInitiative: string | undefined;
+  // ponytail: hoogstens één lopende inschrijving tegelijk (een scalar, geen wachtrij); twee tegelijk leren kennen
+  // in dezelfde sessie komt in de praktijk niet voor.
+  #enrollingPersonId: number | undefined;
+  // In-flight-guard: voorkomt dat een tweede, snel opvolgende beurt een nieuwe enroll()-aanroep start terwijl de
+  // vorige nog loopt (die kan de profiler intern al hebben afgerond en losgelaten).
+  #enrolling = false;
 
-  constructor(brain: Brain, room: JobContext["room"], onUtterance: () => void, onMoodValues: (values: EmotionMessage["values"]) => void, getExpressiveness: () => number = () => 0.5) {
+  constructor(
+    brain: Brain,
+    room: JobContext["room"],
+    onUtterance: () => void,
+    onMoodValues: (values: EmotionMessage["values"]) => void,
+    getExpressiveness: () => number = () => 0.5,
+    speaker: { speakerId: SpeakerId; audio: ReturnType<typeof createSpeakerAudio> } | undefined,
+    faces: ReturnType<typeof createFaces>,
+  ) {
     // instructions is verplicht op voice.Agent, maar onbenut: llmNode hieronder draait i.p.v. het
     // ingebouwde LLM-pad de brein-kern.
     super({ instructions: "Animus", llm: new BrainPlaceholderLLM() });
@@ -120,6 +141,8 @@ class AnimusAgent extends voice.Agent {
     this.#onUtterance = onUtterance;
     this.#onMoodValues = onMoodValues;
     this.#getExpressiveness = getExpressiveness;
+    this.#speaker = speaker;
+    this.#faces = faces;
   }
 
   /** Zet een spontane uiting klaar; de eerstvolgende llmNode (via session.generateReply) draait die i.p.v. een user-turn. */
@@ -132,11 +155,68 @@ class AnimusAgent extends voice.Agent {
       item.type === "message" && item.role === "user";
     const initiative = this.#pendingInitiative;
     this.#pendingInitiative = undefined;
+
+    // Altijd draineren zodra er een speaker-module is — ook bij initiatief of een overgeslagen beurt (geen tekst)
+    // — anders lekt audio van een periode die niet gebruikt werd door naar een latere identify/enroll.
+    const pcm = this.#speaker?.audio.drain();
+
     const text = initiative ?? chatCtx.items.filter(isUserMessage).at(-1)?.textContent;
     if (!text) return null;
     this.#onUtterance();
+
+    // Gezichten (#93): wie is nu in beeld/aanwezig, ongeacht stemherkenning (ook bij initiatief).
+    const now = Date.now();
+    const facesInView = this.#faces.inView(now);
+    const aanwezig = this.#faces.present(now);
+
+    // Stemherkenning (#92): enkel bij een echte beurt (niet bij initiatief, dan spreekt de Dynimo zelf).
+    let identified: { personId: number; score: number } | null = null;
+    if (this.#speaker && initiative === undefined && pcm && pcm.length > 0) {
+      try {
+        identified = this.#speaker.speakerId.identify(pcm);
+      } catch (error) {
+        // Nooit de beurt breken op een identificatiefout: gedraagt zich als geen match (onbekend/eigenaar-regel).
+        console.warn("Stem identificeren faalde:", error instanceof Error ? error.message : error);
+      }
+    }
+    const hasSpeaker = this.#speaker !== undefined && initiative === undefined;
+    // Beslisregel (#92/#93): stem zeker → die Persoon; anders precies één bekend gezicht in beeld → die; anders
+    // onbekend. Zonder enig signaal (geen stemherkenning én geen gezicht in beeld) wordt gesprekspartner weggelaten
+    // (hear() valt dan terug op de eigenaar) — dat is het enige geval dat exact het gedrag van vóór stem-/
+    // gezichtsherkenning blijft. Met camera én zonder stemherkenning is de eigenaar zelf (nog zonder gezichts-
+    // embeddings) géén uitzondering: hij begint ook als onbekend gezicht, en de nieuwe Persoon die daaruit ontstaat
+    // moet nadien via het dashboard (#95) weer met "eigenaar" samengevoegd worden.
+    let gesprekspartner: number | null | undefined;
+    if (shouldOverrideGesprekspartner({ hasSpeaker, faces: facesInView })) {
+      gesprekspartner = decideGesprekspartner({ voice: hasSpeaker ? identified && { personId: identified.personId, sure: true } : null, faces: facesInView });
+    }
+    if (hasSpeaker && pcm) {
+      // Onzeker terwijl er een inschrijving loopt: dan is dit hoogstwaarschijnlijk nog steeds die Persoon (zijn
+      // profiel is nog niet compleet genoeg om zichzelf te herkennen).
+      if (identified === null && this.#enrollingPersonId !== undefined) gesprekspartner = this.#enrollingPersonId;
+      // Enkel voeden als déze beurt ook echt aan de ingeschreven Persoon werd toegeschreven (niet bv. een andere,
+      // al bekende stem die net het gesprek overnam), en niet terwijl een vorige enroll()-aanroep nog loopt.
+      if (gesprekspartner === this.#enrollingPersonId && this.#enrollingPersonId !== undefined && pcm.length > 0 && !this.#enrolling) {
+        const enrollingPersonId = this.#enrollingPersonId;
+        this.#enrolling = true;
+        this.#speaker!.speakerId
+          .enroll(enrollingPersonId, pcm)
+          .then((status) => {
+            if (status === "klaar") this.#enrollingPersonId = undefined;
+          })
+          .catch((error: unknown) => console.warn("Stemprofiel opbouwen faalde:", error instanceof Error ? error.message : error))
+          .finally(() => {
+            this.#enrolling = false;
+          });
+      }
+    }
+
     // tool-*-events uit brain.hear() worden hier genegeerd (ticket #7).
-    return textStream(this.#brain.hear(text, { initiatief: initiative !== undefined }), {
+    return textStream(this.#brain.hear(text, { initiatief: initiative !== undefined, ...(gesprekspartner !== undefined && { gesprekspartner }), ...(aanwezig.length > 0 && { aanwezig }) }), {
+      onPersoon: (personId) => {
+        // Net leren kennen (#92): het stemprofiel van deze nieuwe Persoon beginnen opbouwen.
+        this.#enrollingPersonId = personId;
+      },
       onMood: (message) => {
         // Vóór de eerste tekst (dus vóór de TTS-context van deze beurt opent): emotie in de stem.
         this.#onMoodValues(message.values);
@@ -187,9 +267,13 @@ export default defineAgent<AgentUserData>({
 
     // Kijken (ADR-0018/0019): het laatste camerabeeld van de room, vóór createBrain zodat lookFrame meteen mee kan.
     const frames = createFrameSource(ctx.room);
+    // Gezichtsherkenning (#93, ADR-0020): drempel via env, afgeleid van Human's similarity-vuistregel.
+    const faceMatchDistanceConfig = parseFaceMatchDistance(process.env.FACE_MATCH_DISTANCE);
+    if (faceMatchDistanceConfig.warning) console.warn(faceMatchDistanceConfig.warning);
+
     // In-process (spec: geen aparte brein-API); elke job krijgt zijn eigen brein-instantie.
     // voices: een geboorte vanuit de Galerij kiest net als in het dashboard een stem.
-    const brain = createBrain({ db, type1: TYPE1_MODEL, type2: loadType2Config(), embedder: EMBEDDING_MODEL, voices: defaultVoiceDeps(process.env), lookFrame: () => frames.latest() });
+    const brain = createBrain({ db, type1: TYPE1_MODEL, type2: loadType2Config(), embedder: EMBEDDING_MODEL, voices: defaultVoiceDeps(process.env), lookFrame: () => frames.latest(), faceMatchDistance: faceMatchDistanceConfig.distance });
 
     ctx.addShutdownCallback(async () => frames.dispose());
     ctx.addShutdownCallback(async () => {
@@ -217,6 +301,34 @@ export default defineAgent<AgentUserData>({
         // Niet in het ticket beschreven — hier bewust uitgezet i.p.v. de default (true).
         preemptiveGeneration: { enabled: false },
       },
+    });
+
+    // Stemherkenning (#92, ADR-0020): enkel aan als de sleutel gezet is én Eagle initialiseert; anders precies het
+    // huidige gedrag (geen gesprekspartner-optie, hear() valt terug op de eigenaar).
+    const speakerThreshold = parseSpeakerMatchThreshold(process.env.SPEAKER_MATCH_THRESHOLD);
+    if (speakerThreshold.warning) console.warn(speakerThreshold.warning);
+    let speakerRecognition: { speakerId: SpeakerId; audio: ReturnType<typeof createSpeakerAudio> } | undefined;
+    if (process.env.PICOVOICE_ACCESS_KEY) {
+      let speakerId: SpeakerId | undefined;
+      try {
+        speakerId = createEagleSpeakerId({
+          accessKey: process.env.PICOVOICE_ACCESS_KEY,
+          threshold: speakerThreshold.threshold,
+          loadProfiles: () => brain.voiceProfiles(),
+          saveProfile: (personId, profile) => brain.addVoiceProfile(personId, profile),
+        });
+        await speakerId.reload();
+        const audio = createSpeakerAudio(ctx.room, () => session.userState === "speaking");
+        speakerRecognition = { speakerId, audio };
+      } catch (error) {
+        // reload() kan falen ná een geslaagde new Eagle(...): dan wél de native resources weer vrijgeven.
+        speakerId?.dispose();
+        console.warn("Stemherkenning (Eagle) kon niet starten, blijft uit:", error instanceof Error ? error.message : error);
+      }
+    }
+    ctx.addShutdownCallback(async () => {
+      speakerRecognition?.speakerId.dispose();
+      speakerRecognition?.audio.dispose();
     });
 
     const publish = (topic: string, message: DisplayMessage | GalleryMessage | ReturnType<typeof emotionMessageFor>): void => {
@@ -296,7 +408,7 @@ export default defineAgent<AgentUserData>({
       onSilence: () => {
         const key = watcher.current().key;
         void brain
-          .reflect({ onStart: () => reflectionDisplay.onStart(key) })
+          .reflect({ onStart: () => reflectionDisplay.onStart(key), aanwezig: faces.seenAny() ? faces.present(Date.now()) : undefined })
           .then(() => reflectionDisplay.onFinish(key));
       },
     });
@@ -315,6 +427,8 @@ export default defineAgent<AgentUserData>({
     const lookCooldownConfig = parseLookCooldownMinutes(process.env.SPONTANEOUS_LOOK_COOLDOWN_MINUTES);
     if (lookCooldownConfig.warning) console.warn(lookCooldownConfig.warning);
     const perception = createPerception({ now: Date.now, returnAfterMs: returnAfterConfig.ms, lookCooldownMs: lookCooldownConfig.ms });
+    // Gezichten (#93): aparte, klok-geïnjecteerde module (los van createPerception, dat gaat over aanwezig/afwezig/nieuw-object).
+    const faces = createFaces();
     let initiativeAxes: ReturnType<typeof rowAxes> = null;
     let initiativeMoodFactor = 1;
     const refreshInitiativeAxes = async (): Promise<void> => {
@@ -332,7 +446,7 @@ export default defineAgent<AgentUserData>({
       const expressiveness = initiativeAxes?.expressiveness ?? 0.5;
       // Tempo per Emotie (#70) via speed; de afronding in applyTtsEmotion voorkomt extra websocket-herstarts.
       applyTtsEmotion(speechProvider(process.env), tts, withPacingSpeed(voiceSettingsFor({ values, expressiveness }), pacingFor({ values, expressiveness }).speedFactor));
-    }, () => initiativeAxes?.expressiveness ?? 0.5);
+    }, () => initiativeAxes?.expressiveness ?? 0.5, speakerRecognition, faces);
     const isQuiet = (): boolean =>
       (session.agentState === "idle" || session.agentState === "listening") && session.userState !== "speaking" && perception.isPresent();
     // Gedeeld door de timer-tick en een Waarneming (aanleiding "terug"): een in-flight-guard voorkomt dat ze
@@ -345,7 +459,7 @@ export default defineAgent<AgentUserData>({
       initiativeInFlight = true;
       try {
         await refreshInitiativeAxes();
-        const instruction = await brain.considerInitiative(aanleiding);
+        const instruction = await brain.considerInitiative(aanleiding, { aanwezig: faces.seenAny() ? faces.present(Date.now()) : undefined });
         // Opnieuw controleren: de check duurde even, misschien is er intussen iemand gaan praten.
         if (!instruction || !isQuiet()) return;
         animusAgent.queueInitiative(instruction);
@@ -375,11 +489,28 @@ export default defineAgent<AgentUserData>({
         return;
       }
       if (!isWaarneming(parsed)) return;
+      // Gezicht (#93): geen presence-Waarneming, apart afgehandeld (matchen + faces.ts bijwerken).
+      if (parsed.soort === "gezicht") {
+        const decoded = decodeEmbedding(parsed.embedding);
+        if (!decoded) return; // al gevalideerd door isWaarneming; defensief
+        const aantal = parsed.aantal;
+        brain
+          .recognizeFaces([decoded])
+          .then(([personId]) => {
+            faces.record(personId ?? null, Date.now(), aantal);
+            if (faces.unknownStableSince(Date.now())) return runInitiative({ soort: "onbekend" });
+          })
+          .catch((error: unknown) => console.warn("Gezicht herkennen faalde:", error instanceof Error ? error.message : error));
+        return;
+      }
       const aanleiding = perception.onWaarneming(parsed);
       if (aanleiding) runInitiative(aanleiding).catch((error: unknown) => console.warn("Initiatief-check faalde:", error instanceof Error ? error.message : error));
     });
     // Vertrekt de face-app terwijl niemand in beeld was, dan mag "afwezig" het initiatief niet voorgoed stilleggen.
-    ctx.room.on(RoomEvent.ParticipantDisconnected, () => perception.reset());
+    ctx.room.on(RoomEvent.ParticipantDisconnected, () => {
+      perception.reset();
+      faces.reset();
+    });
 
     // closeOnDisconnect uit: anders sluit de sessie (en stopt de job) zodra de eerste face disconnect, terwijl de room
     // voor een andere tab blijft bestaan; LiveKit dispatcht enkel bij room-creatie, dus die tab zag dan geen agent.
@@ -389,7 +520,10 @@ export default defineAgent<AgentUserData>({
     // De sessie luistert naar één deelnemer (de eerste face) en blijft die trouw, ook als die tab al weg is; elke
     // reload is een nieuwe identiteit. Wij luisteren naar wie zijn microfoon aanzet: de face met een gekozen Dynimo.
     // ponytail: `_roomIO` is private API van @livekit/agents 1.9; bij een upgrade nakijken (RoomIO.setParticipant).
-    const listenTo = (participant: RemoteParticipant): void => session._roomIO?.setParticipant(participant.identity);
+    const listenTo = (participant: RemoteParticipant): void => {
+      session._roomIO?.setParticipant(participant.identity);
+      speakerRecognition?.audio.listenTo(participant.identity);
+    };
     const hasMic = (participant: RemoteParticipant): boolean =>
       [...participant.trackPublications.values()].some((t) => t.source === TrackSource.SOURCE_MICROPHONE && !t.muted);
     const speaker = [...ctx.room.remoteParticipants.values()].find(hasMic);
@@ -410,6 +544,11 @@ export default defineAgent<AgentUserData>({
       onMood: () => void publishState(),
       onNotify: () => void publishGallery(),
       onVoice: () => void readState(brain).then((state) => applyVoice(state.voice)).catch(() => {}),
+      // Personen samengevoegd/verwijderd/opnieuw geleerd (#95): Stemprofielen en de gezien-bijhouding zijn verouderd.
+      onPersons: () => {
+        void speakerRecognition?.speakerId.reload().catch(() => {});
+        faces.reset();
+      },
       onChange: (state) => {
         applyVoice(state.voice);
         // Een wissel beëindigt het reflecterende gezicht; een lopende Reflectie mag doorlopen maar publiceert
@@ -418,6 +557,7 @@ export default defineAgent<AgentUserData>({
         silence.reset();
         initiative.reset();
         perception.reset();
+        faces.reset();
         void refreshInitiativeAxes().catch(() => {});
         // interrupt gooit/weigert als er niets te onderbreken valt; dat is geen fout.
         try {

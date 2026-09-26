@@ -16,14 +16,14 @@ import { getCatalog } from "../lib/voice-catalog";
 export type ActionState = { error?: string };
 
 // Een string uit `work` is een foutmelding; gooit `work`, dan wordt de fout leesbaar getoond i.p.v. te crashen.
-async function run(work: () => Promise<string | void>): Promise<ActionState> {
+async function run(work: () => Promise<string | void>, path = "/"): Promise<ActionState> {
   try {
     const error = await work();
     if (error) return { error };
   } catch (error) {
     return { error: error instanceof Error ? error.message : String(error) };
   }
-  revalidatePath("/");
+  revalidatePath(path);
   return {};
 }
 
@@ -164,6 +164,53 @@ export async function removeMemory(_prev: ActionState, formData: FormData): Prom
     if (id === null || !Number.isInteger(memoryId)) return "Ongeldige Herinnering.";
     if (!(await getBrain().removeMemory(id, memoryId))) return "Deze Herinnering bestaat niet (meer).";
   });
+}
+
+// Personen (#95): server actions dun bovenop de brain-functies.
+const INVALID_PERSON = "Ongeldige Persoon.";
+const PERSON_GONE = "Deze Persoon bestaat niet (meer).";
+
+export async function renamePerson(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  return run(async () => {
+    const id = parseId(formData);
+    if (id === null) return INVALID_PERSON;
+    const name = String(formData.get("name") ?? "");
+    if (!(await getBrain().renamePerson(id, name))) return "Ongeldige naam (of de Persoon bestaat niet meer).";
+  }, "/personen");
+}
+
+// Bevestiging zoals bij verwijderen: de exacte naam van de Persoon die verdwijnt (removeId), vóór het samenvoegen.
+export async function mergePersons(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  return run(async () => {
+    const keepId = parseId(formData);
+    const removeId = Number(formData.get("removeId"));
+    if (keepId === null || !Number.isInteger(removeId) || removeId <= 0) return INVALID_PERSON;
+    const remove = (await getBrain().listPersons()).find((person) => person.id === removeId);
+    if (!remove || remove.name !== String(formData.get("name") ?? "")) {
+      return "De naam klopt niet (of de Persoon bestaat niet meer). Er is niets samengevoegd.";
+    }
+    if (!(await getBrain().mergePersons(keepId, removeId))) return "Kan deze twee Personen niet samenvoegen.";
+  }, "/personen");
+}
+
+export async function relearnPerson(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  return run(async () => {
+    const id = parseId(formData);
+    if (id === null) return INVALID_PERSON;
+    if (!(await getBrain().relearnPerson(id))) return PERSON_GONE;
+  }, "/personen");
+}
+
+// Zoals kill(): de exacte naam ter bevestiging; de check gebeurt in de brain.
+export async function deletePerson(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  return run(async () => {
+    const id = parseId(formData);
+    if (id === null) return INVALID_PERSON;
+    const name = String(formData.get("name") ?? "");
+    if (!(await getBrain().deletePerson(id, name))) {
+      return "De naam klopt niet, of dit is de eigenaar (of de Persoon bestaat niet meer). Er is niets verwijderd.";
+    }
+  }, "/personen");
 }
 
 // Stemontwerp (ElevenLabs). De API-key blijft server-side in process.env.

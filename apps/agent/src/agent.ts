@@ -1,30 +1,17 @@
-import { ReadableStream } from "node:stream/web";
 import { fileURLToPath } from "node:url";
-import { createBrain, defaultVoiceDeps, type Brain } from "@animus/brain";
+import { createBrain, defaultVoiceDeps } from "@animus/brain";
 import { DISPLAY_TOPIC, type DisplayMessage, type DisplayState } from "@animus/brain/display";
 import { COMMAND_TOPIC, GALLERY_TOPIC, type GalleryMessage } from "@animus/brain/gallery";
-import { decodeEmbedding, isWaarneming, LOOK_TOPIC, PERCEPTION_TOPIC, type Aanleiding } from "@animus/brain/perception";
-import { SOUND_TOPIC, type SoundMessage } from "@animus/brain/sound";
-import { EMOTION_TOPIC, type EmotionMessage } from "@animus/brain/emotion";
+import { decodeEmbedding, isWaarneming, PERCEPTION_TOPIC, type Aanleiding } from "@animus/brain/perception";
+import { EMOTION_TOPIC } from "@animus/brain/emotion";
+import { KENMERKEN_TOPIC, type KenmerkenMessage } from "@animus/brain/kenmerken";
 import { initiativeFactor } from "@animus/brain/behavior";
 import { moodOfRow } from "@animus/brain/mood";
 import { rowAxes } from "@animus/brain/personality";
 import { resolveVoice, speechProvider } from "@animus/brain/voice";
 import { EMBEDDING_MODEL, loadType2Config, TYPE1_MODEL } from "@animus/brain/config";
 import { createDb, migrate } from "@animus/db";
-import {
-  cli,
-  defineAgent,
-  llm,
-  ServerOptions,
-  voice,
-  type ChatContext,
-  type ChatMessage,
-  type JobContext,
-  type JobProcess,
-  type ToolContext,
-  type VAD,
-} from "@livekit/agents";
+import { cli, defineAgent, ServerOptions, voice, type JobContext, type JobProcess, type VAD } from "@livekit/agents";
 import * as deepgram from "@livekit/agents-plugin-deepgram";
 import * as elevenlabs from "@livekit/agents-plugin-elevenlabs";
 import * as livekit from "@livekit/agents-plugin-livekit";
@@ -32,7 +19,8 @@ import * as openai from "@livekit/agents-plugin-openai";
 import * as silero from "@livekit/agents-plugin-silero";
 import { RoomEvent, TrackSource, type RemoteParticipant } from "@livekit/rtc-node";
 import { readState, watchDynimos } from "./dynimo-watch.js";
-import { createStateRepublisher, emotionMessageFor, withFaceExpressiveness } from "./state-republish.js";
+import { createStateRepublisher, emotionMessageFor, kenmerkenMessageFor, withFaceExpressiveness } from "./state-republish.js";
+import { vertrouwdheidFor } from "./vertrouwdheid.js";
 import { createCommandHandler, galleryMessageFor, MAX_GRAVES } from "./gallery-commands.js";
 import { createFrameSource } from "./frame-source.js";
 import { createInitiativeTimer, initiativeIntervalMs, parseInitiativeMinutes } from "./initiative-timer.js";
@@ -40,15 +28,14 @@ import { createPerception, parseLookCooldownMinutes, parseReturnAfterMinutes } f
 import { createReflectionDisplay } from "./reflection-display.js";
 import { createSilenceTimer, parseSilenceMinutes } from "./silence-timer.js";
 import { createEagleSpeakerId } from "./eagle-speaker-id.js";
-import { decideGesprekspartner, shouldOverrideGesprekspartner } from "./gesprekspartner.js";
 import { createFaces, parseFaceMatchDistance } from "./faces.js";
 import { parseSpeakerMatchThreshold, type SpeakerId } from "./speaker-id.js";
 import { createSpeakerAudio } from "./speaker-audio.js";
 import { voiceSettingsFor } from "@animus/brain/voice-emotion";
 import { pacingFor, withPacingSpeed } from "@animus/brain/speech-pacing";
 import { applyTtsEmotion, applyTtsVoice } from "./tts-voice.js";
-import { textStream } from "./text-stream.js";
 import { resolveDisplay, voiceDisplay } from "./voice-display.js";
+import { AnimusAgent } from "./animus-agent.js";
 
 try {
   process.loadEnvFile(fileURLToPath(new URL("../../../.env", import.meta.url)));
@@ -93,166 +80,6 @@ function speechProviders(): { stt: deepgram.STT | openai.STT; tts: elevenlabs.TT
       instructions: "Spreek Nederlands, warm en natuurlijk.",
     }),
   };
-}
-
-// LiveKit genereert enkel een antwoord als er een LLM gezet is (agent_activity.userTurnCompleted:
-// `if (this.llm === undefined) return`), ook al vervangt llmNode het LLM-pad volledig. Zonder
-// deze placeholder blijft de agent stil na elke beurt. chat() wordt nooit aangeroepen.
-class BrainPlaceholderLLM extends llm.LLM {
-  label(): string {
-    return "animus-brain";
-  }
-
-  chat(): never {
-    throw new Error("BrainPlaceholderLLM.chat() mag niet aangeroepen worden: llmNode draait het brein.");
-  }
-}
-
-class AnimusAgent extends voice.Agent {
-  readonly #brain: Brain;
-  readonly #room: JobContext["room"];
-  readonly #onUtterance: () => void;
-  readonly #onMoodValues: (values: EmotionMessage["values"]) => void;
-  readonly #getExpressiveness: () => number;
-  readonly #speaker: { speakerId: SpeakerId; audio: ReturnType<typeof createSpeakerAudio> } | undefined;
-  readonly #faces: ReturnType<typeof createFaces>;
-  #pendingInitiative: string | undefined;
-  // ponytail: hoogstens één lopende inschrijving tegelijk (een scalar, geen wachtrij); twee tegelijk leren kennen
-  // in dezelfde sessie komt in de praktijk niet voor.
-  #enrollingPersonId: number | undefined;
-  // In-flight-guard: voorkomt dat een tweede, snel opvolgende beurt een nieuwe enroll()-aanroep start terwijl de
-  // vorige nog loopt (die kan de profiler intern al hebben afgerond en losgelaten).
-  #enrolling = false;
-
-  constructor(
-    brain: Brain,
-    room: JobContext["room"],
-    onUtterance: () => void,
-    onMoodValues: (values: EmotionMessage["values"]) => void,
-    getExpressiveness: () => number = () => 0.5,
-    speaker: { speakerId: SpeakerId; audio: ReturnType<typeof createSpeakerAudio> } | undefined,
-    faces: ReturnType<typeof createFaces>,
-  ) {
-    // instructions is verplicht op voice.Agent, maar onbenut: llmNode hieronder draait i.p.v. het
-    // ingebouwde LLM-pad de brein-kern.
-    super({ instructions: "Animus", llm: new BrainPlaceholderLLM() });
-    this.#brain = brain;
-    this.#room = room;
-    this.#onUtterance = onUtterance;
-    this.#onMoodValues = onMoodValues;
-    this.#getExpressiveness = getExpressiveness;
-    this.#speaker = speaker;
-    this.#faces = faces;
-  }
-
-  /** Zet een spontane uiting klaar; de eerstvolgende llmNode (via session.generateReply) draait die i.p.v. een user-turn. */
-  queueInitiative(instruction: string): void {
-    this.#pendingInitiative = instruction;
-  }
-
-  override async llmNode(chatCtx: ChatContext, _toolCtx: ToolContext): Promise<ReadableStream<string> | null> {
-    const isUserMessage = (item: ChatContext["items"][number]): item is ChatMessage =>
-      item.type === "message" && item.role === "user";
-    const initiative = this.#pendingInitiative;
-    this.#pendingInitiative = undefined;
-
-    // Altijd draineren zodra er een speaker-module is — ook bij initiatief of een overgeslagen beurt (geen tekst)
-    // — anders lekt audio van een periode die niet gebruikt werd door naar een latere identify/enroll.
-    const pcm = this.#speaker?.audio.drain();
-
-    const text = initiative ?? chatCtx.items.filter(isUserMessage).at(-1)?.textContent;
-    if (!text) return null;
-    this.#onUtterance();
-
-    // Gezichten (#93): wie is nu in beeld/aanwezig, ongeacht stemherkenning (ook bij initiatief).
-    const now = Date.now();
-    const facesInView = this.#faces.inView(now);
-    const aanwezig = this.#faces.present(now);
-
-    // Stemherkenning (#92): enkel bij een echte beurt (niet bij initiatief, dan spreekt de Dynimo zelf).
-    let identified: { personId: number; score: number } | null = null;
-    if (this.#speaker && initiative === undefined && pcm && pcm.length > 0) {
-      try {
-        identified = this.#speaker.speakerId.identify(pcm);
-      } catch (error) {
-        // Nooit de beurt breken op een identificatiefout: gedraagt zich als geen match (onbekend/eigenaar-regel).
-        console.warn("Stem identificeren faalde:", error instanceof Error ? error.message : error);
-      }
-    }
-    const hasSpeaker = this.#speaker !== undefined && initiative === undefined;
-    // Beslisregel (#92/#93): stem zeker → die Persoon; anders precies één bekend gezicht in beeld → die; anders
-    // onbekend. Zonder enig signaal (geen stemherkenning én geen gezicht in beeld) wordt gesprekspartner weggelaten
-    // (hear() valt dan terug op de eigenaar) — dat is het enige geval dat exact het gedrag van vóór stem-/
-    // gezichtsherkenning blijft. Met camera én zonder stemherkenning is de eigenaar zelf (nog zonder gezichts-
-    // embeddings) géén uitzondering: hij begint ook als onbekend gezicht, en de nieuwe Persoon die daaruit ontstaat
-    // moet nadien via het dashboard (#95) weer met "eigenaar" samengevoegd worden.
-    let gesprekspartner: number | null | undefined;
-    if (shouldOverrideGesprekspartner({ hasSpeaker, faces: facesInView })) {
-      gesprekspartner = decideGesprekspartner({ voice: hasSpeaker ? identified && { personId: identified.personId, sure: true } : null, faces: facesInView });
-    }
-    if (hasSpeaker && pcm) {
-      // Onzeker terwijl er een inschrijving loopt: dan is dit hoogstwaarschijnlijk nog steeds die Persoon (zijn
-      // profiel is nog niet compleet genoeg om zichzelf te herkennen).
-      if (identified === null && this.#enrollingPersonId !== undefined) gesprekspartner = this.#enrollingPersonId;
-      // Enkel voeden als déze beurt ook echt aan de ingeschreven Persoon werd toegeschreven (niet bv. een andere,
-      // al bekende stem die net het gesprek overnam), en niet terwijl een vorige enroll()-aanroep nog loopt.
-      if (gesprekspartner === this.#enrollingPersonId && this.#enrollingPersonId !== undefined && pcm.length > 0 && !this.#enrolling) {
-        const enrollingPersonId = this.#enrollingPersonId;
-        this.#enrolling = true;
-        this.#speaker!.speakerId
-          .enroll(enrollingPersonId, pcm)
-          .then((status) => {
-            if (status === "klaar") this.#enrollingPersonId = undefined;
-          })
-          .catch((error: unknown) => console.warn("Stemprofiel opbouwen faalde:", error instanceof Error ? error.message : error))
-          .finally(() => {
-            this.#enrolling = false;
-          });
-      }
-    }
-
-    // tool-*-events uit brain.hear() worden hier genegeerd (ticket #7).
-    return textStream(this.#brain.hear(text, { initiatief: initiative !== undefined, ...(gesprekspartner !== undefined && { gesprekspartner }), ...(aanwezig.length > 0 && { aanwezig }) }), {
-      onPersoon: (personId) => {
-        // Net leren kennen (#92): het stemprofiel van deze nieuwe Persoon beginnen opbouwen.
-        this.#enrollingPersonId = personId;
-      },
-      onMood: (message) => {
-        // Vóór de eerste tekst (dus vóór de TTS-context van deze beurt opent): emotie in de stem.
-        this.#onMoodValues(message.values);
-        const participant = this.#room.localParticipant;
-        if (!participant) {
-          console.error("Emotie niet gepubliceerd: agent is (nog) niet verbonden met de room.");
-          return;
-        }
-        // Fire-and-forget: een mislukte publicatie mag de beurt niet breken.
-        participant
-          .publishData(new TextEncoder().encode(JSON.stringify(withFaceExpressiveness(message, this.#getExpressiveness()))), { reliable: true, topic: EMOTION_TOPIC })
-          .catch((error: unknown) => {
-            console.error("Emotie publiceren faalde:", error instanceof Error ? error.message : error);
-          });
-      },
-      onSound: (kind) => {
-        const participant = this.#room.localParticipant;
-        if (!participant) return;
-        const message: SoundMessage = { kind };
-        participant
-          .publishData(new TextEncoder().encode(JSON.stringify(message)), { reliable: true, topic: SOUND_TOPIC })
-          .catch((error: unknown) => {
-            console.error("Geluid publiceren faalde:", error instanceof Error ? error.message : error);
-          });
-      },
-      onLook: () => {
-        const participant = this.#room.localParticipant;
-        if (!participant) return;
-        participant
-          .publishData(new TextEncoder().encode(JSON.stringify({})), { reliable: true, topic: LOOK_TOPIC })
-          .catch((error: unknown) => {
-            console.error("Kijk-event publiceren faalde:", error instanceof Error ? error.message : error);
-          });
-      },
-    });
-  }
 }
 
 export default defineAgent<AgentUserData>({
@@ -331,7 +158,7 @@ export default defineAgent<AgentUserData>({
       speakerRecognition?.audio.dispose();
     });
 
-    const publish = (topic: string, message: DisplayMessage | GalleryMessage | ReturnType<typeof emotionMessageFor>): void => {
+    const publish = (topic: string, message: DisplayMessage | GalleryMessage | ReturnType<typeof emotionMessageFor> | KenmerkenMessage | null): void => {
       const participant = ctx.room.localParticipant;
       if (!participant) return;
       participant
@@ -342,6 +169,9 @@ export default defineAgent<AgentUserData>({
     };
     // `watcher` en `publishState` bestaan pas verderop en worden hier enkel lui gebruikt (nooit tijdens de opbouw).
     let watcher!: Awaited<ReturnType<typeof watchDynimos>>;
+    // Gesprekspartner van de laatst afgelopen beurt (#105): undefined tot de eerste beurt (dan geldt de eigenaar,
+    // net als hear()); gebruikt door publishState() om de Vertrouwdheid te tonen zonder een verse beurt.
+    let lastGesprekspartner: number | null | undefined;
     const reflectionDisplay = createReflectionDisplay({
       getCurrentKey: () => watcher.current().key,
       publishDisplay: (display) => publish(DISPLAY_TOPIC, { state: display }),
@@ -367,6 +197,11 @@ export default defineAgent<AgentUserData>({
         const state = await readState(brain);
         publish(DISPLAY_TOPIC, { state: effectiveDisplay(state), name: state.name });
         publish(EMOTION_TOPIC, withFaceExpressiveness(emotionMessageFor(state.mood), state.expressiveness));
+        // Kenmerken (#105): met de Gesprekspartner van de laatst afgelopen beurt (of de eigenaar zonder beurt).
+        const vertrouwdheid = state.row
+          ? await vertrouwdheidFor({ familiarityOf: brain.familiarityOf, listPersons: brain.listPersons }, state.row.id, lastGesprekspartner)
+          : { onbekend: true as const };
+        publish(KENMERKEN_TOPIC, kenmerkenMessageFor(state.row, vertrouwdheid));
       } catch (error) {
         console.error("Toestand publiceren faalde:", error instanceof Error ? error.message : error);
       }
@@ -446,7 +281,10 @@ export default defineAgent<AgentUserData>({
       const expressiveness = initiativeAxes?.expressiveness ?? 0.5;
       // Tempo per Emotie (#70) via speed; de afronding in applyTtsEmotion voorkomt extra websocket-herstarts.
       applyTtsEmotion(speechProvider(process.env), tts, withPacingSpeed(voiceSettingsFor({ values, expressiveness }), pacingFor({ values, expressiveness }).speedFactor));
-    }, () => initiativeAxes?.expressiveness ?? 0.5, speakerRecognition, faces);
+    }, () => initiativeAxes?.expressiveness ?? 0.5, speakerRecognition, faces, (gesprekspartner) => {
+      lastGesprekspartner = gesprekspartner;
+      void publishState();
+    });
     const isQuiet = (): boolean =>
       (session.agentState === "idle" || session.agentState === "listening") && session.userState !== "speaking" && perception.isPresent();
     // Gedeeld door de timer-tick en een Waarneming (aanleiding "terug"): een in-flight-guard voorkomt dat ze
@@ -542,6 +380,7 @@ export default defineAgent<AgentUserData>({
       databaseUrl,
       brain,
       onMood: () => void publishState(),
+      onKenmerken: () => void publishState(),
       onNotify: () => void publishGallery(),
       onVoice: () => void readState(brain).then((state) => applyVoice(state.voice)).catch(() => {}),
       // Personen samengevoegd/verwijderd/opnieuw geleerd (#95): Stemprofielen en de gezien-bijhouding zijn verouderd.

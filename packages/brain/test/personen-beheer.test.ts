@@ -127,6 +127,29 @@ describe("renamePerson (#95)", () => {
     const [row] = await db.select().from(persons).where(eq(persons.id, anna.id));
     expect(row!.name).toBe("Jean-Luc O'Néill");
   });
+
+  it("meldt de wijziging op het toestandskanaal, zodat het gezichtje de kenmerken (Vertrouwdheid) ververst", async () => {
+    const anna = await insertPerson("Ana");
+    const listener = await listenState();
+    try {
+      await brain().renamePerson(anna.id, "Anna");
+      expect(await listener.settle()).toEqual(["kenmerken:"]);
+    } finally {
+      await listener.close();
+    }
+  });
+
+  it("meldt niets bij een ongeldige naam of een onbekende id", async () => {
+    const anna = await insertPerson("Anna");
+    const listener = await listenState();
+    try {
+      await brain().renamePerson(anna.id, "a".repeat(41));
+      await brain().renamePerson(999, "Anna");
+      expect(await listener.settle()).toEqual([]);
+    } finally {
+      await listener.close();
+    }
+  });
 });
 
 describe("deletePerson (#95)", () => {

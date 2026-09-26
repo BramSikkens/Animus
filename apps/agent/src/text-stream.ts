@@ -12,6 +12,8 @@ export type TextStreamOptions = {
   onLook?: () => void;
   /** Aangeroepen bij een `persoon`-event: net iemand leren kennen (leerKennen), #92. */
   onPersoon?: (personId: number, naam: string) => void;
+  /** Aangeroepen zodra de beurt afgelopen is (de bron is uitgeput), ook als de bron een fout gooide (#105). */
+  onDone?: () => void;
 };
 
 /**
@@ -26,6 +28,13 @@ export type TextStreamOptions = {
  */
 export function textStream(events: AsyncIterable<BrainEvent>, options?: TextStreamOptions): ReadableStream<string> {
   const it = events[Symbol.asyncIterator]();
+  // Eén keer, of de beurt nu normaal afloopt, faalt, of onderbroken wordt (cancel(), barge-in, #105 reviewfix).
+  let done = false;
+  const onDone = (): void => {
+    if (done) return;
+    done = true;
+    options?.onDone?.();
+  };
   return new ReadableStream<string>({
     async pull(controller) {
       for (;;) {
@@ -34,10 +43,12 @@ export function textStream(events: AsyncIterable<BrainEvent>, options?: TextStre
           result = await it.next();
         } catch (error) {
           console.error("Brain-stream faalde tijdens een beurt:", error instanceof Error ? error.message : error);
+          onDone();
           controller.close();
           return;
         }
         if (result.done) {
+          onDone();
           controller.close();
           return;
         }
@@ -65,6 +76,7 @@ export function textStream(events: AsyncIterable<BrainEvent>, options?: TextStre
       }
     },
     async cancel() {
+      onDone();
       await it.return?.();
     },
   });

@@ -629,9 +629,12 @@ export function createBrain(deps: {
     });
   }
 
-  // Postgres levert de melding pas na commit van de omliggende transactie.
-  function notifyStateChange(tx: Tx, id = "") {
-    return tx.execute(sql`select pg_notify(${STATE_CHANNEL}, ${id})`);
+  // Postgres levert de melding pas na commit van de omliggende transactie. Zonder omliggende transactie
+  // (enkel `deps.db`) is de voorgaande schrijfactie zelf al auto-commit, dus de volgorde blijft kloppen.
+  // Payload "kenmerken:<id>" (net als "mood:"/"voice:"): het gezichtje ververst dan enkel de kenmerken, zonder
+  // wissel of Galerij-update (zie setAxes/setVerstand/setArchetype/setFamiliarity/renamePerson).
+  function notifyStateChange(db: Db | Tx, id = "") {
+    return db.execute(sql`select pg_notify(${STATE_CHANNEL}, ${id})`);
   }
 
   // Geeft de ids terug van wie wakker was: die krijgen na de wissel een Reflectie.
@@ -1146,12 +1149,16 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
   }
 
   async function setAxes(id: number, axes: Axes): Promise<boolean> {
-    const updated = await deps.db
-      .update(dynimos)
-      .set({ axisIe: axes.ie, axisSn: axes.sn, axisTf: axes.tf, axisJp: axes.jp, axisReactivity: axes.reactivity, axisExpressiveness: axes.expressiveness })
-      .where(eq(dynimos.id, id))
-      .returning({ id: dynimos.id });
-    return updated.length > 0;
+    return deps.db.transaction(async (tx) => {
+      const updated = await tx
+        .update(dynimos)
+        .set({ axisIe: axes.ie, axisSn: axes.sn, axisTf: axes.tf, axisJp: axes.jp, axisReactivity: axes.reactivity, axisExpressiveness: axes.expressiveness })
+        .where(eq(dynimos.id, id))
+        .returning({ id: dynimos.id });
+      // Payload "kenmerken:", zie notifyStateChange.
+      if (updated.length > 0) await notifyStateChange(tx, `kenmerken:${id}`);
+      return updated.length > 0;
+    });
   }
 
   // Persoon "eigenaar" (#91): de default Gesprekspartner. Race-veilig via de partial unique index op `owner`
@@ -1213,8 +1220,13 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
   async function renamePerson(id: number, name: string): Promise<boolean> {
     const parsed = NAAM_SCHEMA.safeParse(name);
     if (!parsed.success) return false;
-    const result = await deps.db.update(persons).set({ name: parsed.data }).where(eq(persons.id, id)).returning({ id: persons.id });
-    return result.length > 0;
+    return deps.db.transaction(async (tx) => {
+      const result = await tx.update(persons).set({ name: parsed.data }).where(eq(persons.id, id)).returning({ id: persons.id });
+      // Payload "kenmerken:" zonder id (geen Dynimo-specifieke wijziging): de Vertrouwdheid-naam in het gezichtje kan
+      // van deze Persoon zijn, ongeacht welke Dynimo wakker is.
+      if (result.length > 0) await notifyStateChange(tx, "kenmerken:");
+      return result.length > 0;
+    });
   }
 
   // mergePersons (#95): hoogstens MAX_FACE_EMBEDDINGS/MAX_VOICE_PROFILES per Persoon; na het verhuizen van removeId's
@@ -1346,7 +1358,13 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
   }
 
   async function setFamiliarity(id: number, familiarity: number): Promise<boolean> {
-    return upsertFamiliarity(id, await getOwnerId(), familiarity);
+    // Geen omliggende transactie: upsertFamiliarity vangt een FK-violation (verwijderde Dynimo) zelf af en
+    // geeft dan false terug; in een expliciete transactie zou die afgevangen fout de transactie toch in de
+    // aborted-toestand laten (elke volgende statement, ook de notify, zou dan alsnog falen).
+    const ok = await upsertFamiliarity(id, await getOwnerId(), familiarity);
+    // Payload "kenmerken:", zie notifyStateChange.
+    if (ok) await notifyStateChange(deps.db, `kenmerken:${id}`);
+    return ok;
   }
 
   /** Vertrouwdheid voor het dashboard: van `personId` (default eigenaar) met deze Dynimo, 0.2 zonder rij. */
@@ -1426,30 +1444,38 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
   }
 
   async function setVerstand(id: number, verstand: number): Promise<boolean> {
-    const updated = await deps.db.update(dynimos).set({ verstand }).where(eq(dynimos.id, id)).returning({ id: dynimos.id });
-    return updated.length > 0;
+    return deps.db.transaction(async (tx) => {
+      const updated = await tx.update(dynimos).set({ verstand }).where(eq(dynimos.id, id)).returning({ id: dynimos.id });
+      // Payload "kenmerken:", zie notifyStateChange.
+      if (updated.length > 0) await notifyStateChange(tx, `kenmerken:${id}`);
+      return updated.length > 0;
+    });
   }
 
   async function setArchetype(id: number, archetypeId: string): Promise<boolean> {
     const archetype = getArchetype(archetypeId);
     if (!archetype) return false;
     const { axes } = archetype;
-    const updated = await deps.db
-      .update(dynimos)
-      .set({
-        archetype: archetype.id,
-        baseEmotion: archetype.baseEmotion,
-        axisIe: axes.ie,
-        axisSn: axes.sn,
-        axisTf: axes.tf,
-        axisJp: axes.jp,
-        axisReactivity: axes.reactivity,
-        axisExpressiveness: axes.expressiveness,
-        verstand: archetype.verstand,
-      })
-      .where(eq(dynimos.id, id))
-      .returning({ id: dynimos.id });
-    return updated.length > 0;
+    return deps.db.transaction(async (tx) => {
+      const updated = await tx
+        .update(dynimos)
+        .set({
+          archetype: archetype.id,
+          baseEmotion: archetype.baseEmotion,
+          axisIe: axes.ie,
+          axisSn: axes.sn,
+          axisTf: axes.tf,
+          axisJp: axes.jp,
+          axisReactivity: axes.reactivity,
+          axisExpressiveness: axes.expressiveness,
+          verstand: archetype.verstand,
+        })
+        .where(eq(dynimos.id, id))
+        .returning({ id: dynimos.id });
+      // Payload "kenmerken:", zie notifyStateChange.
+      if (updated.length > 0) await notifyStateChange(tx, `kenmerken:${id}`);
+      return updated.length > 0;
+    });
   }
 
   async function setVoiceProfile(id: number, { voice, description }: { voice: string | null; description: string | null }): Promise<boolean> {

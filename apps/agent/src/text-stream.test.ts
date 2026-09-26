@@ -124,4 +124,24 @@ describe("textStream", () => {
     const chunks = await collect(textStream(gen(events)));
     expect(chunks).toEqual(["Hoi"]);
   });
+
+  it("roept onDone aan zodra de beurt (de bron) afgelopen is", async () => {
+    const events: BrainEvent[] = [{ type: "text", delta: "Hoi" }];
+    let done = false;
+    await collect(textStream(gen(events), { onDone: () => { done = true; } }));
+    expect(done).toBe(true);
+  });
+
+  it("roept onDone ook aan bij cancel() (onderbroken beurt, barge-in), precies één keer", async () => {
+    async function* neverEnding(): AsyncGenerator<BrainEvent> {
+      yield { type: "text", delta: "Hoi" };
+      await new Promise(() => {}); // blijft hangen tot cancel() de generator afsluit
+    }
+    let calls = 0;
+    const stream = textStream(neverEnding(), { onDone: () => calls++ });
+    const reader = stream.getReader();
+    await reader.read(); // eerste chunk ("Hoi")
+    await reader.cancel();
+    expect(calls).toBe(1);
+  });
 });

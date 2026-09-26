@@ -1498,8 +1498,22 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
   // — anders niets (voorkomt bijna-kopieën van dezelfde zitting). Is dat zo: < 5 embeddings → toevoegen, op 5 → de
   // oudste vervangen. `for("update")` op de Persoon-rij serialiseert gelijktijdige matches voor dezelfde Persoon
   // (elke transactie wacht op de vorige), zodat er nooit meer dan 5 ontstaan.
+  //
+  // #117: de leeftijd-check vooraf met één lichte select (i.p.v. een in-memory cache) — blijft vanzelf correct bij
+  // samenvoegen/verwijderen/opnieuw leren van Personen of een nieuwe instantie, want leest steeds de actuele rij.
+  // Zo bespaart een herkenning binnen het uur de transactie (SELECT … FOR UPDATE) helemaal. De check binnen de
+  // transactie blijft staan als vangnet tegen een race tussen instanties.
+  // ponytail: één extra round-trip per zekere match per tick; een Map<personId, laatst-opgeslagen> erbovenop is
+  // enkel de moeite waard als deze select zelf meetbaar gaat knellen.
   async function storeFaceEmbedding(personId: number, embedding: number[], distance: number): Promise<void> {
     if (distance >= faceMatchDistance * FACE_SURE_MATCH_FACTOR) return;
+    const [newest] = await deps.db
+      .select({ createdAt: faceEmbeddings.createdAt })
+      .from(faceEmbeddings)
+      .where(eq(faceEmbeddings.personId, personId))
+      .orderBy(desc(faceEmbeddings.createdAt))
+      .limit(1);
+    if (newest && now().getTime() - newest.createdAt.getTime() < FACE_EMBEDDING_MIN_AGE_MS) return;
     await deps.db.transaction(async (tx) => {
       await tx.select({ id: persons.id }).from(persons).where(eq(persons.id, personId)).for("update");
       const rows = await tx
@@ -1525,7 +1539,8 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
    * de sessie bij het juiste wezen hoort; is niemand wakker, dan wordt er niets onthouden (wel gewoon gematcht).
    */
   async function recognizeFaces(embeddings: number[][]): Promise<(number | null)[]> {
-    const [awake] = await deps.db.select().from(dynimos).where(isNotNull(dynimos.awakeSince));
+    // #117: al gefilterd op de wakkere (hoogstens 1); limit(1) maakt dat expliciet i.p.v. impliciet via de data.
+    const [awake] = await deps.db.select().from(dynimos).where(isNotNull(dynimos.awakeSince)).limit(1);
     if (awake) adopt(awake);
     // #114: pas ná adopt() vastleggen — een wissel elders (bv. een lopende hear()) mag dit niet meer raken.
     const s = session;

@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { MockEmbeddingModelV4, MockLanguageModelV4, Experimental_EvaluationMockModelV4 } from "ai/test";
 import { simulateReadableStream } from "ai";
@@ -176,6 +176,26 @@ describe("recognizeFaces (#93)", () => {
     await brain.recognizeFaces([vectorAt(1)]); // zeker, maar de laatste is pas 30 min oud
 
     expect(await db.select().from(faceEmbeddings).where(eq(faceEmbeddings.personId, anna.id))).toHaveLength(1);
+  });
+
+  // #117: de leeftijd-check gebeurt vooraf met een lichte select, zodat een herkenning binnen het uur de
+  // transactie (SELECT … FOR UPDATE) niet meer in gaat. Spy op deps.db.transaction i.p.v. een broze monkeypatch
+  // van drizzle's querybuilder-keten.
+  it("een zekere match binnen het uur gaat de transactie niet in (#117)", async () => {
+    const anna = await insertPerson("Anna");
+    await insertDynimo();
+    await db.insert(faceEmbeddings).values({ personId: anna.id, embedding: vectorAt(0), createdAt: new Date(now.getTime() - 30 * 60 * 1000) });
+    const brain = createBrain({ db, embedder: embedder(), type1: type1(), type2: { light: textModel(), heavy: textModel() }, now: () => now, faceMatchDistance: 10 });
+    const transactionSpy = vi.spyOn(db, "transaction");
+
+    try {
+      await brain.recognizeFaces([vectorAt(1)]); // zeker, maar de laatste is pas 30 min oud
+      expect(transactionSpy).not.toHaveBeenCalled();
+    } finally {
+      // Enkel déze spy terugdraaien: settle-brains.ts's globale createBrain-spy (die settled() per test afdwingt
+      // vóór de volgende truncateAll) moet blijven staan, anders deadlockt een latere hear()-test (#117-onderzoek).
+      transactionSpy.mockRestore();
+    }
   });
 
   it("op 5 embeddings, zekere match, laatste ≥ 1 uur oud: vervangt de oudste", async () => {

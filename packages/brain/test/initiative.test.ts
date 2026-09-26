@@ -221,6 +221,59 @@ describe("considerInitiative(): Reflectie", () => {
     expect(await reflecting).toBe(true);
     expect(await brain.considerInitiative()).not.toBeNull();
   });
+
+  // #114: reflecting was instantiebreed, dus de Reflectie van de ene Dynimo blokkeerde het initiatief van een
+  // andere. Moet per Dynimo (per id) zijn.
+  it("de Reflectie van Dynimo A blokkeert het initiatief van Dynimo B niet", async () => {
+    const dynimoA = await insertDynimo();
+    await db.insert(memories).values({
+      dynimoId: dynimoA.id,
+      text: "Een gesprek.",
+      embedding: new Array<number>(EMBEDDING_DIMENSIONS).fill(0),
+      createdAt: bornAt,
+      impression: 0.5,
+    });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const heavy = new MockLanguageModelV4({
+      doGenerate: async () => {
+        await gate;
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify({
+                evolvedCharacter: "Iets gegroeid.",
+                axisShifts: { ie: 0, sn: 0, tf: 0, jp: 0, reactivity: 0, expressiveness: 0 },
+                verstandShift: 0,
+                drives: { add: [], closeGoals: [], adjust: [], drop: [] },
+                wakeMood: { emotion: "kalm", intensity: 0.3 },
+                dream: null,
+              }),
+            },
+          ],
+          finishReason: STOP,
+          usage: NULL_USAGE,
+          warnings: [],
+        };
+      },
+    });
+    const type1 = initiativeType1({ spreken: "ja" });
+    const brain = brainWith(type1.model, heavy);
+
+    const reflecting = brain.reflect(); // reflecteert Dynimo A (blijft in-flight, gate dicht)
+    await new Promise((resolve) => setTimeout(resolve, 50)); // laat de Reflectie de Type2-call bereiken
+
+    // B wordt de wakkere Dynimo, los van A's nog lopende Reflectie.
+    await db.update(dynimos).set({ awakeSince: null }).where(eq(dynimos.id, dynimoA.id));
+    await insertDynimo({ name: "Wies", awakeSince: new Date(bornAt.getTime() + 1000) });
+
+    expect(await brain.considerInitiative()).not.toBeNull();
+    expect(type1.calls).toHaveLength(1);
+
+    release();
+    expect(await reflecting).toBe(true);
+  });
 });
 
 describe("considerInitiative(): Doelen en robuustheid", () => {

@@ -1,4 +1,4 @@
-export const DEFAULT_FACE_MATCH_DISTANCE = 10;
+import { DEFAULT_FACE_MATCH_DISTANCE } from "@animus/brain/perception";
 
 /** Parseert FACE_MATCH_DISTANCE (L2-afstand, > 0); ongeldig geeft een waarschuwing (patroon: parseSpeakerMatchThreshold). */
 export function parseFaceMatchDistance(value: string | undefined): { distance: number; warning?: string } {

@@ -317,6 +317,18 @@ describe("mergePersons (#95)", () => {
     expect(byDynimo.get(rico.id)).toBe(0.5);
   });
 
+  it("keepId zonder Vertrouwdheidsrij: het resultaat is FAMILIARITY_DEFAULT (0.2), niet 0.1 (#114)", async () => {
+    const anna = await insertPerson("Anna");
+    const anna2 = await insertPerson("Anna2");
+    const vero = await insertDynimo();
+    await db.insert(familiarities).values([{ dynimoId: vero.id, personId: anna2.id, familiarity: 0.1 }]);
+
+    expect(await brain().mergePersons(anna.id, anna2.id)).toBe(true);
+
+    const [row] = await db.select().from(familiarities).where(eq(familiarities.personId, anna.id));
+    expect(row!.familiarity).toBe(0.2);
+  });
+
   it("geen van beiden is de eigenaar: keepId blijft geen eigenaar na het samenvoegen", async () => {
     const anna = await insertPerson("Anna");
     const anna2 = await insertPerson("Anna2");

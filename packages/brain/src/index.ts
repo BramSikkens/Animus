@@ -35,7 +35,7 @@ import { EMOTIONS, oppositeOf, type Emotion } from "./emotion.js";
 import { SEEDS } from "./seeds.js";
 import { createTools } from "./tools.js";
 import { chooseGenesisVoice, type GenesisVoiceDeps } from "./genesis-voice.js";
-import type { Aanleiding } from "./perception.js";
+import { DEFAULT_FACE_MATCH_DISTANCE, type Aanleiding } from "./perception.js";
 export { defaultVoiceDeps } from "./genesis-voice.js";
 
 export { EMOTIONS, type Emotion };
@@ -338,11 +338,6 @@ const RECALL_PRESENT_BONUS = 0.05;
 // Herinneringen dicht bij elkaar clusteren.
 const RECALL_CANDIDATES = 40;
 
-// Gezichtsherkenning (#93, ADR-0020): pgvector `<->` is de L2-afstand tussen twee embeddings. Human's eigen
-// similarity() (src/face/match.ts@3.3.6) rekent similarity = (1 − √(25·Σd²)/100 − 0.2) / 0.6, en Human's
-// vuistregel is "similarity > 0.5 is een match". Met Σd² = L2² (dezelfde som die pgvector's `<->` neemt vóór de
-// wortel) volgt: similarity > 0.5 ⇔ (0.8 − 0.05·L2)/0.6 > 0.5 ⇔ L2 < 10. Vandaar de default 10.
-const DEFAULT_FACE_MATCH_DISTANCE = 10;
 const MAX_FACE_EMBEDDINGS = 5;
 // Stemprofielen (#92), ook gebruikt door mergePersons (#95) om na het samenvoegen te trimmen.
 const MAX_VOICE_PROFILES = 5;
@@ -573,27 +568,60 @@ export function createBrain(deps: {
   const random = deps.random ?? Math.random;
   const voices = deps.voices;
   const faceMatchDistance = deps.faceMatchDistance ?? DEFAULT_FACE_MATCH_DISTANCE;
-  let lastIgnored = false; // vorige beurt genegeerd? Voorkomt twee keer achter elkaar negeren.
-  let turnCount = 0; // beurten (zonder initiatief) van deze brain-instantie, voor de cooldown van het Standpunt.
-  let lastOpinionTurn: number | undefined;
-  let lastSpeechSound: string | undefined; // Spraakgeluid van de vorige beurt: nooit twee keer hetzelfde.
   let current: Dynimo | undefined;
-  const workingMemory: ModelMessage[] = [];
-  // Herinneringen uit deze sessie staan al in het werkgeheugen; niet dubbel ophalen.
-  const sessionMemoryIds: number[] = [];
-  // Herinneringen van de onbekende (person_id null) uit deze sessie (#92): leerKennen koppelt ze aan de nieuwe Persoon.
-  const unknownSessionMemoryIds: number[] = [];
-  // Al naar de naam gevraagd deze sessie (#92)? Voorkomt opnieuw vragen na een weigering.
-  let askedName = false;
-  // Onbekende gezichts-embeddings van deze sessie (#93): leerKennen koppelt wat hier nog binnen de vervaltijd valt.
-  let unknownFaceEmbeddings: { embedding: number[]; at: number }[] = [];
-  // Spontane herinnering die considerInitiative koos: pas na de initiatief-beurt als aangehaald gemarkeerd.
-  let pendingSpontaneousId: number | undefined;
-  // Idem voor een Droom die considerInitiative koos (verteld = told_at).
-  let pendingDreamId: number | undefined;
-  // considerInitiative(nieuw-object) + "ja" zet dit; de eerstvolgende hear(..., { initiatief: true }) verbruikt
-  // het als `kijken` (ADR-0019): zo gaat het beeld mee in precies die ene initiatiefbeurt.
-  let pendingLook = false;
+
+  // Alle sessiestaat van één Wakker-generatie (#114), samen in één object i.p.v. losse instance-velden: bij een
+  // wissel (adopt/resetSession) wordt dit object vervangen, nooit hergebruikt. Een beurt legt zijn sessie meteen
+  // bij de start vast (`const s = session`) en schrijft daarna enkel nog naar die vastgelegde `s` — ook op de
+  // achtergrond (#109) en ook als `session` intussen alweer naar een volgende generatie wijst. Een schrijfactie in
+  // een inmiddels vervangen (niet meer huidige) `s` komt dan simpelweg in een wees-object terecht en bereikt de
+  // nieuwe sessie nooit: dat ís de garantie, zonder aparte "is dit nog actueel"-check.
+  type Session = {
+    workingMemory: ModelMessage[];
+    // Herinneringen uit deze sessie staan al in het werkgeheugen; niet dubbel ophalen.
+    sessionMemoryIds: number[];
+    // Herinneringen van de onbekende (person_id null) uit deze sessie (#92): leerKennen koppelt ze aan de nieuwe Persoon.
+    unknownSessionMemoryIds: number[];
+    // Al naar de naam gevraagd deze sessie (#92)? Voorkomt opnieuw vragen na een weigering.
+    askedName: boolean;
+    // Onbekende gezichts-embeddings van deze sessie (#93): leerKennen koppelt wat hier nog binnen de vervaltijd valt.
+    unknownFaceEmbeddings: { embedding: number[]; at: number }[];
+    // Spontane herinnering die considerInitiative koos: pas na de initiatief-beurt als aangehaald gemarkeerd.
+    pendingSpontaneousId: number | undefined;
+    // Idem voor een Droom die considerInitiative koos (verteld = told_at).
+    pendingDreamId: number | undefined;
+    // considerInitiative(nieuw-object) + "ja" zet dit; de eerstvolgende hear(..., { initiatief: true }) verbruikt
+    // het als `kijken` (ADR-0019): zo gaat het beeld mee in precies die ene initiatiefbeurt.
+    pendingLook: boolean;
+    // considerInitiative(onbekend) + "ja" zet dit; pas de eerstvolgende hear(..., { initiatief: true }) verbruikt hem
+    // door askedName te zetten (#114) — ketst dat initiatief af (geen hear-beurt), dan is askedName nooit verbruikt.
+    pendingAskName: boolean;
+    // vorige beurt genegeerd? Voorkomt twee keer achter elkaar negeren.
+    lastIgnored: boolean;
+    // beurten (zonder initiatief) van deze sessie, voor de cooldown van het Standpunt.
+    turnCount: number;
+    lastOpinionTurn: number | undefined;
+    // Spraakgeluid van de vorige beurt: nooit twee keer hetzelfde.
+    lastSpeechSound: string | undefined;
+  };
+  function newSession(): Session {
+    return {
+      workingMemory: [],
+      sessionMemoryIds: [],
+      unknownSessionMemoryIds: [],
+      askedName: false,
+      unknownFaceEmbeddings: [],
+      pendingSpontaneousId: undefined,
+      pendingDreamId: undefined,
+      pendingLook: false,
+      pendingAskName: false,
+      lastIgnored: false,
+      turnCount: 0,
+      lastOpinionTurn: undefined,
+      lastSpeechSound: undefined,
+    };
+  }
+  let session = newSession();
 
   // Achtergrondschrijfacties van hear() (#109): Herinnering opslaan, lastRecalledAt/toldAt. settled() wacht ze af.
   const pendingWrites = new Set<Promise<unknown>>();
@@ -693,14 +721,17 @@ export function createBrain(deps: {
 
   // Geeft true als er een Reflectie is toegepast. `onStart` draait synchroon vlak vóór de Type2-call, en dus niet
   // als er niets te reflecteren valt.
-  // Aantal lopende Reflecties in deze instantie: tijdens een Reflectie neemt de Dynimo geen initiatief.
-  let reflecting = 0;
+  // Lopende Reflecties per Dynimo-id (#114): enkel díe Dynimo neemt tijdens zijn eigen Reflectie geen initiatief,
+  // niet de hele instantie (anders blokkeert de slaap-Reflectie van A het initiatief van B).
+  const reflecting = new Map<number, number>();
   async function reflectDynimo(id: number, onStart?: () => void, sleeping = true, aanwezig?: number[]): Promise<boolean> {
-    reflecting++;
+    reflecting.set(id, (reflecting.get(id) ?? 0) + 1);
     try {
       return await reflectDynimoInner(id, onStart, sleeping, aanwezig);
     } finally {
-      reflecting--;
+      const left = reflecting.get(id)! - 1;
+      if (left > 0) reflecting.set(id, left);
+      else reflecting.delete(id);
     }
   }
 
@@ -857,18 +888,10 @@ ${fresh.map((memory) => `- (indruk ${memory.impression}) ${memory.text}`).join("
   }
 
   // Per-Dynimo sessiestaat: mag niet doorsijpelen naar een ander (of nieuw) wezen.
+  // ponytail: vervangt het hele sessie-object i.p.v. de velden leeg te maken (#114) — een beurt die zijn `s` al
+  // vastlegde, blijft dan op zijn eigen (wees-)object schrijven i.p.v. op de nieuwe sessie. Zie de Session-comment.
   function resetSession(): void {
-    lastSpeechSound = undefined;
-    workingMemory.length = 0;
-    sessionMemoryIds.length = 0;
-    unknownSessionMemoryIds.length = 0;
-    unknownFaceEmbeddings = [];
-    askedName = false;
-    turnCount = 0;
-    lastOpinionTurn = undefined;
-    pendingSpontaneousId = undefined;
-    pendingDreamId = undefined;
-    pendingLook = false;
+    session = newSession();
   }
 
   // Een andere Wakker-generatie (andere Dynimo of nieuwe awake_since) is een nieuwe sessie.
@@ -1083,7 +1106,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
   // RECALL_PRESENT_BONUS); geen filter, Herinneringen van anderen blijven ophaalbaar.
   // `embeddingPromise` (#109): de uiting wordt vóór/parallel met Type1 al ingebed door de aanroeper; een
   // embed-fout is daar al gelogd en geeft hier null (dan geen Herinneringen, zoals voorheen).
-  async function recall(embeddingPromise: Promise<number[] | null>, dynimoId: number, present: number[]): Promise<{ text: string; personId: number | null }[]> {
+  async function recall(embeddingPromise: Promise<number[] | null>, dynimoId: number, present: number[], sessionMemoryIds: number[]): Promise<{ text: string; personId: number | null }[]> {
     const embedding = await embeddingPromise;
     if (!embedding) return [];
     try {
@@ -1148,7 +1171,11 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
   // De expliciete onthoud-tool geeft de neutrale Indruk 0.5; de eindremember van `hear` geeft die van Type1 mee.
   // personId (#91) komt expliciet van de aanroeper (geen instance-state): elke beurt (en zijn onthoud-tool) sluit
   // over zijn eigen Gesprekspartner, zodat een overlappende tweede beurt hem niet kan overschrijven.
-  async function remember(memoryText: string, dynimoId = current?.id, impression = 0.5, personId: number | null = null): Promise<boolean> {
+  // `s` (#114): de bij de beurt vastgelegde sessie (nooit de instance-brede `session`) — een achtergrond-remember
+  // mag enkel naar zíjn eigen, mogelijk intussen vervangen sessie schrijven. Verplicht en apart genoemd (niet
+  // `session`): anders bindt een vergeten argument stilzwijgend aan de instance-brede `session` en is de bug van
+  // punt 1 zo weer terug.
+  async function remember(memoryText: string, dynimoId = current?.id, impression = 0.5, personId: number | null = null, s: Session): Promise<boolean> {
     if (dynimoId === undefined) return false;
     try {
       let id: number;
@@ -1161,9 +1188,9 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
         console.warn(`Herinnering zonder Persoon opgeslagen: Persoon ${personId} bestaat niet (meer).`);
         id = await insertMemory(memoryText, dynimoId, impression, null);
       }
-      sessionMemoryIds.push(id);
+      s.sessionMemoryIds.push(id);
       // #92: apart bijgehouden zodat leerKennen precies de onbekende-Herinneringen van déze sessie kan koppelen.
-      if (personId === null) unknownSessionMemoryIds.push(id);
+      if (personId === null) s.unknownSessionMemoryIds.push(id);
       return true;
     } catch (error) {
       console.warn("Herinnering opslaan faalde:", error instanceof Error ? error.message : error);
@@ -1235,27 +1262,29 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
   // embeddings van déze sessie (niet ouder dan UNKNOWN_FACE_MAX_AGE_MS, hoogstens MAX_FACE_EMBEDDINGS) eraan. Leegt
   // beide lijsten nadien: een latere, andere onbekende Gesprekspartner (nieuwe bezoeker) in dezelfde sessie mag ze
   // niet nog eens meekrijgen bij zíjn leerKennen.
-  async function leerKennenPersoon(naam: string): Promise<{ id: number; name: string }> {
+  // `s` (#114): de bij déze beurt vastgelegde sessie — enkel díe wordt gelezen én geleegd, nooit de instance-brede
+  // `session` (die kan intussen alweer een volgende Wakker-generatie zijn).
+  async function leerKennenPersoon(naam: string, s: Session): Promise<{ id: number; name: string }> {
     // Reviewfix #109: een vorige beurt kan zijn eind-Herinnering nog op de achtergrond aan het opslaan zijn
     // (dan staat zijn id nog niet in unknownSessionMemoryIds); dat mag niet naar een latere, andere onbekende
     // Gesprekspartner doorschuiven. Wacht die achterstallige schrijfacties af vóór de snapshot. Geen deadlock:
     // déze beurt (de leerKennen-toolcall loopt nog) heeft zijn éigen eind-Herinnering nog niet als
     // achtergrondschrijfactie geregistreerd — dat gebeurt pas in hear()'s finally, ná deze toolcall.
     await settled();
-    const linked = [...unknownSessionMemoryIds];
+    const linked = [...s.unknownSessionMemoryIds];
     // ponytail: koppelt alle nog-niet-vervallen onbekende embeddings aan déze ene nieuwe Persoon. Staan er twee
     // onbekende gezichten in de buffer (twee vreemden tegelijk in beeld), dan belanden ze allebei bij wie het eerst
     // zijn naam geeft. Upgradepad: embeddings pas koppelen als recognizeFaces ze aan hetzelfde gezicht toeschrijft
     // (bv. per-embedding clustering), of leerKennen een gezicht laten kiezen i.p.v. "alles wat onbekend is".
-    const faces = unknownFaceEmbeddings.filter((entry) => now().getTime() - entry.at < UNKNOWN_FACE_MAX_AGE_MS).slice(-MAX_FACE_EMBEDDINGS);
+    const faces = s.unknownFaceEmbeddings.filter((entry) => now().getTime() - entry.at < UNKNOWN_FACE_MAX_AGE_MS).slice(-MAX_FACE_EMBEDDINGS);
     const created = await deps.db.transaction(async (tx) => {
       const [row] = await tx.insert(persons).values({ name: naam }).returning();
       if (linked.length) await tx.update(memories).set({ personId: row!.id }).where(inArray(memories.id, linked));
       if (faces.length) await tx.insert(faceEmbeddings).values(faces.map(({ embedding }) => ({ personId: row!.id, embedding })));
       return row!;
     });
-    unknownSessionMemoryIds.length = 0;
-    unknownFaceEmbeddings = [];
+    s.unknownSessionMemoryIds.length = 0;
+    s.unknownFaceEmbeddings = [];
     return created;
   }
 
@@ -1340,7 +1369,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
         tx.select({ dynimoId: familiarities.dynimoId, familiarity: familiarities.familiarity }).from(familiarities).where(eq(familiarities.personId, removeId)),
       ]);
       const highest = new Map(keepFamiliarities.map((row) => [row.dynimoId, row.familiarity]));
-      for (const row of removeFamiliarities) highest.set(row.dynimoId, Math.max(row.familiarity, highest.get(row.dynimoId) ?? 0));
+      for (const row of removeFamiliarities) highest.set(row.dynimoId, Math.max(row.familiarity, highest.get(row.dynimoId) ?? FAMILIARITY_DEFAULT));
       for (const [dynimoId, familiarity] of highest) {
         await tx
           .insert(familiarities)
@@ -1444,8 +1473,8 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
 
   // Onthoudt een onbekende gezichts-embedding in de sessie (#93): hoogstens MAX_UNKNOWN_FACE_EMBEDDINGS, ouder dan
   // UNKNOWN_FACE_MAX_AGE_MS vervalt. leerKennen koppelt wat hier op dat moment nog binnen de vervaltijd valt.
-  function rememberUnknownFace(embedding: number[], at: number): void {
-    unknownFaceEmbeddings = [...unknownFaceEmbeddings.filter((entry) => at - entry.at < UNKNOWN_FACE_MAX_AGE_MS), { embedding, at }].slice(-MAX_UNKNOWN_FACE_EMBEDDINGS);
+  function rememberUnknownFace(s: Session, embedding: number[], at: number): void {
+    s.unknownFaceEmbeddings = [...s.unknownFaceEmbeddings.filter((entry) => at - entry.at < UNKNOWN_FACE_MAX_AGE_MS), { embedding, at }].slice(-MAX_UNKNOWN_FACE_EMBEDDINGS);
   }
 
   // Reviewfix #93: enkel opslaan bij (a) een écht zekere match (afstand < FACE_SURE_MATCH_FACTOR × drempel) én
@@ -1482,6 +1511,8 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
   async function recognizeFaces(embeddings: number[][]): Promise<(number | null)[]> {
     const [awake] = await deps.db.select().from(dynimos).where(isNotNull(dynimos.awakeSince));
     if (awake) adopt(awake);
+    // #114: pas ná adopt() vastleggen — een wissel elders (bv. een lopende hear()) mag dit niet meer raken.
+    const s = session;
     const at = now().getTime();
     const results: (number | null)[] = [];
     for (const embedding of embeddings) {
@@ -1496,7 +1527,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
         await storeFaceEmbedding(nearest.personId, embedding, distance);
       } else {
         results.push(null);
-        if (awake) rememberUnknownFace(embedding, at);
+        if (awake) rememberUnknownFace(s, embedding, at);
       }
     }
     return results;
@@ -1567,6 +1598,9 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
       return;
     }
     const being = adopt(awake);
+    // #114: vastleggen ván nú af — deze beurt schrijft de rest van zijn duur enkel nog naar déze `s`, ook op de
+    // achtergrond en ook als `session` intussen (door een wissel) alweer een andere generatie is.
+    const s = session;
     // Embedding van de uiting (#109): start meteen, parallel met de rest van de beurt; recall() krijgt hem
     // straks aangereikt i.p.v. zelf te embedden. Een fout wordt hier al gelogd en geeft null (dan geen
     // Herinneringen, zoals voorheen); dit .then-paar zorgt dat de promise zelf nooit afwijst (geen unhandled
@@ -1607,14 +1641,14 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     let opinionMessage: SystemModelMessage[] = [];
     let opinionBoos = 0;
     if (!options.initiatief) {
-      turnCount++;
+      s.turnCount++;
       const opinion = axes
-        ? decideOpinion({ drives: driveRows, utteranceMatches: matchDrives(text, driveRows), axes, rng: random, lastOpinionTurnsAgo: lastOpinionTurn === undefined ? undefined : turnCount - lastOpinionTurn })
+        ? decideOpinion({ drives: driveRows, utteranceMatches: matchDrives(text, driveRows), axes, rng: random, lastOpinionTurnsAgo: s.lastOpinionTurn === undefined ? undefined : s.turnCount - s.lastOpinionTurn })
         : { kind: "geen" as const };
       const drive = driveRows.find((row) => row.id === opinion.driveId);
       const prompt = drive && opinionPrompt(opinion.kind, drive);
       if (drive && prompt) {
-        lastOpinionTurn = turnCount;
+        s.lastOpinionTurn = s.turnCount;
         opinionMessage = [{ role: "system", content: prompt }];
         if (drive.kind === "ergernis") opinionBoos = OPINION_BOOS_DELTA;
       }
@@ -1622,8 +1656,14 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     const canLook = deps.lookFrame !== undefined;
     // Een initiatiefbeurt verbruikt pendingLook meteen (ADR-0019: hoogstens één Kijk per aanleiding); zonder
     // lookFrame-dep nooit kijken, ook al stond de vlag klaar (considerInitiative weet niets van canLook).
-    const initiatiefKijken = canLook && pendingLook;
-    if (options.initiatief) pendingLook = false;
+    const initiatiefKijken = canLook && s.pendingLook;
+    if (options.initiatief) s.pendingLook = false;
+    // #114: pas hier verbruikt (niet al bij de initiatiefcheck): deze initiatiefbeurt vroeg zelf al naar de naam
+    // (aanleidingText "onbekend"), dus askedName mag niet nog eens de UNKNOWN_NAME_PROMPT triggeren.
+    if (options.initiatief && s.pendingAskName) {
+      s.askedName = true;
+      s.pendingAskName = false;
+    }
 
     // Parallel met Type1 (classify): hangen enkel van personId/opties af, niet van Type1's uitkomst (#109). Elke
     // promise krijgt meteen een no-op .catch zodat een vroege return (negeren, gedood tijdens de mood-update)
@@ -1663,8 +1703,8 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     const birthdayBoost = birthdayBoostDue(awake);
     // Emotie stuurt gedrag (behavior.ts). Een spontane uiting (initiatief) wordt nooit genegeerd of ingekort.
     // Vóór de Vertrouwdheid, die "genegeerd" of "beurt" nodig heeft. random()-aanroep #2.
-    const behavior = options.initiatief || !axes ? "normaal" : decideBehavior({ values: mood.values, axes, rng: random, vorigeGenegeerd: lastIgnored });
-    if (!options.initiatief) lastIgnored = behavior === "negeren";
+    const behavior = options.initiatief || !axes ? "normaal" : decideBehavior({ values: mood.values, axes, rng: random, vorigeGenegeerd: s.lastIgnored });
+    if (!options.initiatief) s.lastIgnored = behavior === "negeren";
     // Vertrouwdheid (familiarity.ts): een beurt telt, een positieve beurt extra; een genegeerde beurt telt niet als
     // beurt. Onbekend (personId null, #91): altijd 0.2, nooit opgeslagen.
     const familiarityAxes = axes ?? { tf: 0.5, expressiveness: 0.5 };
@@ -1709,16 +1749,16 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     if (behavior === "negeren") {
       // Zichtbaar op het gezichtje via de (boze) Stemming plus een non-verbaal geluid; geen antwoord en geen TTS.
       if (soundKind && !soundYielded) yield { type: "sound", kind: soundKind };
-      workingMemory.push(userMessage, { role: "assistant", content: "(je negeert dit)" });
+      s.workingMemory.push(userMessage, { role: "assistant", content: "(je negeert dit)" });
       // Achtergrond (#109): de stream eindigt niet meer op deze opslag; remember() vangt zijn eigen fouten al.
-      trackBackground(remember(`Gesprekspartner: ${text}\n${being.name} negeert dit.`, being.id, indruk, personId));
+      trackBackground(remember(`Gesprekspartner: ${text}\n${being.name} negeert dit.`, being.id, indruk, personId, s));
       return;
     }
 
     // #92: de eerste keer dat de onbekende Gesprekspartner echt een antwoord krijgt, vraagt Type2 vriendelijk zijn
     // naam; een weigering wordt (askedName blijft true) deze sessie niet opnieuw gevraagd.
-    const askNameNow = personId === null && !askedName;
-    if (askNameNow) askedName = true;
+    const askNameNow = personId === null && !s.askedName;
+    if (askNameNow) s.askedName = true;
 
     // Kijken (ADR-0019): Type1 besliste al; een fout bij het ophalen telt als geen beeld en breekt de beurt nooit.
     const haalFrame = (): Promise<Frame | null> =>
@@ -1779,7 +1819,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
               execute: async ({ naam }): Promise<{ personId: number; naam: string } | { algekend: true }> => {
                 if (leerKennenGebruikt) return { algekend: true };
                 leerKennenGebruikt = true;
-                const created = await leerKennenPersoon(naam);
+                const created = await leerKennenPersoon(naam, s);
                 personId = created.id;
                 return { personId: created.id, naam: created.name };
               },
@@ -1788,7 +1828,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
         : {};
 
     // Tools van deze beurt (#91): de onthoud-tool sluit over de Gesprekspartner van déze beurt, niet over instance-state.
-    const turnTools = createTools({ now, remember: (memoryText: string) => remember(memoryText, being.id, undefined, personId) });
+    const turnTools = createTools({ now, remember: (memoryText: string) => remember(memoryText, being.id, undefined, personId, s) });
 
     // Naam van de Gesprekspartner (#92): bekend (met owner-vlag) of onbekend. Al gestart parallel met Type1 (#109).
     const speakerPerson = await speakerPersonPromise;
@@ -1800,7 +1840,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     // Al gestart parallel met Type1 (#109); zie presentPersonIds hierboven voor wat dit precies stuurt.
     const presentIds = await presentIdsPromise;
 
-    const recalled = await recall(embeddingPromise, being.id, presentIds);
+    const recalled = await recall(embeddingPromise, being.id, presentIds, s.sessionMemoryIds);
     // Discretieregel (#94): naam bij elke opgehaalde Herinnering van een andere (bekende) Persoon dan de
     // Gesprekspartner; de regel zelf enkel als zo'n Herinnering er ook echt bij zit.
     const otherPersonIds = [...new Set(recalled.map((memory) => memory.personId).filter((id): id is number => id !== null && id !== personId))];
@@ -1811,10 +1851,10 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     const recalledForPrompt = recalled.map((memory) => ({ text: memory.text, label: memory.personId !== null ? (labelById.get(memory.personId) ?? null) : null }));
     const discretionMessage: SystemModelMessage[] = labelById.size ? [DISCRETION_MESSAGE] : [];
     // Spontane herinnering: bij initiatief die van considerInitiative (al in `text`), anders heel zelden een aanleiding.
-    let spontaneousId = options.initiatief ? pendingSpontaneousId : undefined;
-    if (options.initiatief) pendingSpontaneousId = undefined;
-    const dreamToMark = options.initiatief ? pendingDreamId : undefined;
-    if (options.initiatief) pendingDreamId = undefined;
+    let spontaneousId = options.initiatief ? s.pendingSpontaneousId : undefined;
+    if (options.initiatief) s.pendingSpontaneousId = undefined;
+    const dreamToMark = options.initiatief ? s.pendingDreamId : undefined;
+    if (options.initiatief) s.pendingDreamId = undefined;
     let spontaneousPromptMessage: SystemModelMessage[] = [];
     if (!options.initiatief && axes) {
       const picked = await pickSpontaneous(being.id, axes, SPONTANEOUS_TURN_CHANCE, presentIds);
@@ -1838,7 +1878,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
       abortSignal: abort.signal,
       model: intent === "complex" ? deps.type2.heavy : deps.type2.light,
       instructions: [stable, ageMessage(being), ...birthdayMessages(awake), moodMessage(mood, axes?.expressiveness ?? 0.5), familiarityMessage(familiarity), speakerMessage(speakerPerson), ...(aanwezigMessage(present) ? [aanwezigMessage(present)!] : []), ...(askNameNow ? [UNKNOWN_NAME_PROMPT] : []), ...(BEHAVIOR_PROMPTS[behavior] ? [BEHAVIOR_PROMPTS[behavior]] : []), ...opinionMessage, ...discretionMessage, recallPrompt(recalledForPrompt), ...spontaneousPromptMessage, ...(dream ? [dreamPrompt(dream.text)] : []), ...noFrameMessage],
-      messages: [...workingMemory, promptMessage],
+      messages: [...s.workingMemory, promptMessage],
       tools: { ...turnTools, ...kijkTools, ...leerKennenTools },
       // Genoeg stappen om een tool te gebruiken en daarna het resultaat te verwoorden.
       stopWhen: isStepCount(5),
@@ -1858,9 +1898,9 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     function* soundFirst(): Generator<BrainEvent> {
       if (soundDecided) return;
       soundDecided = true;
-      const sound = axes ? pickSpeechSound({ values: mood.values, axes, rng: random, isShort: behavior === "kort", previous: lastSpeechSound }) : null;
+      const sound = axes ? pickSpeechSound({ values: mood.values, axes, rng: random, isShort: behavior === "kort", previous: s.lastSpeechSound }) : null;
       if (!sound) return;
-      lastSpeechSound = sound;
+      s.lastSpeechSound = sound;
       yield { type: "text", delta: `${sound} ` };
     }
     function* flushPacer(): Generator<BrainEvent> {
@@ -1911,9 +1951,9 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
       if (outcome !== "completed") abort.abort();
       // Een mislukte beurt komt nergens in; een onderbroken beurt wel, met wat al gezegd was.
       if (outcome === "completed") {
-        workingMemory.push(userMessage, ...stripBeelden(await result.responseMessages));
+        s.workingMemory.push(userMessage, ...stripBeelden(await result.responseMessages));
       } else if (outcome === "interrupted" && full) {
-        workingMemory.push(userMessage, { role: "assistant", content: full });
+        s.workingMemory.push(userMessage, { role: "assistant", content: full });
       }
       // Achtergrond (#109): de stream eindigt niet meer op deze opslag. personId nu vastleggen (leerKennen kan
       // hem tijdens deze beurt al herbonden hebben; latere beurten mogen déze niet meer wijzigen). Elke stap
@@ -1936,7 +1976,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
             }
           }
           if (outcome !== "failed" && full.trim()) {
-            await remember(options.initiatief ? `${being.name}: ${full}` : `Gesprekspartner: ${text}\n${being.name}: ${full}`, being.id, indruk, personIdAtEnd);
+            await remember(options.initiatief ? `${being.name}: ${full}` : `Gesprekspartner: ${text}\n${being.name}: ${full}`, being.id, indruk, personIdAtEnd, s);
           }
         })(),
       );
@@ -1946,7 +1986,6 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
   // Alles wat deze instantie over het wezen weet; na verwijdering mag niets doorsijpelen naar een nieuw wezen.
   function forgetBeing(): void {
     current = undefined;
-    lastIgnored = false;
     resetSession();
   }
 
@@ -1991,14 +2030,17 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
   }
 
   async function considerInitiative(aanleiding?: Aanleiding, options: { aanwezig?: number[] } = {}): Promise<string | null> {
-    if (reflecting > 0) return null;
     const [awake] = await deps.db.select().from(dynimos).where(isNotNull(dynimos.awakeSince));
     if (!awake) return null;
+    if (reflecting.has(awake.id)) return null;
     adopt(awake); // wisselen wist de pending-ids (en askedName) van de vorige Dynimo vóór we die van deze lezen
+    // #114: vastleggen ná adopt() — een wissel die tijdens de (async) Type1-call gebeurt, mag deze check niet meer raken.
+    const s = session;
     // #92: is er deze sessie al naar de naam gevraagd, dan lokt "onbekend" geen nieuwe Type1-call meer uit.
-    if (aanleiding?.soort === "onbekend" && askedName) return null;
+    if (aanleiding?.soort === "onbekend" && s.askedName) return null;
     try {
-      pendingLook = false; // enkel "ja" + nieuw-object hieronder zet hem weer aan
+      s.pendingLook = false; // enkel "ja" + nieuw-object hieronder zet hem weer aan
+      s.pendingAskName = false; // enkel "ja" + onbekend hieronder zet hem weer aan
       const driveRows = await loadDrives(awake.id);
       const mood = moodOfRow(awake, now());
       const hasGoal = driveRows.some((drive) => drive.kind === "doel" && isActiveDrive(drive));
@@ -2033,12 +2075,13 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
       if (answers.spreken.choice !== "ja") return null;
       // Een aanleiding (Waarneming, of "onbekend" #92) gaat vóór Spontane herinnering en Droom: die worden dan niet gekozen.
       if (aanleiding) {
-        pendingSpontaneousId = undefined;
-        pendingDreamId = undefined;
+        s.pendingSpontaneousId = undefined;
+        s.pendingDreamId = undefined;
         // Een nieuw object wordt de eerstvolgende initiatiefbeurt een Kijk-beurt (ADR-0019); "terug"/"onbekend" niet.
-        pendingLook = aanleiding.soort === "nieuw-object";
+        s.pendingLook = aanleiding.soort === "nieuw-object";
         if (aanleiding.soort === "onbekend") {
-          askedName = true;
+          // #114: niet hier al askedName zetten — pas de echte initiatief-beurt (hear) verbruikt pendingAskName.
+          s.pendingAskName = true;
           return `Je begint uit jezelf een gesprek: ${aanleidingText(aanleiding)}. Vraag vriendelijk hoe die heet; noemt die een naam, gebruik dan leerKennen. Wil die zijn naam niet geven, dring dan niet aan.`;
         }
         return `Je begint uit jezelf een gesprek: ${aanleidingText(aanleiding)}. ${
@@ -2050,8 +2093,8 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
       // (ook weggelaten) valt dit terug op de eigenaar.
       const presentIds = await presentPersonIds(undefined, options.aanwezig);
       const spontaneous = axes ? await pickSpontaneous(awake.id, axes, SPONTANEOUS_INITIATIVE_CHANCE, presentIds) : null;
-      pendingSpontaneousId = spontaneous?.id;
-      pendingDreamId = undefined;
+      s.pendingSpontaneousId = spontaneous?.id;
+      s.pendingDreamId = undefined;
       if (spontaneous) return `Je begint uit jezelf een gesprek en komt spontaan terug op iets uit een eerder gesprek: "${spontaneous.text}". ${SPONTANEOUS_HOW}`;
       // Herinnering gaat voor Droom: nooit beide in één initiatief-moment. Initiatief gebeurt in rust, dus displayState 'wakker'.
       const told = pickDreamToTell({
@@ -2062,7 +2105,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
         now: now(),
       });
       if (told) {
-        pendingDreamId = told.id;
+        s.pendingDreamId = told.id;
         return `Je begint uit jezelf een gesprek en vertelt over een droom die je recent had: "${told.text}". ${DREAM_HOW}`;
       }
       return answers.onderwerp.choice === "doel" && hasGoal

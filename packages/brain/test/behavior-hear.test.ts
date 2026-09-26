@@ -1,6 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { MockEmbeddingModelV4, MockLanguageModelV4, Experimental_EvaluationMockModelV4 } from "ai/test";
 import { simulateReadableStream } from "ai";
+import { eq } from "drizzle-orm";
 import { EMBEDDING_DIMENSIONS, dynimos, memories } from "@animus/db/schema";
 import { EMOTIONS } from "../src/emotion.js";
 import { createBrain, type BrainEvent } from "../src/index.js";
@@ -133,5 +134,38 @@ describe("hear(): Emotie stuurt gedrag", () => {
     const events = await collect(brainWith(model).hear("Begin een gesprek.", { initiatief: true }));
 
     expect(events.some((event) => event.type === "text")).toBe(true);
+  });
+
+  it("een wissel van Dynimo laat B's eerste beurt niet 'kort' worden door A's negeren (#114)", async () => {
+    await insertDynimo("boos");
+    const model = light();
+    const brain = brainWith(model);
+
+    // A negeert (lastIgnored wordt true in deze instantie).
+    await collect(brain.hear("Een"));
+
+    // Wissel: A slaapt, B (nieuwe Wakker-generatie) wordt wakker.
+    await db.update(dynimos).set({ awakeSince: null }).where(eq(dynimos.name, "Vero"));
+    await db.insert(dynimos).values({
+      name: "Wies",
+      coreCharacter: "Rustig.",
+      birthStory: "Geboren.",
+      seed: "z",
+      bornAt,
+      awakeSince: new Date(bornAt.getTime() + 1000),
+      axisIe: 0.5,
+      axisSn: 0.5,
+      axisTf: 0,
+      axisJp: 0.5,
+      axisReactivity: 1,
+      axisExpressiveness: 1,
+      moodValues: singleEmotionValues("boos", 0.9),
+      moodAt: bornAt,
+    });
+
+    // B's eerste beurt: zonder de bug (lastIgnored gereset bij de sessiewissel) is dit ook negeren, geen tekst.
+    const events = await collect(brain.hear("Twee"));
+
+    expect(events.some((event) => event.type === "text")).toBe(false);
   });
 });

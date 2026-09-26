@@ -476,8 +476,7 @@ describe("naamvraag (#92)", () => {
 });
 
 describe("considerInitiative onbekend (#92)", () => {
-  it("Type1-state krijgt de aanleiding, geeft naamvraag-instructie de eerste keer, null de tweede", async () => {
-    const vero = await insertDynimo();
+  function onbekendType1() {
     let sawAanleiding = false;
     const t1 = new Experimental_EvaluationMockModelV4({
       doEvaluate: async (options) => {
@@ -488,15 +487,59 @@ describe("considerInitiative onbekend (#92)", () => {
         return { answers: Object.fromEntries(questions.map((key) => [key, known[key]!])), warnings: [] };
       },
     });
+    return { t1, sawAanleiding: () => sawAanleiding };
+  }
+
+  it("Type1-state krijgt de aanleiding en geeft de naamvraag-instructie", async () => {
+    await insertDynimo();
+    const { t1, sawAanleiding } = onbekendType1();
     const brain = createBrain({ db, embedder: embedder(), type1: t1, type2: { light: textModel(), heavy: textModel() }, now: () => now, random: () => 0.99 });
 
     const instruction = await brain.considerInitiative({ soort: "onbekend" });
-    expect(sawAanleiding).toBe(true);
-    expect(instruction).toContain("naam");
 
+    expect(sawAanleiding()).toBe(true);
+    expect(instruction).toContain("naam");
+  });
+
+  // #114: askedName mag niet al door de initiatiefcheck zelf verbruikt worden — enkel de initiatief-beurt (hear)
+  // mag dat doen. Ketst het initiatief af (hear wordt nooit aangeroepen), dan mag een volgende aanleiding-check
+  // gewoon opnieuw vragen.
+  it("ketst het initiatief af (geen hear-beurt): een volgende aanleiding-check vraagt gewoon opnieuw", async () => {
+    await insertDynimo();
+    const { t1 } = onbekendType1();
+    const brain = createBrain({ db, embedder: embedder(), type1: t1, type2: { light: textModel(), heavy: textModel() }, now: () => now, random: () => 0.99 });
+
+    await brain.considerInitiative({ soort: "onbekend" });
     const second = await brain.considerInitiative({ soort: "onbekend" });
+
+    expect(second).toContain("naam");
+  });
+
+  it("na de echte initiatief-beurt (hear) vraagt een volgende aanleiding-check niet meer", async () => {
+    await insertDynimo();
+    const { t1 } = onbekendType1();
+    const brain = createBrain({ db, embedder: embedder(), type1: t1, type2: { light: textModel(), heavy: textModel() }, now: () => now, random: () => 0.99 });
+
+    const instruction = await brain.considerInitiative({ soort: "onbekend" });
+    await drain(brain.hear(instruction!, { initiatief: true, gesprekspartner: null }));
+    const second = await brain.considerInitiative({ soort: "onbekend" });
+
     expect(second).toBeNull();
-    void vero;
+  });
+
+  // #114: de agent kent gesprekspartner niet altijd expliciet mee op de initiatiefbeurt (die volgt uit stem-/
+  // gezichtsherkenning, niet uit de aanleiding); hear() valt dan terug op de eigenaar. askedName moet ook dán
+  // verbruikt worden door de initiatiefbeurt zelf, niet alleen wanneer gesprekspartner toevallig null is.
+  it("na de echte initiatief-beurt zonder expliciete gesprekspartner vraagt een volgende aanleiding-check ook niet meer", async () => {
+    await insertDynimo();
+    const { t1 } = onbekendType1();
+    const brain = createBrain({ db, embedder: embedder(), type1: t1, type2: { light: textModel(), heavy: textModel() }, now: () => now, random: () => 0.99 });
+
+    const instruction = await brain.considerInitiative({ soort: "onbekend" });
+    await drain(brain.hear(instruction!, { initiatief: true }));
+    const second = await brain.considerInitiative({ soort: "onbekend" });
+
+    expect(second).toBeNull();
   });
 });
 

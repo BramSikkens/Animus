@@ -7,6 +7,13 @@ export const LOOK_TOPIC = "kijk";
 /** Lengte van Human's face.embedding (@vladmandic/human 3.3.6, faceres-model), zie ADR-0020 en het research-doc. */
 export const FACE_EMBEDDING_LENGTH = 1024;
 
+// Gezichtsherkenning (#93, ADR-0020): pgvector `<->` is de L2-afstand tussen twee embeddings. Human's eigen
+// similarity() (src/face/match.ts@3.3.6) rekent similarity = (1 − √(25·Σd²)/100 − 0.2) / 0.6, en Human's
+// vuistregel is "similarity > 0.5 is een match". Met Σd² = L2² (dezelfde som die pgvector's `<->` neemt vóór de
+// wortel) volgt: similarity > 0.5 ⇔ (0.8 − 0.05·L2)/0.6 > 0.5 ⇔ L2 < 10. Vandaar de default 10.
+// Gedeeld tussen de brain (index.ts) en apps/agent/src/faces.ts (#114: was daar gedupliceerd).
+export const DEFAULT_FACE_MATCH_DISTANCE = 10;
+
 // Exacte base64-lengte van FACE_EMBEDDING_LENGTH float32's (4 bytes elk): 4 · ⌈bytes/3⌉. Trust boundary: een
 // binnenkomende string die hier niet exact aan voldoet, wordt geweigerd vóórdat `atob` er iets mee doet.
 const FACE_EMBEDDING_BASE64_LENGTH = Math.ceil((FACE_EMBEDDING_LENGTH * 4) / 3) * 4;

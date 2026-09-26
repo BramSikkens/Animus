@@ -95,9 +95,11 @@ describe("hear(): Spraakgeluiden", () => {
   it("zet een geluid vóór de tekst richting TTS, maar bewaart de schone tekst in de Herinnering", async () => {
     await insertDynimo("blij");
 
-    const events = await collect(brainWith(light()).hear("Hallo"));
+    const brain = brainWith(light());
+    const events = await collect(brain.hear("Hallo"));
 
     expect(textOf(events)).toBe(`ha ha ${REPLY}`);
+    await brain.settled();
     const stored = await db.select().from(memories);
     expect(stored[0]!.text).toContain(REPLY);
     expect(stored[0]!.text).not.toContain("ha ha");
@@ -166,10 +168,12 @@ describe("hear(): spraakpauzes", () => {
 
   it("zet pauzes in de TTS-tekst maar bewaart de schone tekst", async () => {
     await insertDynimo("droevig");
-    const events = await collect(brainWith(twoSentences()).hear("Hallo"));
+    const brain = brainWith(twoSentences());
+    const events = await collect(brain.hear("Hallo"));
 
     expect(textOf(events)).not.toContain("jezelf. …"); // eerste zin zonder pauze
     expect(textOf(events)).toContain("naar je! … Echt");
+    await brain.settled();
     const stored = await db.select().from(memories);
     expect(stored[0]!.text).toContain(TWO);
     expect(stored[0]!.text).not.toContain("…");

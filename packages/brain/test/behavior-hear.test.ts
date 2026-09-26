@@ -92,11 +92,13 @@ describe("hear(): Emotie stuurt gedrag", () => {
     await insertDynimo("boos");
     const model = light();
 
-    const events = await collect(brainWith(model).hear("Hallo daar"));
+    const brain = brainWith(model);
+    const events = await collect(brain.hear("Hallo daar"));
 
     expect(events.map((event) => event.type)).toEqual(["mood", "sound"]);
     expect(events[1]).toEqual({ type: "sound", kind: "brommen" });
     expect(model.doStreamCalls).toHaveLength(0);
+    await brain.settled();
     const stored = await db.select().from(memories);
     expect(stored).toHaveLength(1);
     expect(stored[0]!.text).toContain("Hallo daar");

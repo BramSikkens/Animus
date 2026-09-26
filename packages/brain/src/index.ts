@@ -173,6 +173,12 @@ export type Brain = {
    * (#94); zonder beide de eigenaar.
    */
   hear(text: string, options?: { initiatief?: boolean; gesprekspartner?: number | null; aanwezig?: number[] }): AsyncIterable<BrainEvent>;
+  /**
+   * Wacht tot alle achtergrondschrijfacties van hear() (Herinnering opslaan, lastRecalledAt/toldAt bijwerken)
+   * klaar zijn (#109). Nodig in tests die direct na hear() de database lezen, en vóór het afsluiten van het
+   * proces (anders gaan nog lopende Herinneringen verloren). Gooit nooit; een fout is dan al gelogd.
+   */
+  settled(): Promise<void>;
 };
 
 // Serialiseert alle wissels van Wakker/Slapend tussen instanties en processen.
@@ -582,6 +588,16 @@ export function createBrain(deps: {
   // considerInitiative(nieuw-object) + "ja" zet dit; de eerstvolgende hear(..., { initiatief: true }) verbruikt
   // het als `kijken` (ADR-0019): zo gaat het beeld mee in precies die ene initiatiefbeurt.
   let pendingLook = false;
+
+  // Achtergrondschrijfacties van hear() (#109): Herinnering opslaan, lastRecalledAt/toldAt. settled() wacht ze af.
+  const pendingWrites = new Set<Promise<unknown>>();
+  function trackBackground(promise: Promise<unknown>): void {
+    pendingWrites.add(promise);
+    promise.finally(() => pendingWrites.delete(promise));
+  }
+  async function settled(): Promise<void> {
+    await Promise.allSettled(pendingWrites);
+  }
 
   async function genesis(): Promise<{ dynimo: typeof dynimos.$inferInsert; drives: DrivesOutput; voice: { voice: string; description: string } | null }> {
     const seed = pickSeed(random);
@@ -1044,8 +1060,11 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
   // meegegeven — ook een lege aanwezig-lijst of een expliciet onbekende (`null`) Gesprekspartner — dan telt enkel
   // wie er echt is: een niet-herkende vreemde mag nooit de eigenaar als aanwezig krijgen (en dus diens Spontane
   // herinnering aanhalen). Enkel een bestaande eigenaar-rij lezen (geen insert).
-  async function presentPersonIds(gesprekspartnerOption: number | null | undefined, aanwezigOption: number[] | undefined): Promise<number[]> {
+  // `ownerId` (#109): al opgehaald door de aanroeper (hear()) i.p.v. hier nog eens de eigenaar te selecteren;
+  // considerInitiative geeft hem niet mee en valt terug op zijn eigen getOwnerId()-lookup.
+  async function presentPersonIds(gesprekspartnerOption: number | null | undefined, aanwezigOption: number[] | undefined, ownerId?: number): Promise<number[]> {
     if (gesprekspartnerOption === undefined && aanwezigOption === undefined) {
+      if (ownerId !== undefined) return [ownerId];
       const [owner] = await deps.db.select({ id: persons.id }).from(persons).where(eq(persons.owner, true));
       return owner ? [owner.id] : [];
     }
@@ -1056,9 +1075,12 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
 
   // `present` (#94): Herinneringen van deze Personen krijgen een kleine bonus in de ORDER BY (afstand min
   // RECALL_PRESENT_BONUS); geen filter, Herinneringen van anderen blijven ophaalbaar.
-  async function recall(utterance: string, dynimoId: number, present: number[]): Promise<{ text: string; personId: number | null }[]> {
+  // `embeddingPromise` (#109): de uiting wordt vóór/parallel met Type1 al ingebed door de aanroeper; een
+  // embed-fout is daar al gelogd en geeft hier null (dan geen Herinneringen, zoals voorheen).
+  async function recall(embeddingPromise: Promise<number[] | null>, dynimoId: number, present: number[]): Promise<{ text: string; personId: number | null }[]> {
+    const embedding = await embeddingPromise;
+    if (!embedding) return [];
     try {
-      const { embedding } = await embed({ model: deps.embedder, value: utterance });
       const scope = sessionMemoryIds.length
         ? and(eq(memories.dynimoId, dynimoId), notInArray(memories.id, sessionMemoryIds))
         : eq(memories.dynimoId, dynimoId);
@@ -1196,6 +1218,12 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
   // beide lijsten nadien: een latere, andere onbekende Gesprekspartner (nieuwe bezoeker) in dezelfde sessie mag ze
   // niet nog eens meekrijgen bij zíjn leerKennen.
   async function leerKennenPersoon(naam: string): Promise<{ id: number; name: string }> {
+    // Reviewfix #109: een vorige beurt kan zijn eind-Herinnering nog op de achtergrond aan het opslaan zijn
+    // (dan staat zijn id nog niet in unknownSessionMemoryIds); dat mag niet naar een latere, andere onbekende
+    // Gesprekspartner doorschuiven. Wacht die achterstallige schrijfacties af vóór de snapshot. Geen deadlock:
+    // déze beurt (de leerKennen-toolcall loopt nog) heeft zijn éigen eind-Herinnering nog niet als
+    // achtergrondschrijfactie geregistreerd — dat gebeurt pas in hear()'s finally, ná deze toolcall.
+    await settled();
     const linked = [...unknownSessionMemoryIds];
     // ponytail: koppelt alle nog-niet-vervallen onbekende embeddings aan déze ene nieuwe Persoon. Staan er twee
     // onbekende gezichten in de buffer (twee vreemden tegelijk in beeld), dan belanden ze allebei bij wie het eerst
@@ -1521,12 +1549,27 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
       return;
     }
     const being = adopt(awake);
+    // Embedding van de uiting (#109): start meteen, parallel met de rest van de beurt; recall() krijgt hem
+    // straks aangereikt i.p.v. zelf te embedden. Een fout wordt hier al gelogd en geeft null (dan geen
+    // Herinneringen, zoals voorheen); dit .then-paar zorgt dat de promise zelf nooit afwijst (geen unhandled
+    // rejection, ook niet als een vroege return hem nooit uitleest, bv. negeren of niemand wakker).
+    const embeddingPromise = embed({ model: deps.embedder, value: text }).then(
+      (result) => result.embedding,
+      (error: unknown): null => {
+        console.warn("Uiting embedden faalde:", error instanceof Error ? error.message : error);
+        return null;
+      },
+    );
+    // getOwnerId en loadDrives hangen niet van elkaar af (#109): parallel. loadDrives moet vóór Type1 klaar zijn
+    // (driveRows zit in zijn context); getOwnerId enkel als er straks ook echt een eigenaar-fallback nodig is
+    // (gesprekspartner weggelaten) — anders (een expliciete, ook onbekende, Gesprekspartner) precies als voorheen
+    // geen eigenaar-lookup. Die ene ownerId dient meteen ook presentPersonIds verderop (geen dubbele lookup per beurt).
+    const [ownerId, driveRows] = await Promise.all([options.gesprekspartner === undefined ? getOwnerId() : Promise.resolve(undefined), loadDrives(awake.id)]);
     // Persoon van deze beurt (#91): meegegeven Gesprekspartner (null = onbekend), anders de eigenaar. Ook bij
     // initiatief: die krijgt de eigenaar tenzij een Gesprekspartner is meegegeven. Lokaal (geen instance-state):
     // een overlappende tweede beurt (bv. initiatief) mag deze niet kunnen overschrijven.
     // `let`: leerKennen (#92) bindt de rest van déze beurt aan de nieuw aangemaakte Persoon.
-    let personId = options.gesprekspartner !== undefined ? options.gesprekspartner : await getOwnerId();
-    const driveRows = await loadDrives(awake.id);
+    let personId = options.gesprekspartner !== undefined ? options.gesprekspartner : ownerId!;
     const baseEmotion = baseEmotionOf(awake);
     const stored = storedMoodOf(awake);
     const boosted = boostOnBirthday(awake, stored, baseEmotion);
@@ -1542,6 +1585,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     // mood-event toont dan de bestaande Stemming of Basisemotie).
     const axes = rowAxes(awake);
     // Standpunt (opinion.ts): een Drijfveer die duidelijk raakt aan de uiting; een Ergernis raakt ook boos, via dezelfde delta's.
+    // random()-aanroep #1 (vaste volgorde t.o.v. decideBehavior/pickSpontaneous/droom-worp verderop): niet verplaatsen.
     let opinionMessage: SystemModelMessage[] = [];
     let opinionBoos = 0;
     if (!options.initiatief) {
@@ -1562,6 +1606,30 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     // lookFrame-dep nooit kijken, ook al stond de vlag klaar (considerInitiative weet niets van canLook).
     const initiatiefKijken = canLook && pendingLook;
     if (options.initiatief) pendingLook = false;
+
+    // Parallel met Type1 (classify): hangen enkel van personId/opties af, niet van Type1's uitkomst (#109). Elke
+    // promise krijgt meteen een no-op .catch zodat een vroege return (negeren, gedood tijdens de mood-update)
+    // hem niet als unhandled rejection achterlaat; de "echte" afhandeling gebeurt bij het latere await.
+    const safe = <T>(promise: Promise<T>): Promise<T> => {
+      promise.catch(() => {});
+      return promise;
+    };
+    const familiarityPromise = safe(personId === null ? Promise.resolve(FAMILIARITY_DEFAULT) : familiarityRow(being.id, personId));
+    const speakerPersonPromise = safe(
+      personId === null
+        ? Promise.resolve(undefined)
+        : deps.db.select({ name: persons.name, owner: persons.owner }).from(persons).where(eq(persons.id, personId)).then((rows) => rows[0]),
+    );
+    const presentPromise = safe(
+      options.aanwezig?.length
+        ? deps.db.select({ name: persons.name, owner: persons.owner }).from(persons).where(inArray(persons.id, options.aanwezig))
+        : Promise.resolve([]),
+    );
+    // "Aanwezig" (#94): de ruwe opties (niet de al op de eigenaar teruggevallen `personId`) — een expliciet
+    // onbekende Gesprekspartner (`null`) mag zelf geen eigenaar-fallback triggeren. Stuurt de recall-bonus en
+    // de Spontane herinnering.
+    const presentIdsPromise = safe(presentPersonIds(options.gesprekspartner, options.aanwezig, ownerId));
+
     const { deltas: type1Deltas, indruk, intent, kijken } = await (options.initiatief
       ? Promise.resolve<Type1Result>({ deltas: {}, indruk: 0.2, intent: "simpel", kijken: initiatiefKijken })
       : classify(deps.type1, text, context, canLook)
@@ -1576,13 +1644,13 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     // meerdere schrijvers tegelijk zijn.
     const birthdayBoost = birthdayBoostDue(awake);
     // Emotie stuurt gedrag (behavior.ts). Een spontane uiting (initiatief) wordt nooit genegeerd of ingekort.
-    // Vóór de Vertrouwdheid, die "genegeerd" of "beurt" nodig heeft.
+    // Vóór de Vertrouwdheid, die "genegeerd" of "beurt" nodig heeft. random()-aanroep #2.
     const behavior = options.initiatief || !axes ? "normaal" : decideBehavior({ values: mood.values, axes, rng: random, vorigeGenegeerd: lastIgnored });
     if (!options.initiatief) lastIgnored = behavior === "negeren";
     // Vertrouwdheid (familiarity.ts): een beurt telt, een positieve beurt extra; een genegeerde beurt telt niet als
     // beurt. Onbekend (personId null, #91): altijd 0.2, nooit opgeslagen.
     const familiarityAxes = axes ?? { tf: 0.5, expressiveness: 0.5 };
-    const startFamiliarity = personId === null ? FAMILIARITY_DEFAULT : await familiarityRow(being.id, personId);
+    const startFamiliarity = await familiarityPromise;
     let familiarity = startFamiliarity;
     if (!options.initiatief && personId !== null) {
       if (behavior === "negeren") familiarity = updateFamiliarity({ current: familiarity, event: "genegeerd", axes: familiarityAxes });
@@ -1624,7 +1692,8 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
       // Zichtbaar op het gezichtje via de (boze) Stemming plus een non-verbaal geluid; geen antwoord en geen TTS.
       if (soundKind && !soundYielded) yield { type: "sound", kind: soundKind };
       workingMemory.push(userMessage, { role: "assistant", content: "(je negeert dit)" });
-      await remember(`Gesprekspartner: ${text}\n${being.name} negeert dit.`, being.id, indruk, personId);
+      // Achtergrond (#109): de stream eindigt niet meer op deze opslag; remember() vangt zijn eigen fouten al.
+      trackBackground(remember(`Gesprekspartner: ${text}\n${being.name} negeert dit.`, being.id, indruk, personId));
       return;
     }
 
@@ -1703,23 +1772,17 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     // Tools van deze beurt (#91): de onthoud-tool sluit over de Gesprekspartner van déze beurt, niet over instance-state.
     const turnTools = createTools({ now, remember: (memoryText: string) => remember(memoryText, being.id, undefined, personId) });
 
-    // Naam van de Gesprekspartner (#92): bekend (met owner-vlag) of onbekend.
-    const speakerPerson = personId === null
-      ? undefined
-      : await deps.db.select({ name: persons.name, owner: persons.owner }).from(persons).where(eq(persons.id, personId)).then((rows) => rows[0]);
+    // Naam van de Gesprekspartner (#92): bekend (met owner-vlag) of onbekend. Al gestart parallel met Type1 (#109).
+    const speakerPerson = await speakerPersonPromise;
 
-    // Aanwezige Personen (#93): onbekende ids (intussen verwijderd, of nooit bestaan) worden overgeslagen.
-    const present = options.aanwezig?.length
-      ? await deps.db.select({ name: persons.name, owner: persons.owner }).from(persons).where(inArray(persons.id, options.aanwezig))
-      : [];
+    // Aanwezige Personen (#93): onbekende ids (intussen verwijderd, of nooit bestaan) worden overgeslagen. Al
+    // gestart parallel met Type1 (#109).
+    const present = await presentPromise;
 
-    // "Aanwezig" (#94): de ruwe opties (niet de al op de eigenaar teruggevallen `personId`) — een expliciet
-    // onbekende Gesprekspartner (`null`) mag zelf geen eigenaar-fallback triggeren. Stuurt de recall-bonus en de
-    // Spontane herinnering.
-    const presentIds = await presentPersonIds(options.gesprekspartner, options.aanwezig);
+    // Al gestart parallel met Type1 (#109); zie presentPersonIds hierboven voor wat dit precies stuurt.
+    const presentIds = await presentIdsPromise;
 
-    // ponytail: sequentieel na de emotie; parallel met Type1 als de latency ooit telt.
-    const recalled = await recall(text, being.id, presentIds);
+    const recalled = await recall(embeddingPromise, being.id, presentIds);
     // Discretieregel (#94): naam bij elke opgehaalde Herinnering van een andere (bekende) Persoon dan de
     // Gesprekspartner; de regel zelf enkel als zo'n Herinnering er ook echt bij zit.
     const otherPersonIds = [...new Set(recalled.map((memory) => memory.personId).filter((id): id is number => id !== null && id !== personId))];
@@ -1834,15 +1897,31 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
       } else if (outcome === "interrupted" && full) {
         workingMemory.push(userMessage, { role: "assistant", content: full });
       }
-      if (outcome === "completed" && spontaneousId !== undefined) {
-        await deps.db.update(memories).set({ lastRecalledAt: now() }).where(eq(memories.id, spontaneousId));
-      }
-      if (outcome === "completed" && dreamToMark !== undefined) {
-        await deps.db.update(dreams).set({ toldAt: now() }).where(eq(dreams.id, dreamToMark));
-      }
-      if (outcome !== "failed" && full.trim()) {
-        await remember(options.initiatief ? `${being.name}: ${full}` : `Gesprekspartner: ${text}\n${being.name}: ${full}`, being.id, indruk, personId);
-      }
+      // Achtergrond (#109): de stream eindigt niet meer op deze opslag. personId nu vastleggen (leerKennen kan
+      // hem tijdens deze beurt al herbonden hebben; latere beurten mogen déze niet meer wijzigen). Elke stap
+      // vangt en logt zijn eigen fout, zodat één mislukking de andere twee niet overslaat.
+      const personIdAtEnd = personId;
+      trackBackground(
+        (async () => {
+          if (outcome === "completed" && spontaneousId !== undefined) {
+            try {
+              await deps.db.update(memories).set({ lastRecalledAt: now() }).where(eq(memories.id, spontaneousId));
+            } catch (error) {
+              console.warn("Spontane herinnering markeren faalde:", error instanceof Error ? error.message : error);
+            }
+          }
+          if (outcome === "completed" && dreamToMark !== undefined) {
+            try {
+              await deps.db.update(dreams).set({ toldAt: now() }).where(eq(dreams.id, dreamToMark));
+            } catch (error) {
+              console.warn("Droom markeren faalde:", error instanceof Error ? error.message : error);
+            }
+          }
+          if (outcome !== "failed" && full.trim()) {
+            await remember(options.initiatief ? `${being.name}: ${full}` : `Gesprekspartner: ${text}\n${being.name}: ${full}`, being.id, indruk, personIdAtEnd);
+          }
+        })(),
+      );
     }
   }
 
@@ -1987,6 +2066,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     reflect,
     considerInitiative,
     hear,
+    settled,
     forceMood,
     setMood,
     setAxes,

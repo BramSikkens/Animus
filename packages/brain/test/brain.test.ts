@@ -711,12 +711,96 @@ describe("createBrain", () => {
     await brain.bringToLife();
     await collectText(brain.hear("Mijn kat heet Mimi."));
 
+    await brain.settled();
     const rows = await db.select().from(memories);
     expect(rows).toHaveLength(1);
     expect(rows[0]?.text).toContain("Mijn kat heet Mimi.");
     expect(rows[0]?.text).toContain("Wat een mooie naam!");
     expect(rows[0]?.embedding).toEqual(fakeVector("kat"));
     expect(rows[0]?.createdAt).toEqual(bornAt);
+  });
+
+  it("#109: de stream van hear() is afgelopen vóórdat de Herinnering is opgeslagen; settled() wacht de achtergrondopslag af", async () => {
+    const bornAt = new Date("2026-01-01T00:00:00.000Z");
+    // Eerste doEmbed-call: recall() aan het begin van de beurt (hoort meteen te resolven). Tweede call: de
+    // eind-Herinnering in remember() (op de achtergrond, ná het einde van de stream) — die hangt op de gate.
+    let embedCalls = 0;
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const gatedEmbed = new MockEmbeddingModelV4({
+      doEmbed: async ({ values }) => {
+        embedCalls++;
+        if (embedCalls > 1) await gate;
+        return { embeddings: values.map(fakeVector), warnings: [] };
+      },
+    });
+    const brain = createBrain({
+      db,
+      embedder: gatedEmbed,
+      type1: type1Model(),
+      type2: { light: textModel(["Wat een mooie naam!"]), heavy: genesisModel({ name: "Nova", coreCharacter: "x", birthStory: "y" }) },
+      now: () => bornAt,
+      random: () => 0,
+    });
+    await brain.bringToLife();
+
+    await collectText(brain.hear("Mijn kat heet Mimi."));
+
+    // De stream is klaar (collectText is teruggekeerd); de Herinnering ligt er nog niet.
+    expect(await db.select().from(memories)).toHaveLength(0);
+
+    release();
+    await brain.settled();
+
+    const rows = await db.select().from(memories);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.text).toContain("Mijn kat heet Mimi.");
+    const owner = (await db.select().from(persons).where(eq(persons.owner, true)))[0]!;
+    expect(rows[0]?.personId).toBe(owner.id);
+  });
+
+  it("#109: de embedding van de uiting start parallel met Type1, niet pas erna", async () => {
+    const bornAt = new Date("2026-01-01T00:00:00.000Z");
+    const order: string[] = [];
+    const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+    const timedEmbedder = new MockEmbeddingModelV4({
+      doEmbed: async ({ values }) => {
+        order.push("embed-start");
+        await delay(20);
+        order.push("embed-end");
+        return { embeddings: values.map(fakeVector), warnings: [] };
+      },
+    });
+    const timedType1 = new Experimental_EvaluationMockModelV4({
+      doEvaluate: async (options) => {
+        order.push("type1-start");
+        await delay(20);
+        order.push("type1-end");
+        return {
+          answers: {
+            ...deltaAnswers({}),
+            indruk: { type: "score", score: 0.2 },
+            intent: { type: "choice", choice: "simpel" },
+          },
+          warnings: [],
+        };
+      },
+    });
+    const brain = createBrain({
+      db,
+      embedder: timedEmbedder,
+      type1: timedType1,
+      type2: { light: textModel(["Hoi."]), heavy: genesisModel({ name: "Nova", coreCharacter: "x", birthStory: "y" }) },
+      now: () => bornAt,
+      random: () => 0,
+    });
+    await brain.bringToLife();
+
+    await collectText(brain.hear("Hallo"));
+
+    expect(order.indexOf("embed-start")).toBeLessThan(order.indexOf("type1-end"));
   });
 
   it("geeft na een herstart het meest relevante geheugen uit een vorige sessie eerst mee aan Type2", async () => {
@@ -825,6 +909,7 @@ describe("createBrain", () => {
     await brain.bringToLife();
     await collectText(brain.hear("Onthoud dat ik mijn koffie zwart drink."));
 
+    await brain.settled();
     const rows = await db.select().from(memories);
     const remembered = rows.find((row) => row.text === "Bram drinkt zijn koffie zwart.");
     expect(remembered?.embedding).toHaveLength(EMBEDDING_DIMENSIONS);
@@ -887,6 +972,7 @@ describe("createBrain", () => {
     await brain.bringToLife();
     await collectText(brain.hear("Welke dag is het?"));
 
+    await brain.settled();
     expect(await db.select().from(memories)).toHaveLength(0);
   });
 
@@ -908,6 +994,7 @@ describe("createBrain", () => {
     expect(await brain.kill(nova.id + 999, "Nova")).toBeNull();
 
     expect(await db.select().from(dynimos)).toHaveLength(1);
+    await brain.settled();
     expect(await db.select().from(memories)).toHaveLength(1);
     expect(heavy.doGenerateCalls).toHaveLength(1); // enkel de genesis
   });
@@ -938,6 +1025,7 @@ describe("createBrain", () => {
     expect(heavy.doGenerateCalls).toHaveLength(2); // genesis + aparte Afscheidsreflectie
     expect(JSON.stringify(heavy.doGenerateCalls[1]?.prompt)).toContain("Nova");
     expect(await db.select().from(dynimos)).toHaveLength(0);
+    await brain.settled();
     expect(await db.select().from(memories)).toHaveLength(0);
   });
 
@@ -966,6 +1054,7 @@ describe("createBrain", () => {
     await brain.kill(nova.id, "Nova");
 
     expect((await db.select().from(dynimos)).map((row) => row.name)).toEqual(["Vero"]);
+    await brain.settled();
     const otherMemories = await db.select().from(memories).where(eq(memories.dynimoId, other!.id));
     expect(otherMemories).toHaveLength(1);
     expect(otherMemories[0]?.text).toBe("Herinnering van Vero.");
@@ -1086,6 +1175,7 @@ describe("createBrain", () => {
     for await (const event of stale.hear("Mijn kat heet Mimi.")) events.push(event);
 
     expect(events).toEqual([]);
+    await stale.settled();
     expect(await db.select().from(memories)).toHaveLength(0);
   });
 
@@ -1163,6 +1253,7 @@ describe("createBrain", () => {
     const secondTurn = JSON.stringify(light.doStreamCalls[1]?.prompt);
     expect(secondTurn).toContain("Mijn kat heet Mimi.");
     expect(secondTurn).toContain("Wat een mooie ");
+    await brain.settled();
     const rows = await db.select().from(memories);
     expect(rows.some((row) => row.text.includes("Mijn kat heet Mimi."))).toBe(true);
   });
@@ -1538,6 +1629,7 @@ describe("createBrain", () => {
       }
 
       expect(unhandled).toEqual([]);
+      await talker.settled();
       expect(await db.select().from(memories)).toHaveLength(0);
     });
   });
@@ -2640,6 +2732,7 @@ describe("createBrain", () => {
 
       await collectText(brain.hear("Praat wat minder, alsjeblieft."));
 
+      await brain.settled();
       expect((await db.select().from(memories))[0]?.impression).toBeCloseTo(0.9);
     });
 
@@ -2653,6 +2746,7 @@ describe("createBrain", () => {
 
       await collectText(brain.hear("Hoi"));
 
+      await brain.settled();
       expect((await db.select().from(memories))[0]?.impression).toBe(0);
     });
 
@@ -2673,6 +2767,7 @@ describe("createBrain", () => {
 
       await collectText(brain.hear("Onthoud dat ik mijn koffie zwart drink."));
 
+      await brain.settled();
       const rows = await db.select().from(memories);
       expect(rows.find((row) => row.text === "Bram drinkt zijn koffie zwart.")?.impression).toBe(0.5);
     });

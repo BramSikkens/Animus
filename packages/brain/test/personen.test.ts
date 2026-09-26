@@ -208,6 +208,7 @@ describe("Personen in hear() (#91)", () => {
 
     await hear(brain, "Hoi", { gesprekspartner: anna.id });
 
+    await brain.settled();
     const [memory] = await db.select().from(memories).where(eq(memories.dynimoId, vero.id));
     expect(memory!.personId).toBe(anna.id);
     expect(await brain.familiarityOf(vero.id, anna.id)).toBeGreaterThan(0.2);
@@ -221,6 +222,7 @@ describe("Personen in hear() (#91)", () => {
 
     await hear(brain, "Hoi", { gesprekspartner: null });
 
+    await brain.settled();
     const [memory] = await db.select().from(memories).where(eq(memories.dynimoId, vero.id));
     expect(memory!.personId).toBeNull();
     expect(await db.select().from(familiarities)).toHaveLength(0);
@@ -248,6 +250,7 @@ describe("Personen in hear() (#91)", () => {
 
     await hear(brain, "Onthoud dat ik van thee houd", { gesprekspartner: anna.id });
 
+    await brain.settled();
     const rows = await db.select().from(memories).where(eq(memories.dynimoId, vero.id));
     const remembered = rows.find((row) => row.text === "Anna houdt van thee.");
     expect(remembered?.personId).toBe(anna.id);
@@ -272,6 +275,7 @@ describe("Personen in hear() (#91)", () => {
 
     await hear(brain, "Hoi", { gesprekspartner: 999_999 });
 
+    await brain.settled();
     const rows = await db.select().from(memories).where(eq(memories.dynimoId, vero.id));
     expect(rows).toHaveLength(1);
     expect(rows[0]!.personId).toBeNull();
@@ -283,6 +287,7 @@ describe("Personen in hear() (#91)", () => {
 
     await hear(brain, "Hoi");
 
+    await brain.settled();
     const [memory] = await db.select().from(memories).where(eq(memories.dynimoId, vero.id));
     const owner = (await db.select().from(persons).where(eq(persons.owner, true)))[0]!;
     expect(memory!.personId).toBe(owner.id);

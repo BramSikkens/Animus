@@ -124,6 +124,7 @@ describe("Spontane herinnering bij initiatief", () => {
 
     await drain(brain.hear(instruction!, { initiatief: true }));
 
+    await brain.settled();
     const [after] = await db.select().from(memories).where(eq(memories.id, memory.id));
     expect(after!.lastRecalledAt).toEqual(now);
     expect(await brain.considerInitiative()).not.toContain("ik ben ziek");
@@ -135,10 +136,12 @@ describe("Spontane herinnering in een normale beurt", () => {
     const dynimo = await insertDynimo();
     const memory = await insertMemory(dynimo.id);
     const t2 = type2();
+    const brain = brainWith(t2.model, () => 0);
 
-    await drain(brainWith(t2.model, () => 0).hear("Hallo"));
+    await drain(brain.hear("Hallo"));
 
     expect(t2.prompts[0]).toContain("ik ben ziek");
+    await brain.settled();
     const [row] = await db.select().from(memories).where(eq(memories.id, memory.id));
     expect(row!.lastRecalledAt).toEqual(now);
   });
@@ -147,11 +150,13 @@ describe("Spontane herinnering in een normale beurt", () => {
     const dynimo = await insertDynimo();
     const memory = await insertMemory(dynimo.id);
     const t2 = type2();
+    const brain = brainWith(t2.model, () => 0.99);
 
-    await drain(brainWith(t2.model, () => 0.99).hear("Hallo"));
+    await drain(brain.hear("Hallo"));
 
     // ook al is de tekst via recall() zelf al als herinnering beschikbaar: de aanleiding-prompt ontbreekt
     expect(t2.prompts[0]).not.toContain("Spontane herinnering");
+    await brain.settled();
     const [row] = await db.select().from(memories).where(eq(memories.id, memory.id));
     expect(row!.lastRecalledAt).toBeNull();
   });
@@ -167,6 +172,8 @@ describe("Spontane herinnering: geen query op het kritieke pad zonder kans", () 
     const model = type2().model;
     const brain = createBrain({ db: counting, embedder: embedder(), type1: type1(), type2: { light: model, heavy: model }, now: () => now, random });
     await drain(brain.hear("Hallo"));
+    // De eind-Herinnering slaat op de achtergrond op (#109); afwachten vóórdat de test zelf meteen truncate't.
+    await brain.settled();
     return count;
   }
 
@@ -188,6 +195,7 @@ describe("Spontane herinnering en wisselen van Dynimo", () => {
     await db.insert(dynimos).values({ name: "Ben", coreCharacter: "Druk.", birthStory: "Geboren.", seed: "z", bornAt, awakeSince: bornAt, baseEmotion: "kalm", axisIe: 0.5, axisSn: 0.5, axisTf: 0.5, axisJp: 0.5 });
     await drain(brain.hear("Hoi", { initiatief: true }));
 
+    await brain.settled();
     const [row] = await db.select().from(memories).where(eq(memories.id, memory.id));
     expect(row!.lastRecalledAt).toBeNull();
   });

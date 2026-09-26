@@ -118,6 +118,8 @@ describe("Vertrouwdheid in hear()", () => {
     const plainBrain = brainWith(type2().model);
     await hear(plainBrain, "Hoi");
     const plainValue = await plainBrain.familiarityOf(plain.id);
+    // De eind-Herinnering slaat op de achtergrond op (#109); afwachten vóórdat hier meteen truncate't wordt.
+    await plainBrain.settled();
     await truncateAll(db);
     const happy = await insertDynimo();
     const happyBrain = brainWith(type2().model, 6);

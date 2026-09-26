@@ -220,6 +220,7 @@ describe("leerKennen (#92)", () => {
     const persoon = (await db.select().from(persons).where(eq(persons.name, "Anna")))[0]!;
     expect(persoon).toBeTruthy();
 
+    await brain.settled();
     const rows = await db.select().from(memories).where(eq(memories.dynimoId, vero.id));
     expect(rows.length).toBeGreaterThan(0);
     for (const row of rows) expect(row.personId).toBe(persoon.id);
@@ -229,6 +230,121 @@ describe("leerKennen (#92)", () => {
     const brain2 = brainWith(model2);
     for await (const event of brain2.hear("Ik heet Bert", { gesprekspartner: null })) events.push(event);
     expect(events).toContainEqual(expect.objectContaining({ type: "persoon", naam: "Bert" }));
+  });
+
+  it("#109: de stream is al klaar vóórdat de eind-Herinnering (na leerKennen) is opgeslagen; settled() wacht hem af, met de juiste person_id", async () => {
+    const vero = await insertDynimo();
+    // Eerste doEmbed-call is die van recall() (aan het begin van de beurt, hoort meteen te resolven); de tweede is
+    // die van de eind-Herinnering in remember() (op de achtergrond) en hangt tot de test hem vrijgeeft.
+    let embedCalls = 0;
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const gatedEmbedder = new MockEmbeddingModelV4({
+      doEmbed: async ({ values }) => {
+        embedCalls++;
+        if (embedCalls > 1) await gate;
+        return { embeddings: values.map(() => new Array<number>(EMBEDDING_DIMENSIONS).fill(0)), warnings: [] };
+      },
+    });
+    const model = toolThenTextModel("leerKennen", { naam: "Anna" }, "Leuk je te ontmoeten, Anna!");
+    const brain = createBrain({ db, embedder: gatedEmbedder, type1: type1(), type2: { light: model, heavy: model }, now: () => now, random: () => 0.99 });
+
+    await drain(brain.hear("Ik heet Anna", { gesprekspartner: null }));
+
+    // De stream is afgelopen; de eind-Herinnering ligt er nog niet (de embed hangt op de gate).
+    expect(await db.select().from(memories).where(eq(memories.dynimoId, vero.id))).toHaveLength(0);
+
+    release();
+    await brain.settled();
+
+    const anna = (await db.select().from(persons).where(eq(persons.name, "Anna")))[0]!;
+    const rows = await db.select().from(memories).where(eq(memories.dynimoId, vero.id));
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) expect(row.personId).toBe(anna.id);
+  });
+
+  it("#109: leerKennen wacht een nog-lopende eind-Herinnering van een vorige beurt af (geen race met een latere bezoeker)", async () => {
+    await insertDynimo();
+    // Beurt 1 (onbekende Gesprekspartner, geen tool): zijn eind-Herinnering (embed van de opgeslagen Herinnering-
+    // tekst, te herkennen aan het "Gesprekspartner:"-voorvoegsel) hangt op de gate; recall()'s embed (de kale
+    // uiting, geen voorvoegsel) resolvet altijd meteen. Beurt 2 (óók onbekend) roept meteen leerKennen aan: die
+    // mag pas de unknownSessionMemoryIds snapshotten nadat beurt 1's opslag echt klaar is. De gate wordt pas
+    // vrijgegeven ná het tool-call-event van beurt 2 (dan is leerKennenPersoon() al aangeroepen), zodat de test
+    // niet toevallig slaagt door een gunstige microtask-volgorde.
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const gatedEmbedder = new MockEmbeddingModelV4({
+      doEmbed: async ({ values }) => {
+        if (values.some((value) => value.startsWith("Gesprekspartner:"))) await gate;
+        return { embeddings: values.map(() => new Array<number>(EMBEDDING_DIMENSIONS).fill(0)), warnings: [] };
+      },
+    });
+    const model = new MockLanguageModelV4({
+      doStream: [
+        {
+          // beurt 1: gewoon antwoord, geen tool
+          stream: simulateReadableStream({
+            chunks: [
+              { type: "stream-start" as const, warnings: [] },
+              { type: "text-start" as const, id: "1" },
+              { type: "text-delta" as const, id: "1", delta: "Oké, genoteerd." },
+              { type: "text-end" as const, id: "1" },
+              { type: "finish" as const, usage: NULL_USAGE, finishReason: STOP },
+            ],
+          }),
+        },
+        {
+          // beurt 2, stap 1: leerKennen
+          stream: simulateReadableStream({
+            chunks: [
+              { type: "stream-start" as const, warnings: [] },
+              { type: "tool-call" as const, toolCallId: "call-1", toolName: "leerKennen", input: JSON.stringify({ naam: "Anna" }) },
+              { type: "finish" as const, usage: NULL_USAGE, finishReason: TOOL_CALLS },
+            ],
+          }),
+        },
+        {
+          // beurt 2, stap 2: antwoord ná het tool-resultaat
+          stream: simulateReadableStream({
+            chunks: [
+              { type: "stream-start" as const, warnings: [] },
+              { type: "text-start" as const, id: "1" },
+              { type: "text-delta" as const, id: "1", delta: "Leuk je te ontmoeten, Anna!" },
+              { type: "text-end" as const, id: "1" },
+              { type: "finish" as const, usage: NULL_USAGE, finishReason: STOP },
+            ],
+          }),
+        },
+      ],
+    });
+    const brain = createBrain({ db, embedder: gatedEmbedder, type1: type1(), type2: { light: model, heavy: model }, now: () => now, random: () => 0.99 });
+
+    await drain(brain.hear("Ik ben een vreemdeling.", { gesprekspartner: null }));
+    // Beurt 1 is afgelopen; zijn eind-Herinnering ligt er nog niet (de embed hangt op de gate).
+    expect(await db.select().from(memories)).toHaveLength(0);
+
+    const turn2Events = brain.hear("Ik heet Anna", { gesprekspartner: null });
+    const iterator = turn2Events[Symbol.asyncIterator]();
+    for (;;) {
+      const { value, done } = await iterator.next();
+      if (done) throw new Error("beurt 2 eindigde vóór het tool-call-event");
+      if (value.type === "tool-call") break;
+    }
+    release();
+    for (;;) {
+      const { done } = await iterator.next();
+      if (done) break;
+    }
+    await brain.settled();
+
+    const anna = (await db.select().from(persons).where(eq(persons.name, "Anna")))[0]!;
+    const rows = await db.select().from(memories);
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) expect(row.personId).toBe(anna.id);
   });
 
   it("koppelt enkel de onbekende-Herinneringen van déze sessie, niet die van de eigenaar", async () => {
@@ -242,6 +358,7 @@ describe("leerKennen (#92)", () => {
     await drain(brain2.hear("Ik ben Anna", { gesprekspartner: null }));
 
     const owner = (await db.select().from(persons).where(eq(persons.owner, true)))[0]!;
+    await Promise.all([brain.settled(), brain2.settled()]);
     const ownerMemories = await db.select().from(memories).where(eq(memories.personId, owner.id));
     expect(ownerMemories).toHaveLength(1); // enkel de eigenaar-beurt van vóór leerKennen, niet verhuisd
     void vero;
@@ -328,6 +445,7 @@ describe("leerKennen (#92)", () => {
     await drain(brain.hear("Ik heet Bert", { gesprekspartner: null }));
     const bert = (await db.select().from(persons).where(eq(persons.name, "Bert")))[0]!;
 
+    await brain.settled();
     const annaMemories = await db.select().from(memories).where(eq(memories.personId, anna.id));
     const bertMemories = await db.select().from(memories).where(eq(memories.personId, bert.id));
     expect(annaMemories.length).toBeGreaterThan(0);

@@ -133,6 +133,7 @@ describe("Droom vertellen bij initiatief", () => {
 
     await drain(brain.hear(instruction!, { initiatief: true }));
 
+    await brain.settled();
     const [after] = await db.select().from(dreams).where(eq(dreams.id, dream.id));
     expect(after!.toldAt).toEqual(now);
     expect(await brain.considerInitiative()).not.toContain("een trein door de wolken");
@@ -149,6 +150,7 @@ describe("Droom vertellen bij initiatief", () => {
     expect(instruction).not.toContain("een trein door de wolken");
     await drain(brain.hear(instruction!, { initiatief: true }));
 
+    await brain.settled();
     const [d] = await db.select().from(dreams).where(eq(dreams.id, dream.id));
     const [m] = await db.select().from(memories).where(eq(memories.id, memory.id));
     expect(d!.toldAt).toBeNull();

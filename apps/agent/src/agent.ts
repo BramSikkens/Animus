@@ -104,6 +104,9 @@ export default defineAgent<AgentUserData>({
 
     ctx.addShutdownCallback(async () => frames.dispose());
     ctx.addShutdownCallback(async () => {
+      // Shutdown-callbacks draaien parallel (Promise.allSettled): settled() moet hier, vóór db.$client.end(),
+      // wachten in dezelfde callback — anders gaan Herinneringen die nog op de achtergrond opslaan (#109) verloren.
+      await brain.settled();
       await db.$client.end();
     });
 

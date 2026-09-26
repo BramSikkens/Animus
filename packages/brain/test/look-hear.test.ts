@@ -302,6 +302,7 @@ describe("Kijken in hear()", () => {
     await hear(brain, "Oke, dank je");
     expect(countImages(t2.prompts[1])).toBe(0);
 
+    await brain.settled();
     const stored = await db.select({ text: memories.text }).from(memories).where(eq(memories.dynimoId, row.id));
     for (const memory of stored) expect(typeof memory.text).toBe("string");
     expect(stored.some((memory) => memory.text.includes("Wat zie je?"))).toBe(true);

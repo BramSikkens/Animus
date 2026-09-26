@@ -301,6 +301,7 @@ describe("hear(..., { initiatief: true })", () => {
     expect(events[0]).toMatchObject({ type: "mood", emotion: "blij" });
     const [row] = await db.select().from(dynimos).where(eq(dynimos.id, dynimo.id));
     expect(row).toMatchObject({ moodValues: { blij: 95 } });
+    await brain.settled();
     const stored = await db.select().from(memories);
     expect(stored).toHaveLength(1);
     expect(stored[0]!.text).toBe("Vero: Zeg, ik dacht net aan de zee.");

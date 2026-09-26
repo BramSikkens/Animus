@@ -122,6 +122,8 @@ function fakeJobQueue() {
       enqueued.push({ name, payload, opts });
       return { id: "fake-job-id" } as Job;
     }),
+    // Reflectie-jobs wachten nooit op hun resultaat (#125); enkel hier om aan JobsDep te voldoen.
+    finished: vi.fn(async () => ({})),
   };
 }
 

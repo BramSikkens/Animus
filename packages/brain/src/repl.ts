@@ -51,6 +51,7 @@ async function main(): Promise<void> {
     }
     rl.prompt();
   }
+  await brain.settled();
   await jobs.close();
   await db.$client.end();
 }

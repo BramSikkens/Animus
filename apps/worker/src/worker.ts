@@ -23,6 +23,7 @@ const worker = startWorker({
   connection: redisUrl,
   handlers: {
     reflectie: (payload) => brain.runReflection(payload.dynimoId, payload),
+    herinnering: (payload) => brain.storeMemory(payload),
   },
 });
 

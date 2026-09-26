@@ -103,7 +103,6 @@ export default defineAgent<AgentUserData>({
 
     // Reflectie via de wachtrij (#125, ADR-0022): de agent plant enkel in, de worker voert uit.
     const jobs = createJobQueue({ connection: process.env.REDIS_URL ?? "redis://localhost:6379" });
-    ctx.addShutdownCallback(async () => jobs.close());
 
     // In-process (spec: geen aparte brein-API); elke job krijgt zijn eigen brein-instantie.
     // voices: een geboorte vanuit de Galerij kiest net als in het dashboard een stem.
@@ -113,7 +112,9 @@ export default defineAgent<AgentUserData>({
     ctx.addShutdownCallback(async () => {
       // Shutdown-callbacks draaien parallel (Promise.allSettled): settled() moet hier, vóór db.$client.end(),
       // wachten in dezelfde callback — anders gaan Herinneringen die nog op de achtergrond opslaan (#109) verloren.
+      // Idem de wachtrij (#126): settled() wacht op job-resultaten, dus pas daarna de Redis-verbindingen sluiten.
       await brain.settled();
+      await jobs.close();
       await db.$client.end();
     });
 
@@ -420,7 +421,6 @@ export default defineAgent<AgentUserData>({
         void refreshInitiativeAxes().catch(() => {});
       },
       onNotify: () => void publishGallery(),
-      onVoice: () =>
       // Reflectie van de worker (#125): de initiatief-blokkade volgt altijd, het "reflecterend"-gezicht enkel als
       // het de huidige wakkere Dynimo is (een Reflectie bij slapen/wisselen hoort niet meer bij de huidige generatie).
       onReflectie: (phase, dynimoId) => {
@@ -431,6 +431,7 @@ export default defineAgent<AgentUserData>({
         else reflectionDisplay.onFinish(state.key);
       },
         void readState(brain)
+      onVoice: () =>
           .then((state) => applyVoice(state.voice))
           .catch((error: unknown) => console.warn("Stem herladen faalde:", error instanceof Error ? error.message : error)),
       // Personen samengevoegd/verwijderd/opnieuw geleerd (#95): Stemprofielen, de gezien-bijhouding en een lopende

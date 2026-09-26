@@ -1,14 +1,16 @@
-import { Queue, Worker, type Job, type JobsOptions } from "bullmq";
+import { Queue, QueueEvents, Worker, type Job, type JobsOptions } from "bullmq";
 import { Redis as IORedis } from "ioredis";
 
 export const QUEUE_NAME = "animus";
 
 // ponytail: "ping" blijft naast de echte jobs staan, puur om de wachtrij-fundering (queue, worker, retries) te
-// bewijzen in jobs.test.ts. Herinnering/backfill volgen in #126–#127.
+// bewijzen in jobs.test.ts. Backfill volgt in #127.
 export type JobPayloads = {
   ping: { value: number };
   /** Reflectie van één Dynimo (#125): bij slapen/wisselen (sleeping: true) of bij stilte (sleeping: false). */
   reflectie: { dynimoId: number; sleeping: boolean; aanwezig?: number[] };
+  /** Herinnering opslaan (#126): dezelfde velden als storeMemory() nodig heeft; model idem #123. */
+  herinnering: { dynimoId: number; personId: number | null; text: string; impression: number; model: string | null };
 };
 
 export const DEFAULT_JOB_OPTIONS: JobsOptions = {
@@ -22,12 +24,19 @@ function connect(connection: string): IORedis {
   return new IORedis(connection, { maxRetriesPerRequest: null });
 }
 
-/** Enkel `enqueue`, zoals `createBrain`'s `jobs`-dep hem gebruikt (inplannen, nooit de queue zelf beheren). */
-export type JobEnqueue = ReturnType<typeof createJobQueue>["enqueue"];
+/** Wat `createBrain`'s `jobs`-dep nodig heeft (#126): inplannen, en op een resultaat wachten. */
+export type JobsDep = Pick<ReturnType<typeof createJobQueue>, "enqueue" | "finished">;
 
 export function createJobQueue({ connection, prefix }: { connection: string; prefix?: string }) {
   const redis = connect(connection);
   const queue = new Queue<JobPayloads[keyof JobPayloads]>(QUEUE_NAME, { connection: redis, prefix });
+  // Lui aangemaakt: enkel nodig zodra iets op een job wacht (finished()); reflectie-jobs doen dat nooit. Eigen
+  // connectie (niet de gedeelde `redis` hierboven): QueueEvents blokkeert op XREAD, dat zou queue.add() ophouden.
+  let queueEvents: QueueEvents | undefined;
+  function events(): QueueEvents {
+    queueEvents ??= new QueueEvents(QUEUE_NAME, { connection: { url: connection }, prefix });
+    return queueEvents;
+  }
 
   return {
     async enqueue<K extends keyof JobPayloads>(
@@ -37,7 +46,12 @@ export function createJobQueue({ connection, prefix }: { connection: string; pre
     ): Promise<Job> {
       return queue.add(name, payload, { ...DEFAULT_JOB_OPTIONS, ...opts });
     },
+    /** Wacht op het resultaat van `job` (#126); gooit als de job definitief mislukt of `ttlMs` verstrijkt. */
+    async finished(job: Job, ttlMs?: number): Promise<unknown> {
+      return job.waitUntilFinished(events(), ttlMs);
+    },
     async close(): Promise<void> {
+      await queueEvents?.close();
       await queue.close();
       await redis.quit();
     },

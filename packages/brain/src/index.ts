@@ -18,7 +18,7 @@ import { z } from "zod";
 import type { Db } from "@animus/db";
 import { dreams, drives, dynimos, epitaphs, faceEmbeddings, familiarities, memories, persons, settings, voiceProfiles as voiceProfilesTable } from "@animus/db/schema";
 import type { Type2Catalog } from "./config.js";
-import type { JobEnqueue } from "./jobs.js";
+import type { JobPayloads, JobsDep } from "./jobs.js";
 import { formatAge } from "./age.js";
 import { archetypeOfferText, getArchetype, pickOffer } from "./archetypes.js";
 import { drivesPromptBlock, isActiveDrive, type DriveRow } from "./drives.js";
@@ -174,6 +174,12 @@ export type Brain = {
    */
   runReflection(dynimoId: number, options: { sleeping: boolean; aanwezig?: number[] }): Promise<void>;
   /**
+   * Slaat een Herinnering écht op (#126: door de worker aangeroepen na een `herinnering`-job, buiten deze
+   * brain-instantie om ingepland via remember()). Bevat de FK-terugval van #107. Gooit door bij een andere fout
+   * (bv. embed-fout): BullMQ moet de job dan als mislukt zien en herkansen.
+   */
+  storeMemory(payload: JobPayloads["herinnering"]): Promise<{ id: number }>;
+  /**
    * Meldt van buitenaf (#125: de agent op basis van een NOTIFY van de worker) dat een Reflectie van deze Dynimo
    * start (`running: true`) of eindigt (`running: false`). Werkt dezelfde teller bij als reflectDynimo() intern
    * gebruikt, zodat considerInitiative() ook een Reflectie die in een ander proces (de worker) draait respecteert.
@@ -310,9 +316,10 @@ export function createBrain(deps: {
    * Achtergrondtaken via de wachtrij (#125, ADR-0022). Aanwezig: reflectAll()/reflect() plannen een reflectie-job
    * in i.p.v. zelf te reflecteren en wachten er niet op. Ontbreekt deze: exact het huidige gedrag (rechtstreeks
    * reflecteren) — zo blijven tests en CLI's zonder Redis werken. De worker geeft dit nooit mee: die voert de job
-   * juist zelf uit via runReflection().
+   * juist zelf uit via runReflection(). Ook remember() plant hiermee een `herinnering`-job in i.p.v. zelf op te
+   * slaan (#126); de worker schrijft via storeMemory(), de producer wacht op de achtergrond op het resultaat.
    */
-  jobs?: { enqueue: JobEnqueue };
+  jobs?: JobsDep;
 }): Brain {
   const now = deps.now ?? (() => new Date());
   const random = deps.random ?? Math.random;
@@ -379,8 +386,10 @@ export function createBrain(deps: {
     pendingWrites.add(promise);
     promise.finally(() => pendingWrites.delete(promise));
   }
+  // Herhalen tot de Set leeg is (#126): remember() met deps.jobs voegt zíjn eigen achtergrondwachter pas tóe
+  // terwijl de buitenste trackBackground al liep — één enkele allSettled() zou die nieuwe wachter missen.
   async function settled(): Promise<void> {
-    await Promise.allSettled(pendingWrites);
+    while (pendingWrites.size > 0) await Promise.allSettled([...pendingWrites]);
   }
 
   // Modelwissel-experiment (#123): id van een Type2-model voor op de Herinnering. `deps.type2.light/.heavy` zijn
@@ -1031,6 +1040,23 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     return row!.id;
   }
 
+  // Hoe lang de producer (remember() met deps.jobs) op het job-resultaat wacht (#126) vóór hij opgeeft; ruim boven
+  // de standaard-retrybudget van DEFAULT_JOB_OPTIONS (5 pogingen, exponentiële backoff, samen ca. 30s).
+  const MEMORY_JOB_TTL_MS = 60_000;
+
+  // De echte opslag + FK-terugval van #107 (Persoon intussen verwijderd/samengevoegd → zonder Persoon bewaren);
+  // door remember() gebruikt in-process, en door de worker via storeMemory() (#126, na een `herinnering`-job).
+  // Gooit door bij een andere fout (bv. embed-fout): de aanroeper (remember()) vangt 'm zelf, of BullMQ herkanst.
+  async function storeMemory({ dynimoId, personId, text, impression, model }: JobPayloads["herinnering"]): Promise<{ id: number }> {
+    try {
+      return { id: await insertMemory(text, dynimoId, impression, personId, model) };
+    } catch (error) {
+      if (personId === null || violatedForeignKey(error) !== "memories_person_id_persons_id_fk") throw error;
+      console.warn(`Herinnering zonder Persoon opgeslagen: Persoon ${personId} bestaat niet (meer).`);
+      return { id: await insertMemory(text, dynimoId, impression, null, model) };
+    }
+  }
+
   // De expliciete onthoud-tool geeft de neutrale Indruk 0.5; de eindremember van `hear` geeft die van Type1 mee.
   // personId (#91) komt expliciet van de aanroeper (geen instance-state): elke beurt (en zijn onthoud-tool) sluit
   // over zijn eigen Gesprekspartner, zodat een overlappende tweede beurt hem niet kan overschrijven.
@@ -1038,19 +1064,39 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
   // mag enkel naar zíjn eigen, mogelijk intussen vervangen sessie schrijven. Verplicht en apart genoemd (niet
   // `session`): anders bindt een vergeten argument stilzwijgend aan de instance-brede `session` en is de bug van
   // punt 1 zo weer terug.
+  // Met `deps.jobs` (#126): plant enkel een `herinnering`-job in en geeft meteen true terug zodra die ingepland is
+  // (de onthoud-tool meldt dan al "onthouden"); op de achtergrond (trackBackground, zodat settled() erop wacht)
+  // wacht de producer met jobs.finished() op de echte id van de worker (storeMemory) en schrijft die pas dán in
+  // `s` — exact dezelfde sessie-bookkeeping als het in-process pad hieronder. Faalt dat wachten (definitief
+  // mislukt of ttl), dan loggen en niets breken: de Herinnering is dan gewoon kwijt, net als een mislukte insert
+  // hieronder. Zonder `deps.jobs`: ongewijzigd gedrag.
   async function remember(memoryText: string, dynimoId = current?.id, impression = 0.5, personId: number | null = null, s: Session, model: string | null = null): Promise<boolean> {
     if (dynimoId === undefined) return false;
-    try {
-      let id: number;
+    if (deps.jobs) {
+      const jobs = deps.jobs;
       try {
-        id = await insertMemory(memoryText, dynimoId, impression, personId, model);
+        const job = await jobs.enqueue("herinnering", { dynimoId, personId, text: memoryText, impression, model });
+        trackBackground(
+          jobs
+            .finished(job, MEMORY_JOB_TTL_MS)
+            .then((result) => {
+              const { id } = result as { id: number };
+              s.sessionMemoryIds.push(id);
+              // #92: apart bijgehouden zodat leerKennen precies de onbekende-Herinneringen van déze sessie kan koppelen.
+              if (personId === null) s.unknownSessionMemoryIds.push(id);
+            })
+            .catch((error) => {
+              console.warn("Herinnering opslaan (via job) faalde:", error instanceof Error ? error.message : error);
+            }),
+        );
+        return true;
       } catch (error) {
-        // #107: de Gesprekspartner is intussen verwijderd/samengevoegd; de Herinnering dan zonder Persoon bewaren.
-        // Bewust niet bij unknownSessionMemoryIds: ze hoorde bij een bekende Persoon, niet bij een latere leerKennen.
-        if (personId === null || violatedForeignKey(error) !== "memories_person_id_persons_id_fk") throw error;
-        console.warn(`Herinnering zonder Persoon opgeslagen: Persoon ${personId} bestaat niet (meer).`);
-        id = await insertMemory(memoryText, dynimoId, impression, null, model);
+        console.warn("Herinnering inplannen faalde:", error instanceof Error ? error.message : error);
+        return false;
       }
+    }
+    try {
+      const { id } = await storeMemory({ dynimoId, personId, text: memoryText, impression, model });
       s.sessionMemoryIds.push(id);
       // #92: apart bijgehouden zodat leerKennen precies de onbekende-Herinneringen van déze sessie kan koppelen.
       if (personId === null) s.unknownSessionMemoryIds.push(id);
@@ -2076,6 +2122,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     backfill,
     reflect,
     runReflection,
+    storeMemory,
     noteReflection,
     considerInitiative,
     hear,

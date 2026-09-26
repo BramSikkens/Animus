@@ -103,6 +103,26 @@ describe("jobs", () => {
     warn.mockRestore();
   });
 
+  it("finished() geeft het resultaat van de job via een eigen, gedeelde QueueEvents (#126)", async () => {
+    const prefix = `animus_test_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    const queue = createJobQueue({ connection: REDIS_URL, prefix });
+    const worker = startWorker({
+      connection: REDIS_URL,
+      prefix,
+      handlers: {
+        ping: async (payload) => ({ pong: payload.value * 2 }),
+      },
+    });
+    cleanup.push(() => worker.close());
+    cleanup.push(() => queue.close());
+    cleanup.push(() => obliterate(prefix));
+
+    const job = await queue.enqueue("ping", { value: 21 });
+    const result = await queue.finished(job);
+
+    expect(result).toEqual({ pong: 42 });
+  });
+
   it("dedupliceert: een tweede enqueue met dezelfde deduplication-id terwijl de eerste nog loopt roept de handler één keer aan", async () => {
     const prefix = `animus_test_${Date.now()}_${Math.random().toString(36).slice(2)}`;
     const queue = createJobQueue({ connection: REDIS_URL, prefix });

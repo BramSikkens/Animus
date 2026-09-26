@@ -450,7 +450,8 @@ const NAAM_SCHEMA = z
   .trim()
   .min(1)
   .max(40)
-  .regex(NAAM_PATTERN, { message: "ongeldige tekens in naam" });
+  // refine i.p.v. regex: een pattern met \p{L} belandt in het tool-schema en OpenAI weigert dat.
+  .refine((naam) => NAAM_PATTERN.test(naam), { message: "ongeldige tekens in naam" });
 
 // De tegenpool remt vanzelf af (ADR-0015); Type1 hoeft die niet ook nog omlaag te scoren.
 const pairHint = (emotion: Emotion) => {

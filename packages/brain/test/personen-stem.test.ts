@@ -195,6 +195,21 @@ describe("leerKennen (#92)", () => {
     void vero;
   });
 
+  it("het tool-schema bevat geen regex-pattern (OpenAI weigert \\p{L})", async () => {
+    await insertDynimo();
+    let schema = "";
+    const model = new MockLanguageModelV4({
+      doStream: async (options) => {
+        const leerKennen = options.tools?.find((t) => t.name === "leerKennen");
+        if (leerKennen && "inputSchema" in leerKennen) schema = JSON.stringify(leerKennen.inputSchema);
+        return textModel().doStream(options);
+      },
+    });
+    await drain(brainWith(model).hear("Hoi", { gesprekspartner: null }));
+    expect(schema).toContain("naam");
+    expect(schema).not.toContain("pattern");
+  });
+
   it("maakt de Persoon aan, koppelt de onbekende-Herinneringen van deze sessie en de eind-Herinnering, yieldt persoon-event", async () => {
     const vero = await insertDynimo();
     const model = toolThenTextModel("leerKennen", { naam: "Anna" }, "Leuk je te ontmoeten, Anna!");

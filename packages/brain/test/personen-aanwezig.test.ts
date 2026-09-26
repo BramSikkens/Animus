@@ -148,7 +148,7 @@ describe("discretieregel in recall() (#94)", () => {
     const t2 = type2();
     const brain = brainWith(t2.model);
 
-    await drain(brain.hear("Hoi", { gesprekspartner: null }));
+    await drain(brain.hear("Hoi", { gesprekspartner: { soort: "onbekend" } }));
 
     expect(t2.prompts[0]).not.toContain("Sommige herinneringen komen uit gesprekken met anderen");
   });
@@ -216,7 +216,7 @@ describe("privacy-reviewfix: geen impliciete eigenaar-fallback bij een expliciet
     const t2 = type2();
     const brain = brainWith(t2.model, () => 0); // rng 0: de kansworp voor de Spontane herinnering slaagt altijd
 
-    await drain(brain.hear("Hoi", { gesprekspartner: null }));
+    await drain(brain.hear("Hoi", { gesprekspartner: { soort: "onbekend" } }));
 
     // recall() zelf kent geen muur (eigenaar-geheim mag via een gewone Herinnering nog ophaalbaar zijn); enkel de
     // Spontane herinnering (die wél op aanwezigen filtert) mag hem niet aanhalen.

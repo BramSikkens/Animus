@@ -1,4 +1,5 @@
 import type { Vertrouwdheid } from "@animus/brain/kenmerken";
+import type { Gesprekspartner } from "@animus/brain/perception";
 
 export type VertrouwdheidDeps = {
   familiarityOf: (dynimoId: number, personId?: number) => Promise<number>;
@@ -6,15 +7,15 @@ export type VertrouwdheidDeps = {
 };
 
 /**
- * Vertrouwdheid (#105) met de Gesprekspartner van een beurt. `gesprekspartner` zoals hear() dat kent: een bekende
- * Persoon (number), onbekend gezicht/stem (null), of geen signaal (undefined) -> valt terug op de eigenaar, net
- * als hear() zelf.
+ * Vertrouwdheid (#105) met de Gesprekspartner van een beurt. `gesprekspartner` zoals hear() dat kent (#115): een
+ * bekende Persoon, onbekend gezicht/stem, of geen-signaal -> valt terug op de eigenaar, net als hear() zelf.
  */
-export async function vertrouwdheidFor(deps: VertrouwdheidDeps, dynimoId: number, gesprekspartner: number | null | undefined): Promise<Vertrouwdheid> {
-  if (gesprekspartner === null) return { onbekend: true };
-  const waarde = await deps.familiarityOf(dynimoId, gesprekspartner ?? undefined);
+export async function vertrouwdheidFor(deps: VertrouwdheidDeps, dynimoId: number, gesprekspartner: Gesprekspartner): Promise<Vertrouwdheid> {
+  if (gesprekspartner.soort === "onbekend") return { onbekend: true };
+  const personId = gesprekspartner.soort === "persoon" ? gesprekspartner.personId : undefined;
+  const waarde = await deps.familiarityOf(dynimoId, personId);
   const persons = await deps.listPersons();
-  const personId = gesprekspartner ?? persons.find((p) => p.owner)?.id;
-  const person = persons.find((p) => p.id === personId);
+  const resolvedId = personId ?? persons.find((p) => p.owner)?.id;
+  const person = persons.find((p) => p.id === resolvedId);
   return person ? { naam: person.name, waarde } : { onbekend: true };
 }

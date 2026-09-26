@@ -21,7 +21,7 @@ _Avoid_: complexiteit, moeilijkheidsgraad
 ### Geheugen
 
 **Gesprekspartner**:
-Wie er in deze beurt met de Dynimo praat: een bekende Persoon of *onbekend*. De stem bepaalt wie praat; is die onzeker en staat er precies één gezicht in beeld, dan is het die Persoon. Tot fase 3 was er één: de eigenaar.
+Wie er in deze beurt met de Dynimo praat: een bekende Persoon, *onbekend*, of *geen-signaal*. De stem bepaalt wie praat; is die onzeker en staat er precies één gezicht in beeld, dan is het die Persoon. Levert dat niets op, dan is de Gesprekspartner *onbekend* zodra er perceptie actief is (camera of stemherkenning) — pas zonder enige perceptie (geen camera én geen stemherkenning) valt hij terug op *geen-signaal*, en daarmee op de eigenaar (`hear()` behandelt "weggelaten" hetzelfde als *geen-signaal*). Tot fase 3 was er één: de eigenaar.
 _Avoid_: gebruiker, user
 
 **Persoon** (fase 3):

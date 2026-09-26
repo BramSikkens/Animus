@@ -35,7 +35,7 @@ import { EMOTIONS, oppositeOf, type Emotion } from "./emotion.js";
 import { SEEDS } from "./seeds.js";
 import { createTools } from "./tools.js";
 import { chooseGenesisVoice, type GenesisVoiceDeps } from "./genesis-voice.js";
-import { DEFAULT_FACE_MATCH_DISTANCE, type Aanleiding } from "./perception.js";
+import { DEFAULT_FACE_MATCH_DISTANCE, type Aanleiding, type Gesprekspartner } from "./perception.js";
 export { defaultVoiceDeps } from "./genesis-voice.js";
 
 export { EMOTIONS, type Emotion };
@@ -164,15 +164,15 @@ export type Brain = {
    * Praat met de Wakker Dynimo (elke beurt uit de database gelezen). Niemand wakker: geen events.
    * Met `initiatief` is `text` de instructie uit `considerInitiative()` i.p.v. een uiting van de Gesprekspartner:
    * geen Type1-classificatie (Stemming blijft), en de herinnering bevat enkel wat de Dynimo zei.
-   * `gesprekspartner` (#91): een Persoon-id, `null` = onbekend (Vertrouwdheid 0.2, nooit opgeslagen, geen Persoon op
-   * de Herinnering), weggelaten = de eigenaar. Bij `initiatief` krijgt de Herinnering ook de eigenaar tenzij hier
-   * een Gesprekspartner is meegegeven.
+   * `gesprekspartner` (#91/#115): "persoon" (een Persoon-id), "onbekend" (Vertrouwdheid 0.2, nooit opgeslagen, geen
+   * Persoon op de Herinnering), of "geen-signaal" (weggelaten telt ook als "geen-signaal") = de eigenaar. Bij
+   * `initiatief` krijgt de Herinnering ook de eigenaar tenzij hier een Gesprekspartner is meegegeven.
    * `aanwezig` (#93/#94): de Persoon-ids die nu in beeld zijn (gezichtsherkenning); Type2 krijgt na het cachepunt wie
    * er aanwezig is (eigenaar als "je eigenaar", onbekende ids overgeslagen). Weggelaten: geen regel (zoals nu). Samen
    * met de Gesprekspartner bepaalt dit de voorrang bij het ophalen van Herinneringen en de Spontane herinnering
    * (#94); zonder beide de eigenaar.
    */
-  hear(text: string, options?: { initiatief?: boolean; gesprekspartner?: number | null; aanwezig?: number[] }): AsyncIterable<BrainEvent>;
+  hear(text: string, options?: { initiatief?: boolean; gesprekspartner?: Gesprekspartner; aanwezig?: number[] }): AsyncIterable<BrainEvent>;
   /**
    * Wacht tot alle achtergrondschrijfacties van hear() (Herinnering opslaan, lastRecalledAt/toldAt bijwerken)
    * klaar zijn (#109). Nodig in tests die direct na hear() de database lezen, en vóór het afsluiten van het
@@ -1100,21 +1100,21 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     return { role: "system", content: `Leeftijd: ${formatAge(now().getTime() - being.bornAt.getTime())}` };
   }
 
-  // "Aanwezig" (#94, privacy-reviewfix): zijn `aanwezig` én de Gesprekspartner allebei weggelaten (undefined), dan
-  // is er geen enkel signaal en telt de eigenaar als aanwezig (huidig gedrag). Is minstens één van beide wél
-  // meegegeven — ook een lege aanwezig-lijst of een expliciet onbekende (`null`) Gesprekspartner — dan telt enkel
-  // wie er echt is: een niet-herkende vreemde mag nooit de eigenaar als aanwezig krijgen (en dus diens Spontane
-  // herinnering aanhalen). Enkel een bestaande eigenaar-rij lezen (geen insert).
+  // "Aanwezig" (#94/#115, privacy-reviewfix): is de Gesprekspartner "geen-signaal" én `aanwezig` weggelaten
+  // (undefined), dan is er geen enkel signaal en telt de eigenaar als aanwezig (huidig gedrag). Is minstens één van
+  // beide wél een echt signaal — een aanwezig-lijst (ook leeg) of een expliciet "onbekende"/"persoon" Gesprekspartner
+  // — dan telt enkel wie er echt is: een niet-herkende vreemde mag nooit de eigenaar als aanwezig krijgen (en dus
+  // diens Spontane herinnering aanhalen). Enkel een bestaande eigenaar-rij lezen (geen insert).
   // `ownerId` (#109): al opgehaald door de aanroeper (hear()) i.p.v. hier nog eens de eigenaar te selecteren;
   // considerInitiative geeft hem niet mee en valt terug op zijn eigen getOwnerId()-lookup.
-  async function presentPersonIds(gesprekspartnerOption: number | null | undefined, aanwezigOption: number[] | undefined, ownerId?: number): Promise<number[]> {
-    if (gesprekspartnerOption === undefined && aanwezigOption === undefined) {
+  async function presentPersonIds(gesprekspartner: Gesprekspartner, aanwezigOption: number[] | undefined, ownerId?: number): Promise<number[]> {
+    if (gesprekspartner.soort === "geen-signaal" && aanwezigOption === undefined) {
       if (ownerId !== undefined) return [ownerId];
       const [owner] = await deps.db.select({ id: persons.id }).from(persons).where(eq(persons.owner, true));
       return owner ? [owner.id] : [];
     }
     const ids = new Set(aanwezigOption ?? []);
-    if (typeof gesprekspartnerOption === "number") ids.add(gesprekspartnerOption);
+    if (gesprekspartner.soort === "persoon") ids.add(gesprekspartner.personId);
     return [...ids];
   }
 
@@ -1606,7 +1606,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     });
   }
 
-  async function* hear(text: string, options: { initiatief?: boolean; gesprekspartner?: number | null; aanwezig?: number[] } = {}): AsyncIterable<BrainEvent> {
+  async function* hear(text: string, options: { initiatief?: boolean; gesprekspartner?: Gesprekspartner; aanwezig?: number[] } = {}): AsyncIterable<BrainEvent> {
     // Elke beurt opnieuw: een ander proces (dashboard) kan intussen wisselen van Wakker Dynimo.
     const [awake] = await deps.db.select().from(dynimos).where(isNotNull(dynimos.awakeSince));
     if (!awake) {
@@ -1628,16 +1628,19 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
         return null;
       },
     );
+    // Weggelaten telt hetzelfde als expliciet "geen-signaal" (#115).
+    const gesprekspartner: Gesprekspartner = options.gesprekspartner ?? { soort: "geen-signaal" };
     // getOwnerId en loadDrives hangen niet van elkaar af (#109): parallel. loadDrives moet vóór Type1 klaar zijn
     // (driveRows zit in zijn context); getOwnerId enkel als er straks ook echt een eigenaar-fallback nodig is
-    // (gesprekspartner weggelaten) — anders (een expliciete, ook onbekende, Gesprekspartner) precies als voorheen
-    // geen eigenaar-lookup. Die ene ownerId dient meteen ook presentPersonIds verderop (geen dubbele lookup per beurt).
-    const [ownerId, driveRows] = await Promise.all([options.gesprekspartner === undefined ? getOwnerId() : Promise.resolve(undefined), loadDrives(awake.id)]);
-    // Persoon van deze beurt (#91): meegegeven Gesprekspartner (null = onbekend), anders de eigenaar. Ook bij
+    // (Gesprekspartner "geen-signaal") — anders (een expliciete, ook onbekende, Gesprekspartner) precies als
+    // voorheen geen eigenaar-lookup. Die ene ownerId dient meteen ook presentPersonIds verderop (geen dubbele
+    // lookup per beurt).
+    const [ownerId, driveRows] = await Promise.all([gesprekspartner.soort === "geen-signaal" ? getOwnerId() : Promise.resolve(undefined), loadDrives(awake.id)]);
+    // Persoon van deze beurt (#91/#115): meegegeven Gesprekspartner ("onbekend" = null), anders de eigenaar. Ook bij
     // initiatief: die krijgt de eigenaar tenzij een Gesprekspartner is meegegeven. Lokaal (geen instance-state):
     // een overlappende tweede beurt (bv. initiatief) mag deze niet kunnen overschrijven.
     // `let`: leerKennen (#92) bindt de rest van déze beurt aan de nieuw aangemaakte Persoon.
-    let personId = options.gesprekspartner !== undefined ? options.gesprekspartner : ownerId!;
+    let personId = gesprekspartner.soort === "persoon" ? gesprekspartner.personId : gesprekspartner.soort === "onbekend" ? null : ownerId!;
     const baseEmotion = baseEmotionOf(awake);
     const stored = storedMoodOf(awake);
     const boosted = boostOnBirthday(awake, stored, baseEmotion);
@@ -1699,10 +1702,10 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
         ? deps.db.select({ name: persons.name, owner: persons.owner }).from(persons).where(inArray(persons.id, options.aanwezig))
         : Promise.resolve([]),
     );
-    // "Aanwezig" (#94): de ruwe opties (niet de al op de eigenaar teruggevallen `personId`) — een expliciet
-    // onbekende Gesprekspartner (`null`) mag zelf geen eigenaar-fallback triggeren. Stuurt de recall-bonus en
+    // "Aanwezig" (#94): de ruwe Gesprekspartner (niet de al op de eigenaar teruggevallen `personId`) — een
+    // expliciet "onbekende" Gesprekspartner mag zelf geen eigenaar-fallback triggeren. Stuurt de recall-bonus en
     // de Spontane herinnering.
-    const presentIdsPromise = safe(presentPersonIds(options.gesprekspartner, options.aanwezig, ownerId));
+    const presentIdsPromise = safe(presentPersonIds(gesprekspartner, options.aanwezig, ownerId));
 
     const { deltas: type1Deltas, indruk, intent, kijken } = await (options.initiatief
       ? Promise.resolve<Type1Result>({ deltas: {}, indruk: 0.2, intent: "simpel", kijken: initiatiefKijken })
@@ -2146,9 +2149,9 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
         }`;
       }
       const axes = rowAxes(awake);
-      // #94: considerInitiative kent geen Gesprekspartner-optie (dus altijd "weggelaten"); enkel zonder aanwezig
+      // #94: considerInitiative kent geen Gesprekspartner-optie (dus altijd "geen-signaal"); enkel zonder aanwezig
       // (ook weggelaten) valt dit terug op de eigenaar.
-      const presentIds = await presentPersonIds(undefined, options.aanwezig);
+      const presentIds = await presentPersonIds({ soort: "geen-signaal" }, options.aanwezig);
       const spontaneous = axes ? await pickSpontaneous(awake.id, axes, SPONTANEOUS_INITIATIVE_CHANCE, presentIds) : null;
       s.pendingSpontaneousId = spontaneous?.id;
       s.pendingDreamId = undefined;

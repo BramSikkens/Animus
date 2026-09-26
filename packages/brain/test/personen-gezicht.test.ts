@@ -222,7 +222,7 @@ describe("recognizeFaces (#93)", () => {
     const brain = createBrain({ db, embedder: embedder(), type1: type1(), type2: { light: toolThenTextModel("leerKennen", { naam: "Bert" }, "Hoi Bert!"), heavy: textModel() }, now: () => now, random: () => 0.99, faceMatchDistance: 10 });
 
     await brain.recognizeFaces([vectorAt(50)]); // ver van niets: onbekend
-    await drain(brain.hear("Ik heet Bert", { gesprekspartner: null }));
+    await drain(brain.hear("Ik heet Bert", { gesprekspartner: { soort: "onbekend" } }));
 
     const bert = (await db.select().from(persons).where(eq(persons.name, "Bert")))[0]!;
     const linked = await db.select().from(faceEmbeddings).where(eq(faceEmbeddings.personId, bert.id));
@@ -237,7 +237,7 @@ describe("recognizeFaces (#93)", () => {
 
     await brain.recognizeFaces([vectorAt(50)]);
     clock = new Date(now.getTime() + 15_001);
-    await drain(brain.hear("Ik heet Bert", { gesprekspartner: null }));
+    await drain(brain.hear("Ik heet Bert", { gesprekspartner: { soort: "onbekend" } }));
 
     const bert = (await db.select().from(persons).where(eq(persons.name, "Bert")))[0]!;
     expect(await db.select().from(faceEmbeddings).where(eq(faceEmbeddings.personId, bert.id))).toHaveLength(0);
@@ -248,7 +248,7 @@ describe("recognizeFaces (#93)", () => {
     const brain = createBrain({ db, embedder: embedder(), type1: type1(), type2: { light: toolThenTextModel("leerKennen", { naam: "Bert" }, "Hoi Bert!"), heavy: textModel() }, now: () => now, random: () => 0.99, faceMatchDistance: 10 });
 
     await brain.recognizeFaces([vectorAt(1), vectorAt(2), vectorAt(3), vectorAt(4), vectorAt(5), vectorAt(6)]);
-    await drain(brain.hear("Ik heet Bert", { gesprekspartner: null }));
+    await drain(brain.hear("Ik heet Bert", { gesprekspartner: { soort: "onbekend" } }));
 
     const bert = (await db.select().from(persons).where(eq(persons.name, "Bert")))[0]!;
     const linked = await db.select().from(faceEmbeddings).where(eq(faceEmbeddings.personId, bert.id));
@@ -263,7 +263,7 @@ describe("recognizeFaces (#93)", () => {
     const brain = createBrain({ db, embedder: embedder(), type1: type1(), type2: { light: toolThenTextModel("leerKennen", { naam: "Bert" }, "Hoi Bert!"), heavy: textModel() }, now: () => now, random: () => 0.99, faceMatchDistance: 10 });
 
     await brain.recognizeFaces([vectorAt(50)]);
-    await drain(brain.hear("Ik heet Bert", { gesprekspartner: null }));
+    await drain(brain.hear("Ik heet Bert", { gesprekspartner: { soort: "onbekend" } }));
 
     const bert = (await db.select().from(persons).where(eq(persons.name, "Bert")))[0]!;
     expect(await db.select().from(faceEmbeddings).where(eq(faceEmbeddings.personId, bert.id))).toHaveLength(1);

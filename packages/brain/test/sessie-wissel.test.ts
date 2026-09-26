@@ -163,7 +163,7 @@ describe("Eén sessie-object per Wakker-generatie (#114)", () => {
     const brain = createBrain({ db, embedder: gatedEmbedder, type1: type1(), type2: { light: model, heavy: model }, now: () => bornAt, random: () => 0.99 });
 
     // A's beurt: de stream rondt af, maar de eind-Herinnering (achtergrond) hangt nog op de gate.
-    await drain(brain.hear("Hoi", { gesprekspartner: null }));
+    await drain(brain.hear("Hoi", { gesprekspartner: { soort: "onbekend" } }));
     expect(await db.select().from(memories).where(eq(memories.dynimoId, a.id))).toHaveLength(0);
 
     // Wissel: A slaapt, B wordt wakker (nieuwe sessie), vóórdat A's achtergrondschrijfactie klaar is.
@@ -180,7 +180,7 @@ describe("Eén sessie-object per Wakker-generatie (#114)", () => {
 
     // B's leerKennen: als A's Herinnering per ongeluk in B's unknownSessionMemoryIds beland is, koppelt dit hem
     // aan Bo — dat mag niet, ook al zijn het verschillende Dynimo's (leerKennenPersoon filtert niet op dynimoId).
-    await drain(brain.hear("Ik heet Bo", { gesprekspartner: null }));
+    await drain(brain.hear("Ik heet Bo", { gesprekspartner: { soort: "onbekend" } }));
     await brain.settled();
 
     const boPerson = (await db.select().from(persons).where(eq(persons.name, "Bo")))[0]!;

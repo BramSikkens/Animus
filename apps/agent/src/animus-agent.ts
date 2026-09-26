@@ -1,11 +1,11 @@
 import { ReadableStream } from "node:stream/web";
 import type { Brain } from "@animus/brain";
-import { LOOK_TOPIC } from "@animus/brain/perception";
+import { LOOK_TOPIC, type Gesprekspartner } from "@animus/brain/perception";
 import { SOUND_TOPIC, type SoundMessage } from "@animus/brain/sound";
 import { EMOTION_TOPIC, type EmotionMessage } from "@animus/brain/emotion";
 import { llm, voice, type ChatContext, type ChatMessage, type JobContext, type ToolContext } from "@livekit/agents";
 import { withFaceExpressiveness } from "./state-republish.js";
-import { decideGesprekspartner, shouldOverrideGesprekspartner } from "./gesprekspartner.js";
+import { decideGesprekspartner } from "./gesprekspartner.js";
 import { createFaces } from "./faces.js";
 import type { SpeakerId } from "./speaker-id.js";
 import { createSpeakerAudio } from "./speaker-audio.js";
@@ -32,7 +32,9 @@ export type AnimusAgentOptions = {
   getExpressiveness?: () => number;
   speaker?: { speakerId: SpeakerId; audio: ReturnType<typeof createSpeakerAudio> };
   faces: ReturnType<typeof createFaces>;
-  onBeurtAfgelopen?: (gesprekspartner: number | null | undefined) => void;
+  /** Of er nu een (niet-gemute) eigenaar-camera meekijkt (#115: perceptie actief, ook zonder gezicht in beeld). */
+  cameraActive?: () => boolean;
+  onBeurtAfgelopen?: (gesprekspartner: Gesprekspartner) => void;
 };
 
 export class AnimusAgent extends voice.Agent {
@@ -41,9 +43,10 @@ export class AnimusAgent extends voice.Agent {
   readonly #onUtterance: () => void;
   readonly #onMoodValues: (values: EmotionMessage["values"]) => void;
   readonly #getExpressiveness: () => number;
-  readonly #onBeurtAfgelopen: (gesprekspartner: number | null | undefined) => void;
+  readonly #onBeurtAfgelopen: (gesprekspartner: Gesprekspartner) => void;
   readonly #speaker: { speakerId: SpeakerId; audio: ReturnType<typeof createSpeakerAudio> } | undefined;
   readonly #faces: ReturnType<typeof createFaces>;
+  readonly #cameraActive: () => boolean;
   #pendingInitiative: string | undefined;
   // ponytail: hoogstens één lopende inschrijving tegelijk (een scalar, geen wachtrij); twee tegelijk leren kennen
   // in dezelfde sessie komt in de praktijk niet voor.
@@ -52,7 +55,7 @@ export class AnimusAgent extends voice.Agent {
   // vorige nog loopt (die kan de profiler intern al hebben afgerond en losgelaten).
   #enrolling = false;
 
-  constructor({ brain, room, onUtterance, onMoodValues, getExpressiveness = () => 0.5, speaker, faces, onBeurtAfgelopen = () => {} }: AnimusAgentOptions) {
+  constructor({ brain, room, onUtterance, onMoodValues, getExpressiveness = () => 0.5, speaker, faces, cameraActive = () => false, onBeurtAfgelopen = () => {} }: AnimusAgentOptions) {
     // instructions is verplicht op voice.Agent, maar onbenut: llmNode hieronder draait i.p.v. het
     // ingebouwde LLM-pad de brein-kern.
     super({ instructions: "Animus", llm: new BrainPlaceholderLLM() });
@@ -63,6 +66,7 @@ export class AnimusAgent extends voice.Agent {
     this.#getExpressiveness = getExpressiveness;
     this.#speaker = speaker;
     this.#faces = faces;
+    this.#cameraActive = cameraActive;
     this.#onBeurtAfgelopen = onBeurtAfgelopen;
   }
 
@@ -106,23 +110,26 @@ export class AnimusAgent extends voice.Agent {
       }
     }
     const hasSpeaker = this.#speaker !== undefined && initiative === undefined;
-    // Beslisregel (#92/#93): stem zeker → die Persoon; anders precies één bekend gezicht in beeld → die; anders
-    // onbekend. Zonder enig signaal (geen stemherkenning én geen gezicht in beeld) wordt gesprekspartner weggelaten
-    // (hear() valt dan terug op de eigenaar) — dat is het enige geval dat exact het gedrag van vóór stem-/
-    // gezichtsherkenning blijft. Met camera én zonder stemherkenning is de eigenaar zelf (nog zonder gezichts-
-    // embeddings) géén uitzondering: hij begint ook als onbekend gezicht, en de nieuwe Persoon die daaruit ontstaat
-    // moet nadien via het dashboard (#95) weer met "eigenaar" samengevoegd worden.
-    let gesprekspartner: number | null | undefined;
-    if (shouldOverrideGesprekspartner({ hasSpeaker, faces: facesInView })) {
-      gesprekspartner = decideGesprekspartner({ voice: hasSpeaker ? identified && { personId: identified.personId, sure: true } : null, faces: facesInView });
-    }
+    // Fallback-beleid (#115, CONTEXT.md: Gesprekspartner): stem zeker → die Persoon; anders precies één bekend
+    // gezicht in beeld → die; anders, als er perceptie actief is (stemherkenning, een actieve camera, of ooit een
+    // gezicht gezien deze sessie), onbekend; zonder enige perceptie geen-signaal (hear() valt dan terug op de eigenaar) — dat is het
+    // enige geval dat exact het gedrag van vóór stem-/gezichtsherkenning blijft. Met camera én zonder stemherkenning
+    // is de eigenaar zelf (nog zonder gezichts-embeddings) géén uitzondering: hij begint ook als onbekend gezicht,
+    // en de nieuwe Persoon die daaruit ontstaat moet nadien via het dashboard (#95) weer met "eigenaar" samengevoegd
+    // worden.
+    const perceptionActive = hasSpeaker || this.#cameraActive() || this.#faces.seenAny();
+    let gesprekspartner: Gesprekspartner = decideGesprekspartner({
+      voice: hasSpeaker ? identified && { personId: identified.personId, sure: true } : null,
+      faces: facesInView,
+      perceptionActive,
+    });
     if (hasSpeaker && pcm) {
       // Onzeker terwijl er een inschrijving loopt: dan is dit hoogstwaarschijnlijk nog steeds die Persoon (zijn
       // profiel is nog niet compleet genoeg om zichzelf te herkennen).
-      if (identified === null && this.#enrollingPersonId !== undefined) gesprekspartner = this.#enrollingPersonId;
+      if (identified === null && this.#enrollingPersonId !== undefined) gesprekspartner = { soort: "persoon", personId: this.#enrollingPersonId };
       // Enkel voeden als déze beurt ook echt aan de ingeschreven Persoon werd toegeschreven (niet bv. een andere,
       // al bekende stem die net het gesprek overnam), en niet terwijl een vorige enroll()-aanroep nog loopt.
-      if (gesprekspartner === this.#enrollingPersonId && this.#enrollingPersonId !== undefined && pcm.length > 0 && !this.#enrolling) {
+      if (gesprekspartner.soort === "persoon" && gesprekspartner.personId === this.#enrollingPersonId && this.#enrollingPersonId !== undefined && pcm.length > 0 && !this.#enrolling) {
         const enrollingPersonId = this.#enrollingPersonId;
         this.#enrolling = true;
         this.#speaker!.speakerId
@@ -140,16 +147,16 @@ export class AnimusAgent extends voice.Agent {
     }
 
     // tool-*-events uit brain.hear() worden hier genegeerd (ticket #7).
-    return textStream(this.#brain.hear(text, { initiatief: initiative !== undefined, ...(gesprekspartner !== undefined && { gesprekspartner }), ...(aanwezig.length > 0 && { aanwezig }) }), {
+    return textStream(this.#brain.hear(text, { initiatief: initiative !== undefined, gesprekspartner, ...(aanwezig.length > 0 && { aanwezig }) }), {
       // Na afloop van de beurt (#105): de kenmerken opnieuw publiceren met de Gesprekspartner van déze beurt,
       // want de Vertrouwdheid kan tijdens de beurt verschoven zijn.
       onDone: () => this.#onBeurtAfgelopen(gesprekspartner),
       onPersoon: (personId) => {
         // Net leren kennen (#92): het stemprofiel van deze nieuwe Persoon beginnen opbouwen. hear() bindt de rest
         // van déze beurt aan de nieuwe Persoon (reviewfix #105): de Gesprekspartner die onDone hierboven straks
-        // rapporteert moet dus ook bijgewerkt worden, ongeacht wat vóór het antwoord bekend was (onbekend/geen signaal).
+        // rapporteert moet dus ook bijgewerkt worden, ongeacht wat vóór het antwoord bekend was (onbekend/geen-signaal).
         this.#enrollingPersonId = personId;
-        gesprekspartner = personId;
+        gesprekspartner = { soort: "persoon", personId };
       },
       onMood: (message) => {
         // Vóór de eerste tekst (dus vóór de TTS-context van deze beurt opent): emotie in de stem.

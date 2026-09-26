@@ -2,7 +2,7 @@ import { fileURLToPath } from "node:url";
 import { createBrain, defaultVoiceDeps } from "@animus/brain";
 import { DISPLAY_TOPIC, type DisplayMessage, type DisplayState } from "@animus/brain/display";
 import { COMMAND_TOPIC, GALLERY_TOPIC, type GalleryMessage } from "@animus/brain/gallery";
-import { decodeEmbedding, isWaarneming, PERCEPTION_TOPIC, type Aanleiding } from "@animus/brain/perception";
+import { decodeEmbedding, isWaarneming, PERCEPTION_TOPIC, type Aanleiding, type Gesprekspartner } from "@animus/brain/perception";
 import { EMOTION_TOPIC } from "@animus/brain/emotion";
 import { KENMERKEN_TOPIC, type KenmerkenMessage } from "@animus/brain/kenmerken";
 import { initiativeFactor } from "@animus/brain/behavior";
@@ -174,9 +174,9 @@ export default defineAgent<AgentUserData>({
     };
     // `watcher` en `publishState` bestaan pas verderop en worden hier enkel lui gebruikt (nooit tijdens de opbouw).
     let watcher!: Awaited<ReturnType<typeof watchDynimos>>;
-    // Gesprekspartner van de laatst afgelopen beurt (#105): undefined tot de eerste beurt (dan geldt de eigenaar,
-    // net als hear()); gebruikt door publishState() om de Vertrouwdheid te tonen zonder een verse beurt.
-    let lastGesprekspartner: number | null | undefined;
+    // Gesprekspartner van de laatst afgelopen beurt (#105/#115): geen-signaal tot de eerste beurt (dan geldt de
+    // eigenaar, net als hear()); gebruikt door publishState() om de Vertrouwdheid te tonen zonder een verse beurt.
+    let lastGesprekspartner: Gesprekspartner = { soort: "geen-signaal" };
     const reflectionDisplay = createReflectionDisplay({
       getCurrentKey: () => watcher.current().key,
       publishDisplay: (display) => publish(DISPLAY_TOPIC, { state: display }),
@@ -294,6 +294,7 @@ export default defineAgent<AgentUserData>({
       getExpressiveness: () => initiativeAxes?.expressiveness ?? 0.5,
       speaker: speakerRecognition,
       faces,
+      cameraActive: () => frames.hasCamera(),
       onBeurtAfgelopen: (gesprekspartner) => {
         lastGesprekspartner = gesprekspartner;
         void publishState();

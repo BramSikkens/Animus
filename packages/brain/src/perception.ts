@@ -32,6 +32,14 @@ export type Waarneming =
  */
 export type Aanleiding = { soort: "terug" } | { soort: "nieuw-object"; object: string } | { soort: "onbekend" };
 
+/**
+ * Wie er deze beurt met de Dynimo praat (CONTEXT.md: Gesprekspartner), gedeeld tussen de agent (die hem bepaalt uit
+ * stem-/gezichtsherkenning, `apps/agent/src/gesprekspartner.ts`) en de brain (`hear()`-optie, #115): "persoon" een
+ * bekende Persoon; "onbekend" een niet-herkende stem/gezicht terwijl er wél perceptie actief was (camera of
+ * stemherkenning); "geen-signaal" geen enkele perceptie actief — hear() valt dan terug op de eigenaar.
+ */
+export type Gesprekspartner = { soort: "persoon"; personId: number } | { soort: "onbekend" } | { soort: "geen-signaal" };
+
 // COCO-labels: lowercase woorden, gescheiden door spaties (het label komt in prompts, #87).
 const OBJECT_PATTERN = /^[a-z][a-z ]{0,29}$/;
 

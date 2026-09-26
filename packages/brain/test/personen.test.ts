@@ -13,6 +13,7 @@ import { EMBEDDING_DIMENSIONS, dynimos, familiarities, memories, persons } from 
 import { EMOTIONS } from "../src/emotion.js";
 import { singleEmotionValues } from "../src/mood.js";
 import { createBrain } from "../src/index.js";
+import type { Gesprekspartner } from "../src/perception.js";
 import { createTestDb, databaseUrl, truncateAll } from "./db.js";
 
 const DRIZZLE_DIR = fileURLToPath(new URL("../../db/drizzle", import.meta.url));
@@ -190,7 +191,7 @@ describe("Personen in hear() (#91)", () => {
   const brainWith = (model: MockLanguageModelV4, blijScore = 4, rng = 0.99) =>
     createBrain({ db, embedder: embedder(), type1: type1(blijScore), type2: { light: model, heavy: model }, now: () => now, random: () => rng });
 
-  async function hear(brain: ReturnType<typeof createBrain>, text: string, options?: { initiatief?: boolean; gesprekspartner?: number | null }) {
+  async function hear(brain: ReturnType<typeof createBrain>, text: string, options?: { initiatief?: boolean; gesprekspartner?: Gesprekspartner }) {
     for await (const _ of brain.hear(text, options)) void _;
   }
 
@@ -206,7 +207,7 @@ describe("Personen in hear() (#91)", () => {
     const anna = await insertPerson("Anna");
     const brain = brainWith(type2().model);
 
-    await hear(brain, "Hoi", { gesprekspartner: anna.id });
+    await hear(brain, "Hoi", { gesprekspartner: { soort: "persoon", personId: anna.id } });
 
     await brain.settled();
     const [memory] = await db.select().from(memories).where(eq(memories.dynimoId, vero.id));
@@ -220,7 +221,7 @@ describe("Personen in hear() (#91)", () => {
     const t2 = type2();
     const brain = brainWith(t2.model);
 
-    await hear(brain, "Hoi", { gesprekspartner: null });
+    await hear(brain, "Hoi", { gesprekspartner: { soort: "onbekend" } });
 
     await brain.settled();
     const [memory] = await db.select().from(memories).where(eq(memories.dynimoId, vero.id));
@@ -236,7 +237,7 @@ describe("Personen in hear() (#91)", () => {
     await brain.setFamiliarity(vero.id, 0.5); // eigenaar; setFamiliarity werkt enkel op de eigenaar
     await db.insert(familiarities).values({ dynimoId: vero.id, personId: anna.id, familiarity: 0.5 });
 
-    await hear(brain, "Hallo daar", { gesprekspartner: anna.id });
+    await hear(brain, "Hallo daar", { gesprekspartner: { soort: "persoon", personId: anna.id } });
 
     expect(await brain.familiarityOf(vero.id, anna.id)).toBeLessThan(0.5);
     expect(await brain.familiarityOf(vero.id)).toBe(0.5); // eigenaar onaangeroerd
@@ -248,7 +249,7 @@ describe("Personen in hear() (#91)", () => {
     const light = toolThenTextModel({ text: "Anna houdt van thee." }, "Onthouden!");
     const brain = createBrain({ db, embedder: embedder(), type1: type1(), type2: { light, heavy: light }, now: () => now, random: () => 0.99 });
 
-    await hear(brain, "Onthoud dat ik van thee houd", { gesprekspartner: anna.id });
+    await hear(brain, "Onthoud dat ik van thee houd", { gesprekspartner: { soort: "persoon", personId: anna.id } });
 
     await brain.settled();
     const rows = await db.select().from(memories).where(eq(memories.dynimoId, vero.id));
@@ -261,7 +262,7 @@ describe("Personen in hear() (#91)", () => {
     const brain = brainWith(type2().model);
 
     const events: string[] = [];
-    for await (const event of brain.hear("Hoi", { gesprekspartner: 999_999 })) {
+    for await (const event of brain.hear("Hoi", { gesprekspartner: { soort: "persoon", personId: 999_999 } })) {
       if (event.type === "text") events.push(event.delta);
     }
 
@@ -273,7 +274,7 @@ describe("Personen in hear() (#91)", () => {
     const vero = await insertDynimo();
     const brain = brainWith(type2().model);
 
-    await hear(brain, "Hoi", { gesprekspartner: 999_999 });
+    await hear(brain, "Hoi", { gesprekspartner: { soort: "persoon", personId: 999_999 } });
 
     await brain.settled();
     const rows = await db.select().from(memories).where(eq(memories.dynimoId, vero.id));
@@ -323,7 +324,7 @@ describe("Personen in hear() (#91)", () => {
     });
     const brain = createBrain({ db, embedder: embedder(), type1: type1(), type2: { light: type2().model, heavy }, now: () => now, random: () => 0.99 });
     await brain.setFamiliarity(vero.id, 0.5);
-    await hear(brain, "Hoi", { gesprekspartner: anna.id });
+    await hear(brain, "Hoi", { gesprekspartner: { soort: "persoon", personId: anna.id } });
     const annaBefore = await brain.familiarityOf(vero.id, anna.id);
 
     await brain.reflect();

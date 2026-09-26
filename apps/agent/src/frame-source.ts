@@ -34,7 +34,7 @@ const GRAB_TIMEOUT_MS = 1000;
  * Houdt de camera-track van de room bij en pakt pas bij Kijken één beeld als JPEG (ADR-0018). Geen continue stream:
  * elk beeld (~30/s) binnenlezen kostte GC-pauzes op de agent-loop terwijl er zelden gekeken wordt.
  */
-export function createFrameSource(room: Room): { latest(): Promise<Frame | null>; dispose(): void } {
+export function createFrameSource(room: Room): { latest(): Promise<Frame | null>; hasCamera(): boolean; dispose(): void } {
   let track: RemoteTrack | undefined;
   let muted = false;
   // Enkel events van de actieve track tellen: een late unsubscribe/mute van een herladen tab mag de nieuwe niet wissen.
@@ -86,6 +86,10 @@ export function createFrameSource(room: Room): { latest(): Promise<Frame | null>
       if (!frame || muted) return null; // intussen gemute: niets tonen
       const rgba = frame.convert(VideoBufferType.RGBA);
       return encodeFrame(rgba.data, rgba.width, rgba.height);
+    },
+    /** Een eigenaar-cameratrack is geabonneerd en niet gemute (#115: perceptie actief). */
+    hasCamera() {
+      return track !== undefined && !muted;
     },
     dispose() {
       room.off(RoomEvent.TrackSubscribed, onSubscribed);

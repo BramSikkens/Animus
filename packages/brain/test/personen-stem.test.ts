@@ -181,7 +181,7 @@ describe("leerKennen (#92)", () => {
         return textModel().doStream(options);
       },
     });
-    await drain(brainWith(bekendModel).hear("Hoi", { gesprekspartner: anna.id }));
+    await drain(brainWith(bekendModel).hear("Hoi", { gesprekspartner: { soort: "persoon", personId: anna.id } }));
     expect(sawLeerKennenBekend).toBe(false);
 
     const onbekendModel = new MockLanguageModelV4({
@@ -190,7 +190,7 @@ describe("leerKennen (#92)", () => {
         return textModel().doStream(options);
       },
     });
-    await drain(brainWith(onbekendModel).hear("Hoi", { gesprekspartner: null }));
+    await drain(brainWith(onbekendModel).hear("Hoi", { gesprekspartner: { soort: "onbekend" } }));
     expect(sawLeerKennenOnbekend).toBe(true);
     void vero;
   });
@@ -205,7 +205,7 @@ describe("leerKennen (#92)", () => {
         return textModel().doStream(options);
       },
     });
-    await drain(brainWith(model).hear("Hoi", { gesprekspartner: null }));
+    await drain(brainWith(model).hear("Hoi", { gesprekspartner: { soort: "onbekend" } }));
     expect(schema).toContain("naam");
     expect(schema).not.toContain("pattern");
   });
@@ -215,7 +215,7 @@ describe("leerKennen (#92)", () => {
     const model = toolThenTextModel("leerKennen", { naam: "Anna" }, "Leuk je te ontmoeten, Anna!");
     const brain = brainWith(model);
 
-    await drain(brain.hear("Ik heet Anna", { gesprekspartner: null }));
+    await drain(brain.hear("Ik heet Anna", { gesprekspartner: { soort: "onbekend" } }));
 
     const persoon = (await db.select().from(persons).where(eq(persons.name, "Anna")))[0]!;
     expect(persoon).toBeTruthy();
@@ -228,7 +228,7 @@ describe("leerKennen (#92)", () => {
     const events: unknown[] = [];
     const model2 = toolThenTextModel("leerKennen", { naam: "Bert" }, "Hoi Bert!");
     const brain2 = brainWith(model2);
-    for await (const event of brain2.hear("Ik heet Bert", { gesprekspartner: null })) events.push(event);
+    for await (const event of brain2.hear("Ik heet Bert", { gesprekspartner: { soort: "onbekend" } })) events.push(event);
     expect(events).toContainEqual(expect.objectContaining({ type: "persoon", naam: "Bert" }));
   });
 
@@ -251,7 +251,7 @@ describe("leerKennen (#92)", () => {
     const model = toolThenTextModel("leerKennen", { naam: "Anna" }, "Leuk je te ontmoeten, Anna!");
     const brain = createBrain({ db, embedder: gatedEmbedder, type1: type1(), type2: { light: model, heavy: model }, now: () => now, random: () => 0.99 });
 
-    await drain(brain.hear("Ik heet Anna", { gesprekspartner: null }));
+    await drain(brain.hear("Ik heet Anna", { gesprekspartner: { soort: "onbekend" } }));
 
     // De stream is afgelopen; de eind-Herinnering ligt er nog niet (de embed hangt op de gate).
     expect(await db.select().from(memories).where(eq(memories.dynimoId, vero.id))).toHaveLength(0);
@@ -323,11 +323,11 @@ describe("leerKennen (#92)", () => {
     });
     const brain = createBrain({ db, embedder: gatedEmbedder, type1: type1(), type2: { light: model, heavy: model }, now: () => now, random: () => 0.99 });
 
-    await drain(brain.hear("Ik ben een vreemdeling.", { gesprekspartner: null }));
+    await drain(brain.hear("Ik ben een vreemdeling.", { gesprekspartner: { soort: "onbekend" } }));
     // Beurt 1 is afgelopen; zijn eind-Herinnering ligt er nog niet (de embed hangt op de gate).
     expect(await db.select().from(memories)).toHaveLength(0);
 
-    const turn2Events = brain.hear("Ik heet Anna", { gesprekspartner: null });
+    const turn2Events = brain.hear("Ik heet Anna", { gesprekspartner: { soort: "onbekend" } });
     const iterator = turn2Events[Symbol.asyncIterator]();
     for (;;) {
       const { value, done } = await iterator.next();
@@ -355,7 +355,7 @@ describe("leerKennen (#92)", () => {
 
     const model = toolThenTextModel("leerKennen", { naam: "Anna" }, "Hoi Anna!");
     const brain2 = brainWith(model);
-    await drain(brain2.hear("Ik ben Anna", { gesprekspartner: null }));
+    await drain(brain2.hear("Ik ben Anna", { gesprekspartner: { soort: "onbekend" } }));
 
     const owner = (await db.select().from(persons).where(eq(persons.owner, true)))[0]!;
     await Promise.all([brain.settled(), brain2.settled()]);
@@ -367,7 +367,7 @@ describe("leerKennen (#92)", () => {
   it("ongeldige naam: tool-fout, geen Persoon aangemaakt", async () => {
     const model = toolThenTextModel("leerKennen", { naam: "" }, "Oh.");
     const brain = brainWith(model);
-    await drain(brain.hear("Ik heet ", { gesprekspartner: null }));
+    await drain(brain.hear("Ik heet ", { gesprekspartner: { soort: "onbekend" } }));
     expect(await db.select().from(persons)).toHaveLength(0);
   });
 
@@ -375,7 +375,7 @@ describe("leerKennen (#92)", () => {
     await insertDynimo();
     const model = toolThenTextModel("leerKennen", { naam: "Anna123" }, "Oh.");
     const brain = brainWith(model);
-    await drain(brain.hear("Ik heet Anna123", { gesprekspartner: null }));
+    await drain(brain.hear("Ik heet Anna123", { gesprekspartner: { soort: "onbekend" } }));
     expect(await db.select().from(persons)).toHaveLength(0);
   });
 
@@ -383,7 +383,7 @@ describe("leerKennen (#92)", () => {
     await insertDynimo();
     const model = toolThenTextModel("leerKennen", { naam: "Anne-José O'Brien" }, "Hoi!");
     const brain = brainWith(model);
-    await drain(brain.hear("Ik heet Anne-José O'Brien", { gesprekspartner: null }));
+    await drain(brain.hear("Ik heet Anne-José O'Brien", { gesprekspartner: { soort: "onbekend" } }));
     expect(await db.select().from(persons)).toHaveLength(1);
   });
 
@@ -393,7 +393,7 @@ describe("leerKennen (#92)", () => {
     const brain = brainWith(model);
 
     const events: unknown[] = [];
-    for await (const event of brain.hear("Ik heet Anna", { gesprekspartner: null })) events.push(event);
+    for await (const event of brain.hear("Ik heet Anna", { gesprekspartner: { soort: "onbekend" } })) events.push(event);
 
     expect(await db.select().from(persons)).toHaveLength(1);
     const persoonEvents = events.filter((event) => (event as { type: string }).type === "persoon");
@@ -439,10 +439,10 @@ describe("leerKennen (#92)", () => {
     });
     const brain = brainWith(model);
 
-    await drain(brain.hear("Ik heet Anna", { gesprekspartner: null }));
+    await drain(brain.hear("Ik heet Anna", { gesprekspartner: { soort: "onbekend" } }));
     const anna = (await db.select().from(persons).where(eq(persons.name, "Anna")))[0]!;
-    await drain(brain.hear("Nog een vraag", { gesprekspartner: null }));
-    await drain(brain.hear("Ik heet Bert", { gesprekspartner: null }));
+    await drain(brain.hear("Nog een vraag", { gesprekspartner: { soort: "onbekend" } }));
+    await drain(brain.hear("Ik heet Bert", { gesprekspartner: { soort: "onbekend" } }));
     const bert = (await db.select().from(persons).where(eq(persons.name, "Bert")))[0]!;
 
     await brain.settled();
@@ -466,8 +466,8 @@ describe("naamvraag (#92)", () => {
       },
     });
     const brain2 = brainWith(model);
-    await drain(brain2.hear("Hoi", { gesprekspartner: null }));
-    await drain(brain2.hear("Hoi nogmaals", { gesprekspartner: null }));
+    await drain(brain2.hear("Hoi", { gesprekspartner: { soort: "onbekend" } }));
+    await drain(brain2.hear("Hoi nogmaals", { gesprekspartner: { soort: "onbekend" } }));
 
     expect(prompts[0]).toContain("Vraag vriendelijk hoe die heet");
     expect(prompts[1]).not.toContain("Vraag vriendelijk hoe die heet");
@@ -521,7 +521,7 @@ describe("considerInitiative onbekend (#92)", () => {
     const brain = createBrain({ db, embedder: embedder(), type1: t1, type2: { light: textModel(), heavy: textModel() }, now: () => now, random: () => 0.99 });
 
     const instruction = await brain.considerInitiative({ soort: "onbekend" });
-    await drain(brain.hear(instruction!, { initiatief: true, gesprekspartner: null }));
+    await drain(brain.hear(instruction!, { initiatief: true, gesprekspartner: { soort: "onbekend" } }));
     const second = await brain.considerInitiative({ soort: "onbekend" });
 
     expect(second).toBeNull();
@@ -554,7 +554,7 @@ describe("naamregels in de Type2-prompt (#92)", () => {
         return textModel().doStream(options);
       },
     });
-    await drain(brainWith(model).hear("Hoi", { gesprekspartner: anna.id }));
+    await drain(brainWith(model).hear("Hoi", { gesprekspartner: { soort: "persoon", personId: anna.id } }));
     expect(prompts[0]).toContain("Je praat nu met Anna.");
   });
 
@@ -581,7 +581,7 @@ describe("naamregels in de Type2-prompt (#92)", () => {
         return textModel().doStream(options);
       },
     });
-    await drain(brainWith(model).hear("Hoi", { gesprekspartner: null }));
+    await drain(brainWith(model).hear("Hoi", { gesprekspartner: { soort: "onbekend" } }));
     expect(prompts[0]).toContain("Je weet niet wie er nu praat.");
   });
 });

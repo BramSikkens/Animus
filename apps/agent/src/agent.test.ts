@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ChatContext, ToolContext, type JobContext } from "@livekit/agents";
 import type { Brain, BrainEvent } from "@animus/brain";
+import type { Gesprekspartner } from "@animus/brain/perception";
 import { createFaces } from "./faces.js";
 import { AnimusAgent, type AnimusAgentOptions } from "./animus-agent.js";
 import type { SpeakerId } from "./speaker-id.js";
@@ -20,23 +21,23 @@ describe("AnimusAgent.llmNode", () => {
     const brain = { hear: () => gen([{ type: "persoon", personId: 42, naam: "Anna" }, { type: "text", delta: "Hoi Anna" }]) } as unknown as Brain;
     const room = { localParticipant: undefined } as unknown as JobContext["room"];
     const faces = createFaces();
-    faces.record(null, Date.now(), 1); // onbekend gezicht in beeld -> gesprekspartner start als null (onbekend)
-    const reported: (number | null | undefined)[] = [];
-    const agent = new AnimusAgent({ brain, room, onUtterance: () => {}, onMoodValues: () => {}, faces, onBeurtAfgelopen: (g: number | null | undefined) => reported.push(g) });
+    faces.record(null, Date.now(), 1); // onbekend gezicht in beeld -> gesprekspartner start als onbekend
+    const reported: Gesprekspartner[] = [];
+    const agent = new AnimusAgent({ brain, room, onUtterance: () => {}, onMoodValues: () => {}, faces, onBeurtAfgelopen: (g) => reported.push(g) });
 
     const stream = agent.llmNode(chatCtxWith("Ik ben Anna"), ToolContext.empty());
     for await (const _chunk of (await stream)!) {
       // enkel uitlezen zodat de stream (en dus onDone) afloopt
     }
 
-    expect(reported).toEqual([42]);
+    expect(reported).toEqual([{ soort: "persoon", personId: 42 }]);
   });
 
   // Stem-inschrijving (#107): beurt 1 leert Anna (42) kennen, daarna blijft haar stem onherkend.
   function enrollingSetup(enrollStatus: "bezig" | "opgegeven") {
-    const heard: { gesprekspartner?: number | null }[] = [];
+    const heard: { gesprekspartner?: Gesprekspartner }[] = [];
     const brain = {
-      hear: (_text: string, options: { gesprekspartner?: number | null }) => {
+      hear: (_text: string, options: { gesprekspartner?: Gesprekspartner }) => {
         heard.push(options);
         return gen(heard.length === 1 ? [{ type: "persoon", personId: 42, naam: "Anna" }] : [{ type: "text", delta: "Ja" }]);
       },
@@ -58,7 +59,7 @@ describe("AnimusAgent.llmNode", () => {
     const { heard, turn } = enrollingSetup("bezig");
     await turn("Ik ben Anna");
     await turn("Hoe gaat het?");
-    expect(heard[1]!.gesprekspartner).toBe(42);
+    expect(heard[1]!.gesprekspartner).toEqual({ soort: "persoon", personId: 42 });
   });
 
   it("na een opgegeven inschrijving is een onherkende stem niet meer die Persoon", async () => {
@@ -66,7 +67,7 @@ describe("AnimusAgent.llmNode", () => {
     await turn("Ik ben Anna");
     await turn("Hoe gaat het?"); // enroll() geeft op
     await turn("En nu?");
-    expect(heard[2]!.gesprekspartner).toBeNull();
+    expect(heard[2]!.gesprekspartner).toEqual({ soort: "onbekend" });
   });
 
   it("na cancelEnrollment (persons:/wissel/slapen) is een onherkende stem niet meer de inschrijvende Persoon", async () => {
@@ -74,6 +75,19 @@ describe("AnimusAgent.llmNode", () => {
     await turn("Ik ben Anna");
     agent.cancelEnrollment();
     await turn("Hoe gaat het?");
-    expect(heard[1]!.gesprekspartner).toBeNull();
+    expect(heard[1]!.gesprekspartner).toEqual({ soort: "onbekend" });
+  });
+
+  it("een actieve camera zonder gezicht in beeld en zonder stemherkenning maakt de Gesprekspartner onbekend, niet de eigenaar (#115)", async () => {
+    const heard: { gesprekspartner?: Gesprekspartner }[] = [];
+    const brain = { hear: (_text: string, options: { gesprekspartner?: Gesprekspartner }) => (heard.push(options), gen([{ type: "text", delta: "Ja" }])) } as unknown as Brain;
+    const room = { localParticipant: undefined } as unknown as JobContext["room"];
+    const agent = new AnimusAgent({ brain, room, onUtterance: () => {}, onMoodValues: () => {}, faces: createFaces(), cameraActive: () => true });
+
+    for await (const _chunk of (await agent.llmNode(chatCtxWith("Hallo"), ToolContext.empty()))!) {
+      // uitlezen
+    }
+
+    expect(heard[0]!.gesprekspartner).toEqual({ soort: "onbekend" });
   });
 });

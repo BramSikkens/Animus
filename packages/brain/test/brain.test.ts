@@ -7,7 +7,7 @@ import postgres from "postgres";
 import { EMOTIONS } from "../src/emotion.js";
 import { moodOfRow, singleEmotionValues, type MoodValues } from "../src/mood.js";
 import { ARCHETYPES, getArchetype, pickOffer } from "../src/archetypes.js";
-import { createBrain, DELTA_TABLE, STATE_CHANNEL, type BrainEvent } from "../src/index.js";
+import { createBrain, DELTA_TABLE, MAX_WORKING_MEMORY_TURNS, STATE_CHANNEL, WORKING_MEMORY_TRIM_TO, type BrainEvent } from "../src/index.js";
 import type { CatalogVoice } from "../src/voice-catalog.js";
 import { createTestDb, databaseUrl, TEST_DB_NAME, truncateAll } from "./db.js";
 
@@ -935,6 +935,32 @@ describe("createBrain", () => {
 
     const secondTurn = light.doStreamCalls[2]?.prompt as Array<{ role: string }>;
     expect(secondTurn.some((message) => message.role === "tool")).toBe(true);
+  });
+
+  it("begrenst het Werkgeheugen: oudste beurten vallen weg, per hele beurt", async () => {
+    const bornAt = new Date("2026-01-01T12:00:00.000Z");
+    const light = textModel(["Ok."]);
+    const brain = createBrain({
+      db,
+      embedder: embedModel(),
+      type1: type1Model(),
+      type2: { light, heavy: genesisModel({ name: "Nova", coreCharacter: "x", birthStory: "y" }) },
+      now: () => bornAt,
+      random: () => 0,
+    });
+    await brain.bringToLife();
+    for (let i = 0; i < MAX_WORKING_MEMORY_TURNS + 5; i++) {
+      await collectText(brain.hear(`Bericht ${i}`));
+    }
+
+    const lastPrompt = light.doStreamCalls.at(-1)?.prompt as Array<{ role: string; content: unknown }>;
+    const userMessages = lastPrompt.filter((message) => message.role === "user");
+    // Hysterese (cache): boven MAX_WORKING_MEMORY_TURNS in één keer terug naar WORKING_MEMORY_TRIM_TO, niet elke beurt
+    // één eraf. Na beurt 20 (21 in het geheugen) blijven 11..20 over; daarna komen 21..23 erbij, plus de huidige uiting.
+    const firstKept = MAX_WORKING_MEMORY_TURNS + 1 - WORKING_MEMORY_TRIM_TO;
+    expect(userMessages).toHaveLength(WORKING_MEMORY_TRIM_TO + 4);
+    expect(JSON.stringify(userMessages[0])).toContain(`Bericht ${firstKept}`);
+    expect(JSON.stringify(userMessages)).not.toContain(`Bericht ${firstKept - 1}\"`);
   });
 
   it("levert ook een tool-result-gebeurtenis met de fout als een tool faalt", async () => {
@@ -2478,6 +2504,25 @@ describe("createBrain", () => {
       expect(moodMessage(light, 0)).toContain("boos");
       expect(moodMessage(light, 0)).toContain("boos: 100");
       expect(systems.indexOf(moodMessage(light, 0)!)).toBeGreaterThan(1); // na stabiel en leeftijd
+    });
+
+    it("houdt de wisselende context ná de hele geschiedenis, ook in latere beurten (#113: cache-vriendelijke volgorde)", async () => {
+      await insertDynimo();
+      const { model } = type1Sequence([{ deltas: { boos: 100 } }]);
+      const light = textModel(["Ok."]);
+      const brain = brainWith({ type1: model, light });
+
+      await collectText(brain.hear("Eerste beurt"));
+      await collectText(brain.hear("Tweede beurt"));
+
+      const prompt = light.doStreamCalls[1]?.prompt as Array<{ role: string; content: unknown }>;
+      const historyIndex = prompt.findIndex((message) => JSON.stringify(message.content).includes("Eerste beurt"));
+      const moodIndex = prompt.findIndex((message) => message.role === "system" && typeof message.content === "string" && message.content.includes("Je huidige stemming"));
+      const currentTurnIndex = prompt.findIndex((message) => JSON.stringify(message.content).includes("Tweede beurt"));
+
+      expect(historyIndex).toBeGreaterThan(-1);
+      expect(moodIndex).toBeGreaterThan(historyIndex);
+      expect(moodIndex).toBeLessThan(currentTurnIndex);
     });
 
     it("dooft de Stemming uit: na 3 minuten is de afstand tot de ruststand gehalveerd", async () => {

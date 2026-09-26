@@ -328,6 +328,22 @@ Antwoord in karakter en in het Nederlands.`;
 const FAREWELL_PROMPT = `Je wordt zo meteen voor altijd verwijderd: je naam, je karakter en al je herinneringen verdwijnen.
 Schrijf je Afscheidsreflectie: je laatste woorden, in karakter, in een paar zinnen.`;
 
+// #113: bovengrens voor het Werkgeheugen — voorkomt onbegrensde groei (en dus onbegrensde kosten/latency per
+// beurt) naarmate een sessie langer duurt. Trimmen gebeurt per hele beurt (zie trimWorkingMemory hieronder), nooit
+// halverwege, zodat er geen losse tool-result zonder bijbehorende tool-call overblijft.
+export const MAX_WORKING_MEMORY_TURNS = 20;
+// Hysterese: boven de grens in één keer terug naar dit aantal. Eén beurt per keer wegknippen zou het gecachete
+// voorvoegsel (stable + geschiedenis) elke beurt veranderen, zodat de prompt-cache in lange gesprekken nooit pakt.
+export const WORKING_MEMORY_TRIM_TO = 10;
+
+// Verwijdert de oudste beurten uit `memory` zodra er meer dan MAX_WORKING_MEMORY_TURNS zijn, tot er
+// WORKING_MEMORY_TRIM_TO overblijven. Een beurt begint bij een user-bericht en loopt tot (niet met) het volgende.
+function trimWorkingMemory(memory: ModelMessage[]): void {
+  const turnStarts = memory.reduce<number[]>((starts, message, i) => (message.role === "user" ? [...starts, i] : starts), []);
+  if (turnStarts.length <= MAX_WORKING_MEMORY_TURNS) return;
+  memory.splice(0, turnStarts[turnStarts.length - WORKING_MEMORY_TRIM_TO]!);
+}
+
 const RECALL_LIMIT = 5;
 // #94: voorrang voor Herinneringen van een aanwezige Persoon in recall()'s ORDER BY (afstand min deze bonus), geen filter.
 const RECALL_PRESENT_BONUS = 0.05;
@@ -1750,6 +1766,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
       // Zichtbaar op het gezichtje via de (boze) Stemming plus een non-verbaal geluid; geen antwoord en geen TTS.
       if (soundKind && !soundYielded) yield { type: "sound", kind: soundKind };
       s.workingMemory.push(userMessage, { role: "assistant", content: "(je negeert dit)" });
+      trimWorkingMemory(s.workingMemory);
       // Achtergrond (#109): de stream eindigt niet meer op deze opslag; remember() vangt zijn eigen fouten al.
       trackBackground(remember(`Gesprekspartner: ${text}\n${being.name} negeert dit.`, being.id, indruk, personId, s));
       return;
@@ -1873,12 +1890,51 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
       providerOptions: { anthropic: { cacheControl: { type: "ephemeral" } } },
     };
 
+    // #113: promptvolgorde voor de cache van de provider — vaste systeemtekst (`stable`, met cachebreakpoint)
+    // vooraan, dan de geschiedenis (Werkgeheugen, ongewijzigd per beurt zolang de bovengrens niet knipt), en pas
+    // daarna de wisselende context (leeftijd, Stemming, Vertrouwdheid, ...), vlak vóór de laatste uiting. Zo blijft
+    // het gecachete deel (stabiel + geschiedenis) een herbruikbaar voorvoegsel; alleen het staartje verandert.
+    // Als los system-bericht (niet in de laatste user-uiting): zowel Anthropic als OpenAI accepteren system-
+    // berichten die niet vooraan staan (geverifieerd in de geïnstalleerde @ai-sdk/anthropic en @ai-sdk/openai:
+    // Anthropic via de mid-conversation-system-beta, OpenAI zonder bijzondere behandeling) — vandaar
+    // `allowSystemInMessages: true` i.p.v. tekst-parts in het laatste user-bericht.
+    const contextMessages: SystemModelMessage[] = [
+      ageMessage(being),
+      ...birthdayMessages(awake),
+      moodMessage(mood, axes?.expressiveness ?? 0.5),
+      familiarityMessage(familiarity),
+      speakerMessage(speakerPerson),
+      ...(aanwezigMessage(present) ? [aanwezigMessage(present)!] : []),
+      ...(askNameNow ? [UNKNOWN_NAME_PROMPT] : []),
+      ...(BEHAVIOR_PROMPTS[behavior] ? [BEHAVIOR_PROMPTS[behavior]] : []),
+      ...opinionMessage,
+      ...discretionMessage,
+      recallPrompt(recalledForPrompt),
+      ...spontaneousPromptMessage,
+      ...(dream ? [dreamPrompt(dream.text)] : []),
+      ...noFrameMessage,
+    ];
+
+    const model = intent === "complex" ? deps.type2.heavy : deps.type2.light;
+    // Tweede Anthropic-cachebreakpoint op het laatste geschiedenisbericht: zonder deze marker cachet Anthropic
+    // (in tegenstelling tot OpenAI's automatische prefix-cache) alleen wat vóór een expliciete breakpoint staat,
+    // dus zonder deze tweede marker blijft enkel `stable` gecached en niet de (groeiende) geschiedenis erna. Kopie
+    // van het laatste bericht, niet muteren: s.workingMemory zelf mag geen providerOptions van deze beurt krijgen.
+    const history: ModelMessage[] =
+      typeof model !== "string" && model.provider.startsWith("anthropic") && s.workingMemory.length > 0
+        ? [
+            ...s.workingMemory.slice(0, -1),
+            { ...s.workingMemory.at(-1)!, providerOptions: { ...s.workingMemory.at(-1)!.providerOptions, anthropic: { cacheControl: { type: "ephemeral" } } } },
+          ]
+        : s.workingMemory;
+
     const abort = new AbortController();
     const result = streamText({
       abortSignal: abort.signal,
-      model: intent === "complex" ? deps.type2.heavy : deps.type2.light,
-      instructions: [stable, ageMessage(being), ...birthdayMessages(awake), moodMessage(mood, axes?.expressiveness ?? 0.5), familiarityMessage(familiarity), speakerMessage(speakerPerson), ...(aanwezigMessage(present) ? [aanwezigMessage(present)!] : []), ...(askNameNow ? [UNKNOWN_NAME_PROMPT] : []), ...(BEHAVIOR_PROMPTS[behavior] ? [BEHAVIOR_PROMPTS[behavior]] : []), ...opinionMessage, ...discretionMessage, recallPrompt(recalledForPrompt), ...spontaneousPromptMessage, ...(dream ? [dreamPrompt(dream.text)] : []), ...noFrameMessage],
-      messages: [...s.workingMemory, promptMessage],
+      model,
+      instructions: [stable],
+      messages: [...history, ...contextMessages, promptMessage],
+      allowSystemInMessages: true,
       tools: { ...turnTools, ...kijkTools, ...leerKennenTools },
       // Genoeg stappen om een tool te gebruiken en daarna het resultaat te verwoorden.
       stopWhen: isStepCount(5),
@@ -1955,6 +2011,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
       } else if (outcome === "interrupted" && full) {
         s.workingMemory.push(userMessage, { role: "assistant", content: full });
       }
+      trimWorkingMemory(s.workingMemory);
       // Achtergrond (#109): de stream eindigt niet meer op deze opslag. personId nu vastleggen (leerKennen kan
       // hem tijdens deze beurt al herbonden hebben; latere beurten mogen déze niet meer wijzigen). Elke stap
       // vangt en logt zijn eigen fout, zodat één mislukking de andere twee niet overslaat.

@@ -2,12 +2,14 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { MockEmbeddingModelV4, MockLanguageModelV4, Experimental_EvaluationMockModelV4 } from "ai/test";
 import { simulateReadableStream } from "ai";
 import { eq, isNotNull } from "drizzle-orm";
-import { EMBEDDING_DIMENSIONS, dreams, drives, dynimos, epitaphs, memories, persons } from "@animus/db/schema";
+import { EMBEDDING_DIMENSIONS, dreams, drives, dynimos, epitaphs, memories, persons, settings } from "@animus/db/schema";
 import postgres from "postgres";
+import type { LanguageModel } from "ai";
 import { EMOTIONS } from "../src/emotion.js";
 import { moodOfRow, singleEmotionValues, type MoodValues } from "../src/mood.js";
 import { ARCHETYPES, getArchetype, pickOffer } from "../src/archetypes.js";
 import { createBrain, DELTA_TABLE, MAX_WORKING_MEMORY_TURNS, STATE_CHANNEL, WORKING_MEMORY_TRIM_TO, type BrainEvent } from "../src/index.js";
+import type { Type2Catalog } from "../src/config.js";
 import type { CatalogVoice } from "../src/voice-catalog.js";
 import { createTestDb, databaseUrl, TEST_DB_NAME, truncateAll } from "./db.js";
 
@@ -118,6 +120,21 @@ function embedModel() {
   return new MockEmbeddingModelV4({
     doEmbed: async ({ values }) => ({ embeddings: values.map(fakeVector), warnings: [] }),
   });
+}
+
+// Modelwissel-experiment (#123): een fake Type2Catalog voor tests, zonder de echte registry/env aan te spreken.
+// `models` koppelt elk catalogus-id aan zijn (mock)LanguageModel; `resolve` gooit op een onbekend id, net als de
+// echte registry dat zou doen.
+function fakeCatalog(models: Record<string, LanguageModel>, defaults: { light: string; heavy: string }): Type2Catalog {
+  return {
+    available: Object.keys(models),
+    defaults,
+    resolve: (id) => {
+      const model = models[id];
+      if (!model) throw new Error(`fakeCatalog: onbekend model-id "${id}"`);
+      return model;
+    },
+  };
 }
 
 // Type1-contract: per emotie een 'delta_<emotie>'-score (niveau 0..8 in DELTA_TABLE; 4 = geen verandering). Een delta wordt het dichtstbijzijnde niveau.
@@ -4084,6 +4101,200 @@ describe("createBrain", () => {
     });
 
       // OVERRIDES-APPEND
+    });
+  });
+
+  describe("modelwissel (#123)", () => {
+    const bornAt = new Date("2026-01-01T12:00:00.000Z");
+    const DEFAULT_LIGHT = "anthropic:claude-haiku-4-5";
+    const DEFAULT_HEAVY = "anthropic:claude-opus-4-1";
+    const ALT_LIGHT = "openai:gpt-5-mini";
+
+    async function bringUpBeing() {
+      const genesisBrain = createBrain({
+        db,
+        embedder: embedModel(),
+        type1: type1Model(),
+        type2: { light: unusedModel(), heavy: genesisModel({ name: "Nova", coreCharacter: "x", birthStory: "y" }) },
+        now: () => bornAt,
+        random: () => 0,
+      });
+      await genesisBrain.bringToLife();
+    }
+
+    it("gebruikt zonder instelling het env-standaardmodel (licht bij 'simpel')", async () => {
+      await bringUpBeing();
+      const defaultLight = textModel(["Hoi!"]);
+      const altLight = unusedModel();
+      const brain = createBrain({
+        db,
+        embedder: embedModel(),
+        type1: type1Model({ intent: "simpel" }),
+        type2: { light: unusedModel(), heavy: unusedModel() },
+        type2Catalog: fakeCatalog({ [DEFAULT_LIGHT]: defaultLight, [ALT_LIGHT]: altLight, [DEFAULT_HEAVY]: unusedModel() }, { light: DEFAULT_LIGHT, heavy: DEFAULT_HEAVY }),
+        now: () => bornAt,
+        random: () => 0,
+      });
+
+      const text = await collectText(brain.hear("Hoi!"));
+
+      expect(text).toBe("Hoi!");
+      expect(defaultLight.doStreamCalls).toHaveLength(1);
+    });
+
+    it("gebruikt na setType2Models meteen het nieuwe model, zonder nieuwe brain", async () => {
+      await bringUpBeing();
+      const defaultLight = unusedModel();
+      const altLight = textModel(["Van het alternatief."]);
+      const brain = createBrain({
+        db,
+        embedder: embedModel(),
+        type1: type1Model({ intent: "simpel" }),
+        type2: { light: unusedModel(), heavy: unusedModel() },
+        type2Catalog: fakeCatalog({ [DEFAULT_LIGHT]: defaultLight, [ALT_LIGHT]: altLight, [DEFAULT_HEAVY]: unusedModel() }, { light: DEFAULT_LIGHT, heavy: DEFAULT_HEAVY }),
+        now: () => bornAt,
+        random: () => 0,
+      });
+
+      await brain.setType2Models({ light: ALT_LIGHT, heavy: null });
+      const text = await collectText(brain.hear("Hoi!"));
+
+      expect(text).toBe("Van het alternatief.");
+      expect(altLight.doStreamCalls).toHaveLength(1);
+      expect(defaultLight.doStreamCalls).toHaveLength(0);
+    });
+
+    it("weigert een model buiten availableModels() met een duidelijke fout, rij blijft ongewijzigd", async () => {
+      const brain = createBrain({
+        db,
+        embedder: embedModel(),
+        type1: type1Model(),
+        type2: { light: unusedModel(), heavy: unusedModel() },
+        type2Catalog: fakeCatalog({ [DEFAULT_LIGHT]: unusedModel(), [DEFAULT_HEAVY]: unusedModel() }, { light: DEFAULT_LIGHT, heavy: DEFAULT_HEAVY }),
+        now: () => bornAt,
+        random: () => 0,
+      });
+
+      await expect(brain.setType2Models({ light: "openai:onbestaand-model", heavy: null })).rejects.toThrow(/openai:onbestaand-model/);
+
+      const rows = await db.select().from(settings);
+      expect(rows).toHaveLength(0);
+    });
+
+    it("null zet een veld terug naar de env-standaard", async () => {
+      await bringUpBeing();
+      const defaultLight = textModel(["Standaard."]);
+      const altLight = unusedModel();
+      const brain = createBrain({
+        db,
+        embedder: embedModel(),
+        type1: type1Model({ intent: "simpel" }),
+        type2: { light: unusedModel(), heavy: unusedModel() },
+        type2Catalog: fakeCatalog({ [DEFAULT_LIGHT]: defaultLight, [ALT_LIGHT]: altLight, [DEFAULT_HEAVY]: unusedModel() }, { light: DEFAULT_LIGHT, heavy: DEFAULT_HEAVY }),
+        now: () => bornAt,
+        random: () => 0,
+      });
+
+      await brain.setType2Models({ light: ALT_LIGHT, heavy: null });
+      await brain.setType2Models({ light: null, heavy: null });
+      const text = await collectText(brain.hear("Hoi!"));
+
+      expect(text).toBe("Standaard.");
+      expect(defaultLight.doStreamCalls).toHaveLength(1);
+      expect(altLight.doStreamCalls).toHaveLength(0);
+    });
+
+    it("type2Models() geeft de actieve keuze en of dat de standaard is", async () => {
+      const brain = createBrain({
+        db,
+        embedder: embedModel(),
+        type1: type1Model(),
+        type2: { light: unusedModel(), heavy: unusedModel() },
+        type2Catalog: fakeCatalog({ [DEFAULT_LIGHT]: unusedModel(), [ALT_LIGHT]: unusedModel(), [DEFAULT_HEAVY]: unusedModel() }, { light: DEFAULT_LIGHT, heavy: DEFAULT_HEAVY }),
+        now: () => bornAt,
+        random: () => 0,
+      });
+
+      expect(await brain.type2Models()).toEqual({ light: DEFAULT_LIGHT, heavy: DEFAULT_HEAVY, isDefault: true });
+
+      await brain.setType2Models({ light: ALT_LIGHT, heavy: null });
+      expect(await brain.type2Models()).toEqual({ light: ALT_LIGHT, heavy: DEFAULT_HEAVY, isDefault: false });
+    });
+
+    it("een Herinnering uit hear() bevat het gebruikte model (licht bij simpel, zwaar bij complex)", async () => {
+      await bringUpBeing();
+      const light = textModel(["Hoi!"]);
+      const heavy = textModel(["Zwaar antwoord."]);
+      const catalog = fakeCatalog({ [DEFAULT_LIGHT]: light, [DEFAULT_HEAVY]: heavy }, { light: DEFAULT_LIGHT, heavy: DEFAULT_HEAVY });
+
+      const simpleBrain = createBrain({ db, embedder: embedModel(), type1: type1Model({ intent: "simpel" }), type2: { light: unusedModel(), heavy: unusedModel() }, type2Catalog: catalog, now: () => bornAt, random: () => 0 });
+      await collectText(simpleBrain.hear("Hoi!"));
+      await simpleBrain.settled();
+
+      const complexBrain = createBrain({ db, embedder: embedModel(), type1: type1Model({ intent: "complex" }), type2: { light: unusedModel(), heavy: unusedModel() }, type2Catalog: catalog, now: () => bornAt, random: () => 0 });
+      await collectText(complexBrain.hear("Leg iets ingewikkelds uit."));
+      await complexBrain.settled();
+
+      const rows = await db.select().from(memories);
+      expect(rows.find((row) => row.text.includes("Hoi!"))?.model).toBe(DEFAULT_LIGHT);
+      expect(rows.find((row) => row.text.includes("Zwaar antwoord."))?.model).toBe(DEFAULT_HEAVY);
+    });
+
+    it("een Herinnering uit de onthoud-tool bevat het gebruikte model", async () => {
+      await bringUpBeing();
+      const light = toolThenTextModel("remember", { text: "Bram drinkt zijn koffie zwart." }, "Onthouden!");
+      const brain = createBrain({
+        db,
+        embedder: embedModel(),
+        type1: type1Model({ intent: "simpel" }),
+        type2: { light: unusedModel(), heavy: unusedModel() },
+        type2Catalog: fakeCatalog({ [DEFAULT_LIGHT]: light, [DEFAULT_HEAVY]: unusedModel() }, { light: DEFAULT_LIGHT, heavy: DEFAULT_HEAVY }),
+        now: () => bornAt,
+        random: () => 0,
+      });
+
+      await collectText(brain.hear("Onthoud dat ik mijn koffie zwart drink."));
+      await brain.settled();
+
+      const rows = await db.select().from(memories);
+      const remembered = rows.find((row) => row.text === "Bram drinkt zijn koffie zwart.");
+      expect(remembered?.model).toBe(DEFAULT_LIGHT);
+    });
+
+    it("addMemory (dashboard) laat het model op null", async () => {
+      const genesisBrain = createBrain({
+        db,
+        embedder: embedModel(),
+        type1: type1Model(),
+        type2: { light: unusedModel(), heavy: genesisModel({ name: "Nova", coreCharacter: "x", birthStory: "y" }) },
+        now: () => bornAt,
+        random: () => 0,
+      });
+      const vero = await genesisBrain.bringToLife();
+
+      const brain = createBrain({
+        db,
+        embedder: embedModel(),
+        type1: type1Model(),
+        type2: { light: unusedModel(), heavy: unusedModel() },
+        type2Catalog: fakeCatalog({ [DEFAULT_LIGHT]: unusedModel(), [DEFAULT_HEAVY]: unusedModel() }, { light: DEFAULT_LIGHT, heavy: DEFAULT_HEAVY }),
+        now: () => bornAt,
+        random: () => 0,
+      });
+      await brain.addMemory(vero.id, "Handmatig toegevoegd.");
+
+      const rows = await db.select().from(memories);
+      expect(rows.find((row) => row.text === "Handmatig toegevoegd.")?.model).toBeNull();
+    });
+
+    it("availableModels() is leeg zonder type2Catalog-dep", () => {
+      const brain = createBrain({ db, embedder: embedModel(), type1: type1Model(), type2: { light: unusedModel(), heavy: unusedModel() }, now: () => bornAt, random: () => 0 });
+      expect(brain.availableModels()).toEqual([]);
+    });
+
+    it("setType2Models gooit zonder type2Catalog-dep", async () => {
+      const brain = createBrain({ db, embedder: embedModel(), type1: type1Model(), type2: { light: unusedModel(), heavy: unusedModel() }, now: () => bornAt, random: () => 0 });
+      await expect(brain.setType2Models({ light: DEFAULT_LIGHT, heavy: null })).rejects.toThrow();
     });
   });
 });

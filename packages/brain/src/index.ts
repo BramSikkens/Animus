@@ -16,7 +16,8 @@ import {
 import { and, asc, cosineDistance, desc, eq, gt, gte, inArray, isNotNull, isNull, l2Distance, lte, notInArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { Db } from "@animus/db";
-import { dreams, drives, dynimos, epitaphs, faceEmbeddings, familiarities, memories, persons, voiceProfiles as voiceProfilesTable } from "@animus/db/schema";
+import { dreams, drives, dynimos, epitaphs, faceEmbeddings, familiarities, memories, persons, settings, voiceProfiles as voiceProfilesTable } from "@animus/db/schema";
+import type { Type2Catalog } from "./config.js";
 import { formatAge } from "./age.js";
 import { archetypeOfferText, getArchetype, pickOffer } from "./archetypes.js";
 import { drivesPromptBlock, isActiveDrive, type DriveRow } from "./drives.js";
@@ -121,6 +122,24 @@ export type PersonSummary = { id: number; name: string; owner: boolean; createdA
 export type Type2Models = { light: LanguageModel; heavy: LanguageModel };
 
 export type Brain = {
+  /**
+   * Modelwissel-experiment (#123): provider:model-ids waaruit `setType2Models` mag kiezen. Zonder `type2Catalog`-
+   * dep (geen catalogus meegegeven) altijd leeg — dan is modelwissel niet beschikbaar.
+   */
+  availableModels(): string[];
+  /**
+   * Actief Type2-model (licht + zwaar), zoals de eerstvolgende beurt hem gebruikt. `isDefault` is true als geen
+   * van beide velden expliciet ingesteld is (dan gelden de env-standaarden). Zonder `type2Catalog`-dep: de vaste
+   * modelId's van `deps.type2`, altijd `isDefault: true` (zie createBrain hieronder voor de precieze afweging).
+   */
+  type2Models(): Promise<{ light: string; heavy: string; isDefault: boolean }>;
+  /**
+   * Modelwissel-experiment (#123): zet het globale Type2-model (licht/zwaar apart); null = terug naar de
+   * env-standaard voor dat veld. Gooit bij een id buiten `availableModels()`, of zonder `type2Catalog`-dep.
+   * Geldt meteen voor de eerstvolgende beurt, geen herstart nodig (geen caching, geen NOTIFY: elke Type2-aanroep
+   * leest de instelling zelf opnieuw).
+   */
+  setType2Models(choice: { light: string | null; heavy: string | null }): Promise<void>;
   /** Laat een nieuwe Dynimo geboren worden (genesis); die is meteen Wakker, een eerder wakkere gaat slapen. */
   bringToLife(): Promise<Dynimo>;
   /** Wekt de Dynimo (een eventueel andere wakkere gaat slapen). Null bij een onbekende id. */
@@ -256,6 +275,12 @@ export function createBrain(deps: {
   db: Db;
   type1: Experimental_EvaluationModel;
   type2: Type2Models;
+  /**
+   * Modelwissel-experiment (#123): curated catalogus + resolver voor het globaal instelbare Type2-model.
+   * Ontbreekt deze: `availableModels()` geeft [], `setType2Models` gooit, `type2Models()` geeft de vaste
+   * modelId's van `type2` terug (altijd `isDefault: true`) — kortom, gedraagt zich als vóór #123.
+   */
+  type2Catalog?: Type2Catalog;
   embedder: EmbeddingModel;
   now?: () => Date;
   random?: () => number;
@@ -335,11 +360,61 @@ export function createBrain(deps: {
     await Promise.allSettled(pendingWrites);
   }
 
+  // Modelwissel-experiment (#123): id van een Type2-model voor op de Herinnering. `deps.type2.light/.heavy` zijn
+  // altijd al opgeloste LanguageModel-instanties (geen catalog); hun `modelId` is dan het enige zinvolle id.
+  function modelIdOf(model: LanguageModel): string {
+    return typeof model === "string" ? model : model.modelId;
+  }
+
+  function availableModels(): string[] {
+    return deps.type2Catalog?.available ?? [];
+  }
+
+  // Enige plek die de settings-rij leest; elke Type2-aanroep (ook hear()) roept dit zelf aan, per aanroep één
+  // kleine select, bewust geen caching/NOTIFY (ticket #123: minder complex, en modelwissel is een laagfrequente
+  // dashboard-actie). Zonder `type2Catalog`-dep helemaal geen select: het gedrag van vóór #123 blijft exact gelijk.
+  async function activeType2(): Promise<{ light: { id: string; model: LanguageModel }; heavy: { id: string; model: LanguageModel } }> {
+    if (!deps.type2Catalog) {
+      return { light: { id: modelIdOf(deps.type2.light), model: deps.type2.light }, heavy: { id: modelIdOf(deps.type2.heavy), model: deps.type2.heavy } };
+    }
+    const catalog = deps.type2Catalog;
+    const [row] = await deps.db.select().from(settings).where(eq(settings.id, 1));
+    const lightId = row?.type2Light ?? catalog.defaults.light;
+    const heavyId = row?.type2Heavy ?? catalog.defaults.heavy;
+    return { light: { id: lightId, model: catalog.resolve(lightId) }, heavy: { id: heavyId, model: catalog.resolve(heavyId) } };
+  }
+
+  async function type2Models(): Promise<{ light: string; heavy: string; isDefault: boolean }> {
+    // Zonder catalog is er niets instelbaars: de vaste modelId's van deps.type2 zijn dan per definitie "de standaard".
+    if (!deps.type2Catalog) return { light: modelIdOf(deps.type2.light), heavy: modelIdOf(deps.type2.heavy), isDefault: true };
+    const catalog = deps.type2Catalog;
+    const [row] = await deps.db.select().from(settings).where(eq(settings.id, 1));
+    return {
+      light: row?.type2Light ?? catalog.defaults.light,
+      heavy: row?.type2Heavy ?? catalog.defaults.heavy,
+      isDefault: (row?.type2Light ?? null) === null && (row?.type2Heavy ?? null) === null,
+    };
+  }
+
+  async function setType2Models(choice: { light: string | null; heavy: string | null }): Promise<void> {
+    if (!deps.type2Catalog) throw new Error("Modelwissel niet beschikbaar: brain is aangemaakt zonder type2Catalog.");
+    const available = deps.type2Catalog.available;
+    for (const [label, id] of [["light", choice.light] as const, ["heavy", choice.heavy] as const]) {
+      if (id !== null && !available.includes(id)) {
+        throw new Error(`Onbekend Type2-model voor ${label}: "${id}". Toegestaan: ${available.join(", ")}`);
+      }
+    }
+    await deps.db
+      .insert(settings)
+      .values({ id: 1, type2Light: choice.light, type2Heavy: choice.heavy })
+      .onConflictDoUpdate({ target: settings.id, set: { type2Light: choice.light, type2Heavy: choice.heavy } });
+  }
+
   async function genesis(): Promise<{ dynimo: typeof dynimos.$inferInsert; drives: DrivesOutput; voice: { voice: string; description: string } | null }> {
     const seed = pickSeed(random);
     const offer = pickOffer(random);
     const result = await generateText({
-      model: deps.type2.heavy,
+      model: (await activeType2()).heavy.model,
       instructions: `${GENESIS_INSTRUCTIONS}\n${genesisArchetypeInstructions(archetypeOfferText(offer))}`,
       prompt: seed,
       output: Output.object({ schema: genesisSchema }),
@@ -466,7 +541,7 @@ export function createBrain(deps: {
 
     onStart?.();
     const { output } = await generateText({
-      model: deps.type2.heavy,
+      model: (await activeType2()).heavy.model,
       instructions: REFLECTION_INSTRUCTIONS,
       prompt: `Naam: ${row.name}
 Kern-karakter: ${row.coreCharacter}
@@ -696,7 +771,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
       isMissing: async (row) => rowAxes(row) === null,
       fill: async (row) => {
         const { output } = await generateText({
-          model: deps.type2.heavy,
+          model: (await activeType2()).heavy.model,
           instructions: BACKFILL_INSTRUCTIONS,
           prompt: backfillPrompt(row, await recentMemoryTexts(row.id)),
           output: Output.object({ schema: z.object({ axes: axesSchema }) }),
@@ -715,7 +790,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
         (await deps.db.select({ id: drives.id }).from(drives).where(eq(drives.dynimoId, row.id)).limit(1)).length === 0,
       fill: async (row) => {
         const { output } = await generateText({
-          model: deps.type2.heavy,
+          model: (await activeType2()).heavy.model,
           instructions: DRIVES_BACKFILL_INSTRUCTIONS,
           prompt: backfillPrompt(row, await recentMemoryTexts(row.id)),
           output: Output.object({ schema: z.object({ drives: drivesSchema }) }),
@@ -735,7 +810,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
       isMissing: async (row) => row.baseEmotion === null,
       fill: async (row) => {
         const { output } = await generateText({
-          model: deps.type2.heavy,
+          model: (await activeType2()).heavy.model,
           instructions: BASE_EMOTION_BACKFILL_INSTRUCTIONS,
           prompt: backfillPrompt(row, await recentMemoryTexts(row.id), await loadDrives(row.id)),
           output: Output.object({ schema: z.object({ baseEmotion: z.enum(EMOTIONS) }) }),
@@ -870,11 +945,13 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     }
   }
 
-  async function insertMemory(memoryText: string, dynimoId: number, impression: number, personId: number | null = null): Promise<number> {
+  // `model` (#123): het Type2-model-id dat deze Herinnering schreef (hear()/onthoud-tool); null bij een
+  // dashboard-Herinnering (addMemory) — die gaat buiten Type2 om.
+  async function insertMemory(memoryText: string, dynimoId: number, impression: number, personId: number | null = null, model: string | null = null): Promise<number> {
     const { embedding } = await embed({ model: deps.embedder, value: memoryText });
     const [row] = await deps.db
       .insert(memories)
-      .values({ dynimoId, personId, text: memoryText, embedding, createdAt: now(), impression })
+      .values({ dynimoId, personId, text: memoryText, embedding, createdAt: now(), impression, model })
       .returning({ id: memories.id });
     return row!.id;
   }
@@ -886,18 +963,18 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
   // mag enkel naar zíjn eigen, mogelijk intussen vervangen sessie schrijven. Verplicht en apart genoemd (niet
   // `session`): anders bindt een vergeten argument stilzwijgend aan de instance-brede `session` en is de bug van
   // punt 1 zo weer terug.
-  async function remember(memoryText: string, dynimoId = current?.id, impression = 0.5, personId: number | null = null, s: Session): Promise<boolean> {
+  async function remember(memoryText: string, dynimoId = current?.id, impression = 0.5, personId: number | null = null, s: Session, model: string | null = null): Promise<boolean> {
     if (dynimoId === undefined) return false;
     try {
       let id: number;
       try {
-        id = await insertMemory(memoryText, dynimoId, impression, personId);
+        id = await insertMemory(memoryText, dynimoId, impression, personId, model);
       } catch (error) {
         // #107: de Gesprekspartner is intussen verwijderd/samengevoegd; de Herinnering dan zonder Persoon bewaren.
         // Bewust niet bij unknownSessionMemoryIds: ze hoorde bij een bekende Persoon, niet bij een latere leerKennen.
         if (personId === null || violatedForeignKey(error) !== "memories_person_id_persons_id_fk") throw error;
         console.warn(`Herinnering zonder Persoon opgeslagen: Persoon ${personId} bestaat niet (meer).`);
-        id = await insertMemory(memoryText, dynimoId, impression, null);
+        id = await insertMemory(memoryText, dynimoId, impression, null, model);
       }
       s.sessionMemoryIds.push(id);
       // #92: apart bijgehouden zodat leerKennen precies de onbekende-Herinneringen van déze sessie kan koppelen.
@@ -1433,6 +1510,9 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     // expliciet "onbekende" Gesprekspartner mag zelf geen eigenaar-fallback triggeren. Stuurt de recall-bonus en
     // de Spontane herinnering.
     const presentIdsPromise = safe(presentPersonIds(gesprekspartner, options.aanwezig, ownerId));
+    // Modelwissel-experiment (#123): welk Type2-model deze beurt gebruikt, staat pas vast ná Intent (hieronder);
+    // het lezen van de instelling zelf hangt daar niet van af, en start dus hier al parallel met Type1 (#109).
+    const type2Promise = safe(activeType2());
 
     const { deltas: type1Deltas, indruk, intent, kijken } = await (options.initiatief
       ? Promise.resolve<Type1Result>({ deltas: {}, indruk: 0.2, intent: "simpel", kijken: initiatiefKijken })
@@ -1574,8 +1654,13 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
           }
         : {};
 
+    // Modelwissel-experiment (#123): licht of zwaar zoals Type1's Intent besliste; de select zelf liep al parallel
+    // met Type1 hierboven (type2Promise), enkel de keuze licht/zwaar hangt van `intent` af.
+    const type2Choice = intent === "complex" ? (await type2Promise).heavy : (await type2Promise).light;
+
     // Tools van deze beurt (#91): de onthoud-tool sluit over de Gesprekspartner van déze beurt, niet over instance-state.
-    const turnTools = createTools({ now, remember: (memoryText: string) => remember(memoryText, being.id, undefined, personId, s) });
+    // `type2Choice.id` (#123): de onthoud-tool schrijft ook een Herinnering, dus ook die krijgt het model van déze beurt.
+    const turnTools = createTools({ now, remember: (memoryText: string) => remember(memoryText, being.id, undefined, personId, s, type2Choice.id) });
 
     // Naam van de Gesprekspartner (#92): bekend (met owner-vlag) of onbekend. Al gestart parallel met Type1 (#109).
     const speakerPerson = await speakerPersonPromise;
@@ -1645,7 +1730,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
       ...noFrameMessage,
     ];
 
-    const model = intent === "complex" ? deps.type2.heavy : deps.type2.light;
+    const model = type2Choice.model;
     // Tweede Anthropic-cachebreakpoint op het laatste geschiedenisbericht: zonder deze marker cachet Anthropic
     // (in tegenstelling tot OpenAI's automatische prefix-cache) alleen wat vóór een expliciete breakpoint staat,
     // dus zonder deze tweede marker blijft enkel `stable` gecached en niet de (groeiende) geschiedenis erna. Kopie
@@ -1763,7 +1848,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
             }
           }
           if (outcome !== "failed" && full.trim()) {
-            await remember(options.initiatief ? `${being.name}: ${full}` : `Gesprekspartner: ${text}\n${being.name}: ${full}`, being.id, indruk, personIdAtEnd, s);
+            await remember(options.initiatief ? `${being.name}: ${full}` : `Gesprekspartner: ${text}\n${being.name}: ${full}`, being.id, indruk, personIdAtEnd, s, type2Choice.id);
           }
         })(),
       );
@@ -1784,7 +1869,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     // (1) Aparte, finale Type2-call: de laatste woorden, niet een bestaande reflectie.
     // Faalt die, dan wordt er bewust niets verwijderd: geen Grafschrift zonder laatste woorden.
     const { text: farewellReflection } = await generateText({
-      model: deps.type2.heavy,
+      model: (await activeType2()).heavy.model,
       instructions: [
         { role: "system", content: buildStableSystemPrompt(being, await loadDrives(id)) },
         ageMessage(being),
@@ -1905,6 +1990,9 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
   }
 
   return {
+    availableModels,
+    type2Models,
+    setType2Models,
     bringToLife,
     wake,
     sleep,

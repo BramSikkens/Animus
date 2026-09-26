@@ -1,7 +1,7 @@
 import { fileURLToPath } from "node:url";
 import { createDb, migrate } from "@animus/db";
 import { createBrain } from "./index.js";
-import { EMBEDDING_MODEL, loadType2Config, TYPE1_MODEL } from "./config.js";
+import { EMBEDDING_MODEL, loadType2Config, TYPE1_MODEL, type2Catalog } from "./config.js";
 
 try {
   process.loadEnvFile(fileURLToPath(new URL("../../../.env", import.meta.url)));
@@ -15,7 +15,7 @@ async function main(): Promise<void> {
   const db = createDb(process.env.DATABASE_URL ?? "postgres://animus:animus@localhost:5433/animus");
   try {
     await migrate(db);
-    const brain = createBrain({ db, type1: TYPE1_MODEL, type2: loadType2Config(), embedder: EMBEDDING_MODEL });
+    const brain = createBrain({ db, type1: TYPE1_MODEL, type2: loadType2Config(), type2Catalog: type2Catalog(), embedder: EMBEDDING_MODEL });
     console.log(`Backfill: ${await brain.backfill()} Dynimo(s) bijgewerkt.`);
   } catch (error) {
     console.warn(

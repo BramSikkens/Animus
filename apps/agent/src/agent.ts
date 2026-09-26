@@ -10,7 +10,7 @@ import { isEigenaar, livekitEnv } from "@animus/brain/security";
 import { moodOfRow } from "@animus/brain/mood";
 import { rowAxes } from "@animus/brain/personality";
 import { resolveVoice, speechProvider } from "@animus/brain/voice";
-import { EMBEDDING_MODEL, loadType2Config, TYPE1_MODEL } from "@animus/brain/config";
+import { EMBEDDING_MODEL, loadType2Config, TYPE1_MODEL, type2Catalog } from "@animus/brain/config";
 import { createDb, migrate } from "@animus/db";
 import { cli, defineAgent, ServerOptions, voice, type JobContext, type JobProcess, type VAD } from "@livekit/agents";
 import * as deepgram from "@livekit/agents-plugin-deepgram";
@@ -102,7 +102,7 @@ export default defineAgent<AgentUserData>({
 
     // In-process (spec: geen aparte brein-API); elke job krijgt zijn eigen brein-instantie.
     // voices: een geboorte vanuit de Galerij kiest net als in het dashboard een stem.
-    const brain = createBrain({ db, type1: TYPE1_MODEL, type2: loadType2Config(), embedder: EMBEDDING_MODEL, voices: defaultVoiceDeps(process.env), lookFrame: () => frames.latest(), faceMatchDistance: faceMatchDistanceConfig.distance });
+    const brain = createBrain({ db, type1: TYPE1_MODEL, type2: loadType2Config(), type2Catalog: type2Catalog(), embedder: EMBEDDING_MODEL, voices: defaultVoiceDeps(process.env), lookFrame: () => frames.latest(), faceMatchDistance: faceMatchDistanceConfig.distance });
 
     ctx.addShutdownCallback(async () => frames.dispose());
     ctx.addShutdownCallback(async () => {

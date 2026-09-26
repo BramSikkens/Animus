@@ -1,5 +1,5 @@
 import { createBrain, defaultVoiceDeps, type Brain } from "@animus/brain";
-import { EMBEDDING_MODEL, loadType2Config, TYPE1_MODEL } from "@animus/brain/config";
+import { EMBEDDING_MODEL, loadType2Config, TYPE1_MODEL, type2Catalog } from "@animus/brain/config";
 import { db } from "./db";
 
 const globalForBrain = globalThis as unknown as { animusBrain?: Brain };
@@ -10,6 +10,7 @@ export function getBrain(): Brain {
     db,
     type1: TYPE1_MODEL,
     type2: loadType2Config(),
+    type2Catalog: type2Catalog(),
     embedder: EMBEDDING_MODEL,
     voices: defaultVoiceDeps(process.env),
   }));

@@ -3,7 +3,7 @@ import { isNotNull } from "drizzle-orm";
 import { createDb, migrate } from "@animus/db";
 import { dynimos } from "@animus/db/schema";
 import { createBrain } from "./index.js";
-import { EMBEDDING_MODEL, loadType2Config, TYPE1_MODEL } from "./config.js";
+import { EMBEDDING_MODEL, loadType2Config, TYPE1_MODEL, type2Catalog } from "./config.js";
 
 try {
   process.loadEnvFile(fileURLToPath(new URL("../../../.env", import.meta.url)));
@@ -18,7 +18,7 @@ async function main(): Promise<void> {
     await migrate(db);
     try {
       // Via de brain: de vorige wakkere Dynimo krijgt zo zijn Reflectie voor het slapen.
-      const brain = createBrain({ db, type1: TYPE1_MODEL, type2: loadType2Config(), embedder: EMBEDDING_MODEL });
+      const brain = createBrain({ db, type1: TYPE1_MODEL, type2: loadType2Config(), type2Catalog: type2Catalog(), embedder: EMBEDDING_MODEL });
       await brain.sleep();
     } catch (error) {
       // Geen modelconfig (of de call faalde): dev mag nooit breken, dus terugval op direct slapen zonder Reflectie.

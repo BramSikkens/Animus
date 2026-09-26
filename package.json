@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "docker compose up -d --wait && pnpm --filter @animus/brain run slaap-allen && pnpm --filter @animus/brain run backfill && pnpm --parallel --filter @animus/agent --filter @animus/face --filter @animus/dashboard --filter @animus/worker run dev",
+    "dev": "docker compose up -d --wait && pnpm --filter @animus/brain run slaap-allen && pnpm --parallel --filter @animus/agent --filter @animus/face --filter @animus/dashboard --filter @animus/worker run dev",
     "test": "turbo run test && node --test scripts/*.test.mjs",
     "kiosk": "node scripts/kiosk.mjs",
     "typecheck": "turbo run typecheck",

@@ -160,6 +160,14 @@ export type Brain = {
    */
   backfill(): Promise<number>;
   /**
+   * Vult alle ontbrekende eigenschappen van één Dynimo aan (#127: door de worker aangeroepen na een `backfill`-job,
+   * buiten deze brain-instantie om ingepland). Probeert bij een fout in een stap tóch de overige stappen — ze zijn
+   * idempotent via `isMissing`, dus een retry pakt gewoon door waar het bleef steken. Meldt "kenmerken:<id>" als er
+   * iets veranderde, óók als een latere stap faalde, en gooit daarna de eerste fout opnieuw zodat BullMQ herkanst.
+   * Geeft terug of er iets veranderd is; false bij een onbekende id.
+   */
+  backfillDynimo(id: number): Promise<boolean>;
+  /**
    * Reflectie van de wakkere Dynimo (bij stilte); hij blijft wakker. `onStart` draait vlak vóór de Type2-call en
    * niet als er niets te reflecteren valt. Geeft true bij een toegepaste Reflectie, anders false; gooit nooit.
    * `aanwezig` (#94): Persoon-ids die tijdens de stilte in beeld waren; hun Vertrouwdheid daalt dan niet mee. Zonder
@@ -924,25 +932,42 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     },
   ];
 
+  // Alle stappen voor één Dynimo; een falende stap stopt de overige niet (idempotent via isMissing). Geeft of er
+  // iets veranderde en de eerste fout terug: backfillDynimo gooit die door (retry), backfill() logt hem.
+  async function fillDynimo(id: number): Promise<{ changed: boolean; error: unknown }> {
+    let changed = false;
+    let error: unknown;
+    for (const step of backfillSteps) {
+      try {
+        // Vers lezen vóór elke stap: latere stappen (Drijfveren) gebruiken wat eerdere stappen of een
+        // andere instantie (assen) net aanvulden.
+        const [row] = await deps.db.select().from(dynimos).where(eq(dynimos.id, id));
+        if (!row || !(await step.isMissing(row))) continue;
+        changed = (await step.fill(row)) || changed;
+      } catch (stepError) {
+        error ??= stepError;
+      }
+    }
+    // Assen/Verstand/Basisemotie vullen hierboven de kenmerken aan; het gezichtje ververst ze (#111).
+    if (changed) await notifyStateChange(deps.db, `${STATE_PREFIXES.kenmerken}${id}`);
+    return { changed, error };
+  }
+
+  async function backfillDynimo(id: number): Promise<boolean> {
+    const { changed, error } = await fillDynimo(id);
+    if (error !== undefined) throw error;
+    return changed;
+  }
+
   async function backfill(): Promise<number> {
     let updatedRows = 0;
     for (const listed of await list()) {
-      let changed = false;
-      for (const step of backfillSteps) {
-        try {
-          // Vers lezen vóór elke stap: latere stappen (Drijfveren) gebruiken wat eerdere stappen of een
-          // andere instantie (assen) net aanvulden.
-          const [row] = await deps.db.select().from(dynimos).where(eq(dynimos.id, listed.id));
-          if (!row || !(await step.isMissing(row))) continue;
-          changed = (await step.fill(row)) || changed;
-        } catch (error) {
-          console.warn(`Backfill faalde voor ${listed.name}:`, error instanceof Error ? error.message : error);
-        }
-      }
-      // Assen/Verstand/Basisemotie vullen hierboven de kenmerken aan; het gezichtje ververst ze (#111).
-      if (changed) {
-        updatedRows++;
-        await notifyStateChange(deps.db, `${STATE_PREFIXES.kenmerken}${listed.id}`);
+      try {
+        const { changed, error } = await fillDynimo(listed.id);
+        if (changed) updatedRows++;
+        if (error !== undefined) console.warn(`Backfill faalde voor ${listed.name}:`, error instanceof Error ? error.message : error);
+      } catch (error) {
+        console.warn(`Backfill faalde voor ${listed.name}:`, error instanceof Error ? error.message : error);
       }
     }
     return updatedRows;
@@ -2120,6 +2145,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     kill,
     list,
     backfill,
+    backfillDynimo,
     reflect,
     runReflection,
     storeMemory,

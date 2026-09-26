@@ -1,6 +1,6 @@
 import { Queue, QueueEvents } from "bullmq";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createJobQueue, QUEUE_NAME, startWorker } from "../src/jobs.js";
+import { createJobQueue, QUEUE_NAME, scheduleBackfill, startWorker } from "../src/jobs.js";
 
 const REDIS_URL = process.env.REDIS_URL ?? process.env.TEST_REDIS_URL ?? "redis://localhost:6379";
 
@@ -154,5 +154,14 @@ describe("jobs", () => {
     await new Promise((resolve) => setTimeout(resolve, 150)); // een eventuele tweede uitvoering de kans geven
 
     expect(calls).toBe(1);
+  });
+
+  it("scheduleBackfill plant per Dynimo-id een backfill-job in met een eigen dedup-id (#127)", async () => {
+    const enqueue = vi.fn().mockResolvedValue(undefined);
+
+    await scheduleBackfill({ enqueue }, [3, 7]);
+
+    expect(enqueue).toHaveBeenNthCalledWith(1, "backfill", { dynimoId: 3 }, { deduplication: { id: "backfill:3" } });
+    expect(enqueue).toHaveBeenNthCalledWith(2, "backfill", { dynimoId: 7 }, { deduplication: { id: "backfill:7" } });
   });
 });

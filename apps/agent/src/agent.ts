@@ -430,9 +430,9 @@ export default defineAgent<AgentUserData>({
         if (phase === "start") reflectionDisplay.onStart(state.key);
         else reflectionDisplay.onFinish(state.key);
       },
-        void readState(brain)
       onVoice: () =>
           .then((state) => applyVoice(state.voice))
+        void readState(brain)
           .catch((error: unknown) => console.warn("Stem herladen faalde:", error instanceof Error ? error.message : error)),
       // Personen samengevoegd/verwijderd/opnieuw geleerd (#95): Stemprofielen, de gezien-bijhouding en een lopende
       // stem-inschrijving (#107: de Persoon kan weg zijn) zijn verouderd.

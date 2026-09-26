@@ -1973,6 +1973,74 @@ describe("createBrain", () => {
     });
   });
 
+  describe("backfillDynimo (#127)", () => {
+    const bornAt = new Date("2026-01-01T12:00:00.000Z");
+    const AXES_RESULT = { axes: { ie: 0.2, sn: 0.8, tf: 0.7, jp: 0.3 } };
+
+    function brainWith(heavy: MockLanguageModelV4, light: MockLanguageModelV4 = unusedModel()) {
+      return createBrain({
+        db,
+        embedder: embedModel(),
+        type1: type1Model(),
+        type2: { light, heavy },
+        now: () => bornAt,
+        random: () => 0,
+      });
+    }
+
+    async function insertLegacy(name: string, extra: Partial<typeof dynimos.$inferInsert> = {}) {
+      const [row] = await db
+        .insert(dynimos)
+        .values({ name, coreCharacter: `Kern van ${name}.`, birthStory: "Geboren.", seed: "z", bornAt, baseEmotion: "kalm", verstand: 0.5, ...extra })
+        .returning();
+      await db.insert(drives).values({ dynimoId: row!.id, kind: "wens", text: "Een wens", createdAt: bornAt, updatedAt: bornAt });
+      return row!;
+    }
+
+    it("vult aan en meldt \"kenmerken:<id>\"", async () => {
+      // Enkel de Verstand-stap heeft iets te doen (geen Type2-call): assen/Drijfveer/Basisemotie al aanwezig.
+      const legacy = await insertLegacy("Lumi", { axisIe: 0.5, axisSn: 0.5, axisTf: 0.5, axisJp: 0.5, verstand: null });
+      const client = postgres(databaseUrl(TEST_DB_NAME), { onnotice: () => {} });
+      const received: string[] = [];
+      await client.listen(STATE_CHANNEL, (payload) => received.push(payload));
+      try {
+        await expect(brainWith(unusedModel()).backfillDynimo(legacy.id)).resolves.toBe(true);
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        expect(received).toEqual([`kenmerken:${legacy.id}`]);
+      } finally {
+        await client.end();
+      }
+    });
+
+    it("gooit de fout van een falende stap door, maar heeft de andere stappen wél aangevuld en de melding ging uit", async () => {
+      // Assen-stap faalt (Type2-call plat); Verstand-stap (geen Type2-call) moet toch aangevuld worden.
+      const legacy = await insertLegacy("Lumi", { verstand: null });
+      const heavy = new MockLanguageModelV4({
+        doGenerate: async () => {
+          throw new Error("model plat");
+        },
+      });
+      const client = postgres(databaseUrl(TEST_DB_NAME), { onnotice: () => {} });
+      const received: string[] = [];
+      await client.listen(STATE_CHANNEL, (payload) => received.push(payload));
+      try {
+        await expect(brainWith(heavy).backfillDynimo(legacy.id)).rejects.toThrow("model plat");
+        await new Promise((resolve) => setTimeout(resolve, 150));
+
+        const [row] = await db.select().from(dynimos).where(eq(dynimos.id, legacy.id));
+        expect(row?.verstand).toBeCloseTo(0.5);
+        expect(row?.axisIe).toBeNull();
+        expect(received).toEqual([`kenmerken:${legacy.id}`]);
+      } finally {
+        await client.end();
+      }
+    });
+
+    it("geeft false terug voor een onbekende id, zonder te gooien", async () => {
+      await expect(brainWith(unusedModel()).backfillDynimo(999_999)).resolves.toBe(false);
+    });
+  });
+
   describe("Drijfveren", () => {
     const bornAt = new Date("2026-01-01T12:00:00.000Z");
     const DRIVES_RESULT = {

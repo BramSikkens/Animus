@@ -4,13 +4,15 @@ import { Redis as IORedis } from "ioredis";
 export const QUEUE_NAME = "animus";
 
 // ponytail: "ping" blijft naast de echte jobs staan, puur om de wachtrij-fundering (queue, worker, retries) te
-// bewijzen in jobs.test.ts. Backfill volgt in #127.
+// bewijzen in jobs.test.ts.
 export type JobPayloads = {
   ping: { value: number };
   /** Reflectie van één Dynimo (#125): bij slapen/wisselen (sleeping: true) of bij stilte (sleeping: false). */
   reflectie: { dynimoId: number; sleeping: boolean; aanwezig?: number[] };
   /** Herinnering opslaan (#126): dezelfde velden als storeMemory() nodig heeft; model idem #123. */
   herinnering: { dynimoId: number; personId: number | null; text: string; impression: number; model: string | null };
+  /** Backfill van één Dynimo (#127): brain.backfillDynimo(dynimoId). */
+  backfill: { dynimoId: number };
 };
 
 export const DEFAULT_JOB_OPTIONS: JobsOptions = {
@@ -56,6 +58,14 @@ export function createJobQueue({ connection, prefix }: { connection: string; pre
       await redis.quit();
     },
   };
+}
+
+/** Plant per Dynimo-id een `backfill`-job in (#127), gededupliceerd per id: staat er al een gepland, dan negeert
+ * BullMQ de nieuwe totdat de vorige verwerkt is. */
+export async function scheduleBackfill(queue: Pick<ReturnType<typeof createJobQueue>, "enqueue">, dynimoIds: number[]): Promise<void> {
+  for (const id of dynimoIds) {
+    await queue.enqueue("backfill", { dynimoId: id }, { deduplication: { id: `backfill:${id}` } });
+  }
 }
 
 export function startWorker({

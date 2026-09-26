@@ -65,7 +65,15 @@ pnpm typecheck
 pnpm repl
 ```
 
+```bash
+pnpm kiosk
+```
+
 `pnpm test` draait alle tests; de brain-tests maken daarvoor een wegwerp-database `animus_test` aan in de Docker-Postgres. `pnpm repl` praat in de terminal met de wakkere Dynimo, zonder spraak.
+
+## Kiosk
+
+`pnpm kiosk` opent het gezichtje schermvullend in Chrome of Chromium (kiosk-mode, zonder adresbalk), met camera/microfoon/autoplay al toegestaan. De dev-server moet al draaien (`pnpm dev` of `pnpm face`); zonder draaiende server, of zonder gevonden Chrome/Chromium, stopt het script met een duidelijke melding. Op macOS vraagt het systeem de eerste keer nog één keer toestemming voor camera en microfoon voor Chrome zelf. Afsluiten: Cmd+Q. Toestemmingen en de Galerij-keuze staan in een eigen profielmap (`~/.animus-kiosk`, buiten de repo) — verwijder die map om ze te resetten. Hetzelfde script werkt op Linux (bv. de Pi in fase 4) met Chromium.
 
 ## Beveiliging
 

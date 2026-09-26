@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "dev": "docker compose up -d --wait && pnpm --filter @animus/brain run slaap-allen && pnpm --filter @animus/brain run backfill && pnpm --parallel --filter @animus/agent --filter @animus/face --filter @animus/dashboard run dev",
-    "test": "turbo run test",
+    "test": "turbo run test && node --test scripts/*.test.mjs",
+    "kiosk": "node scripts/kiosk.mjs",
     "typecheck": "turbo run typecheck",
     "repl": "pnpm --filter @animus/brain run repl",
     "verwijder": "pnpm --filter @animus/brain run verwijder",

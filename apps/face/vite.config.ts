@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import react from "@vitejs/plugin-react";
-import { AccessToken, AgentDispatchClient, RoomServiceClient } from "livekit-server-sdk";
+import { AccessToken, AgentDispatchClient, RoomServiceClient, TrackSource } from "livekit-server-sdk";
 import { defineConfig, type Plugin } from "vite";
+import { EIGENAAR_PREFIX, livekitEnv } from "@animus/brain/security";
 
 // Zelfde .env als de andere apps (repo-root).
 try {
@@ -10,9 +11,10 @@ try {
 } catch {
   // .env is optioneel.
 }
-process.env.LIVEKIT_URL ??= "ws://localhost:7880";
-process.env.LIVEKIT_API_KEY ??= "devkey";
-process.env.LIVEKIT_API_SECRET ??= "secret";
+const livekit = livekitEnv(process.env);
+process.env.LIVEKIT_URL = livekit.url;
+process.env.LIVEKIT_API_KEY = livekit.apiKey;
+process.env.LIVEKIT_API_SECRET = livekit.apiSecret;
 
 const ROOM_NAME = "animus";
 const AGENT_KIND = 4; // ParticipantInfo.Kind.AGENT (livekit-protocol), niet re-exported door de SDK
@@ -58,9 +60,19 @@ function tokenEndpoint(): Plugin {
         void (async () => {
           await ensureAgent().catch((error: unknown) => console.error("Agent dispatchen faalde:", error));
           const at = new AccessToken(process.env.LIVEKIT_API_KEY, process.env.LIVEKIT_API_SECRET, {
-            identity: `eigenaar-${randomUUID()}`,
+            identity: `${EIGENAAR_PREFIX}${randomUUID()}`,
           });
-          at.addGrant({ roomJoin: true, room: ROOM_NAME });
+          // Enkel wat het gezichtje echt nodig heeft: microfoon/camera publiceren, commando's/Waarnemingen
+          // via data (canPublishData), geen eigen metadata-updates.
+          at.addGrant({
+            roomJoin: true,
+            room: ROOM_NAME,
+            canSubscribe: true,
+            canPublish: true,
+            canPublishSources: [TrackSource.MICROPHONE, TrackSource.CAMERA],
+            canPublishData: true,
+            canUpdateOwnMetadata: false,
+          });
           const token = await at.toJwt();
           res.setHeader("Content-Type", "application/json");
           res.end(JSON.stringify({ serverUrl: process.env.LIVEKIT_URL, token }));

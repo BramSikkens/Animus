@@ -13,6 +13,7 @@ import {
   type VideoFrame,
 } from "@livekit/rtc-node";
 import type { Frame } from "@animus/brain";
+import { isEigenaar } from "@animus/brain/security";
 
 const MAX_SIDE = 768;
 const JPEG_QUALITY = 80;
@@ -54,8 +55,8 @@ export function createFrameSource(room: Room): { latest(): Promise<Frame | null>
     }
   }
 
-  const onSubscribed = (subscribed: RemoteTrack, publication: RemoteTrackPublication, _participant: RemoteParticipant): void => {
-    if (subscribed.kind !== TrackKind.KIND_VIDEO) return;
+  const onSubscribed = (subscribed: RemoteTrack, publication: RemoteTrackPublication, participant: RemoteParticipant): void => {
+    if (subscribed.kind !== TrackKind.KIND_VIDEO || !isEigenaar(participant.identity)) return;
     activeSid = publication.sid;
     muted = publication.muted ?? false;
     track = subscribed;

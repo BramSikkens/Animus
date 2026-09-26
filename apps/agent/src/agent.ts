@@ -6,6 +6,7 @@ import { decodeEmbedding, isWaarneming, PERCEPTION_TOPIC, type Aanleiding } from
 import { EMOTION_TOPIC } from "@animus/brain/emotion";
 import { KENMERKEN_TOPIC, type KenmerkenMessage } from "@animus/brain/kenmerken";
 import { initiativeFactor } from "@animus/brain/behavior";
+import { isEigenaar, livekitEnv } from "@animus/brain/security";
 import { moodOfRow } from "@animus/brain/mood";
 import { rowAxes } from "@animus/brain/personality";
 import { resolveVoice, speechProvider } from "@animus/brain/voice";
@@ -42,9 +43,10 @@ try {
 } catch {
   // .env is optioneel: de omgevingsvariabelen kunnen ook al gezet zijn (bv. via shell/CI).
 }
-process.env.LIVEKIT_URL ??= "ws://localhost:7880";
-process.env.LIVEKIT_API_KEY ??= "devkey";
-process.env.LIVEKIT_API_SECRET ??= "secret";
+const livekitConfig = livekitEnv(process.env);
+process.env.LIVEKIT_URL = livekitConfig.url;
+process.env.LIVEKIT_API_KEY = livekitConfig.apiKey;
+process.env.LIVEKIT_API_SECRET = livekitConfig.apiSecret;
 
 type AgentUserData = { vad: VAD };
 
@@ -220,14 +222,14 @@ export default defineAgent<AgentUserData>({
         console.error("Galerij publiceren faalde:", error instanceof Error ? error.message : error);
       }
     };
-    // Commando's van het gezichtje (dev-only, geen auth): birth/wake/sleep/kill; handler valideert zelf.
+    // Commando's van het gezichtje (enkel van een eigenaar-identity, #116): birth/wake/sleep/kill; handler valideert zelf.
     const handleCommand = createCommandHandler({
       brain,
       publishGallery: () => void publishGallery(),
       onError: (error) => console.error("Commando uitvoeren faalde:", error instanceof Error ? error.message : error),
     });
-    ctx.room.on(RoomEvent.DataReceived, (payload, _participant, _kind, topic) => {
-      if (topic !== COMMAND_TOPIC) return;
+    ctx.room.on(RoomEvent.DataReceived, (payload, participant, _kind, topic) => {
+      if (topic !== COMMAND_TOPIC || !participant || !isEigenaar(participant.identity)) return;
       let parsed: unknown;
       try {
         parsed = JSON.parse(new TextDecoder().decode(payload));
@@ -319,10 +321,9 @@ export default defineAgent<AgentUserData>({
 
     // Waarnemingen van de face-app (ADR-0018): aanwezig/afwezig over PERCEPTION_TOPIC; enkel van een remote
     // participant (niet van de agent zelf).
-    // ponytail: elke remote deelnemer mag Waarnemingen sturen (dev-only, zoals COMMAND_TOPIC); twee face-tabs kunnen
-    // elkaar dan overschrijven.
+    // Enkel van een eigenaar-identity (#116); ponytail: twee face-tabs van de eigenaar kunnen elkaar nog overschrijven.
     ctx.room.on(RoomEvent.DataReceived, (payload, participant, _kind, topic) => {
-      if (topic !== PERCEPTION_TOPIC || !participant) return;
+      if (topic !== PERCEPTION_TOPIC || !participant || !isEigenaar(participant.identity)) return;
       let parsed: unknown;
       try {
         parsed = JSON.parse(new TextDecoder().decode(payload));
@@ -362,6 +363,7 @@ export default defineAgent<AgentUserData>({
     // reload is een nieuwe identiteit. Wij luisteren naar wie zijn microfoon aanzet: de face met een gekozen Dynimo.
     // ponytail: `_roomIO` is private API van @livekit/agents 1.9; bij een upgrade nakijken (RoomIO.setParticipant).
     const listenTo = (participant: RemoteParticipant): void => {
+      if (!isEigenaar(participant.identity)) return;
       session._roomIO?.setParticipant(participant.identity);
       speakerRecognition?.audio.listenTo(participant.identity);
     };

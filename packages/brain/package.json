@@ -15,6 +15,7 @@
     "./kenmerken": "./src/kenmerken.ts",
     "./perception": "./src/perception.ts",
     "./personality": "./src/personality.ts",
+    "./security": "./src/security.ts",
     "./drives": "./src/drives.ts",
     "./mood": "./src/mood.ts",
     "./sound": "./src/sound.ts",

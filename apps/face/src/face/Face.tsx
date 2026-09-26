@@ -136,8 +136,9 @@ export type FaceProps = {
   display: DisplayState;
   emotion: Emotion;
   intensity: number;
-  /** Volume 0..1 van de agent-audiotrack; stuurt de mondopening alleen tijdens "spreekt". */
-  mouthVolume?: number;
+  /** Volume 0..1 van de agent-audiotrack; stuurt de mondopening alleen tijdens "spreekt". Ref (zoals
+   * `voice`/`facePosition`) zodat App niet per audioframe rendert; Face leest 'm in zijn eigen animatielus. */
+  mouthVolume?: { current: number };
   /** Volledige emotievector; voedt de frons (boos >= 60). */
   values?: Record<Emotion, number>;
   /** Laatste uiting van de Gesprekspartner (transcriptie); voedt vraag-wenkbrauw en glimlach. */
@@ -149,7 +150,7 @@ export type FaceProps = {
 };
 
 /** Het gezichtje: achtergrond + ogen + mond + wenkbrauwen, getweend tussen emoties en de slaapstand (~300-500ms). */
-export function Face({ doodle = false, display, emotion, intensity, mouthVolume = 0, values, lastUserText, voice, facePosition }: FaceProps) {
+export function Face({ doodle = false, display, emotion, intensity, mouthVolume, values, lastUserText, voice, facePosition }: FaceProps) {
   const reduced = useReducedMotion();
   const [recentText, setRecentText] = useState<string>();
   useEffect(() => {
@@ -162,7 +163,10 @@ export function Face({ doodle = false, display, emotion, intensity, mouthVolume 
   const frame = frameForDisplay(display, emotion, intensity);
   const speaking = display === "spreekt";
   const baseMouth = { ...frame.mouth, curve: frame.mouth.curve + micro.smile };
-  const mouth = speaking ? { ...baseMouth, open: Math.max(frame.mouth.open, mouthOpenForVolume(mouthVolume)) } : baseMouth;
+  // Mondvolume komt binnen als ref (App rendert niet per audioframe); dit leest 'm in de eigen animatielus
+  // hieronder en spiegelt 'm naar lokale state, met dezelfde afronding als voorheen om onnodige renders te schelen.
+  const [liveMouthVolume, setLiveMouthVolume] = useState(0);
+  const mouth = speaking ? { ...baseMouth, open: Math.max(frame.mouth.open, mouthOpenForVolume(liveMouthVolume)) } : baseMouth;
   // Muispositie in een ref; useAnimationFrame is de per-frame-throttle (geen extra rAF).
   const pointer = useRef<{ x: number; y: number } | null>(null);
   const gaze = useRef({ dx: 0, dy: 0 });
@@ -182,6 +186,10 @@ export function Face({ doodle = false, display, emotion, intensity, mouthVolume 
   const lean = useRef(0);
   // Dunne lijm: pure idleOffsets(t) naar MotionValues; loopt in elke Weergavetoestand door.
   useAnimationFrame((timeMs) => {
+    if (mouthVolume) {
+      const rounded = Math.round(mouthVolume.current * 100) / 100;
+      setLiveMouthVolume((prev) => (prev === rounded ? prev : rounded));
+    }
     const o = idleOffsets(timeMs / 1000);
     blink.set(Math.max(o.blink, 0.05));
     const aanwijzer = facePosition?.current

@@ -14,6 +14,7 @@ const WASM_BASE = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1/wa
 const MODEL_URL = "https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite";
 const OBJECT_MODEL_URL = "https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite0/float16/1/efficientdet_lite0.tflite";
 const DETECT_INTERVAL_MS = 200; // ~5 fps: genoeg voor aanwezigheid, scheelt CPU.
+const OBJECT_DETECT_INTERVAL_MS = 1000; // ~1 Hz: objecten veranderen traag, gezichtsdetectie hoeft dat tempo niet te delen.
 const PRESENCE_DEBOUNCE_MS = 1500;
 const OBJECT_MIN_SCORE = 0.6;
 const OBJECT_STABLE_MS = 1000;
@@ -27,6 +28,16 @@ export type VisionSnapshot = {
   faces: VideoBox[];
   objects: { box: VideoBox; name: string; score: number }[];
 };
+
+/** Maakt `create` met GPU-delegate; faalt dat, dan een keer terugval op CPU (console.warn i.p.v. stille crash). */
+async function createWithGpuFallback<T>(create: (delegate: "GPU" | "CPU") => Promise<T>, label: string): Promise<T> {
+  try {
+    return await create("GPU");
+  } catch (error) {
+    console.warn(`${label}: GPU-delegate faalde, terugval naar CPU.`, error instanceof Error ? error.message : error);
+    return create("CPU");
+  }
+}
 
 /**
  * MediaPipe-adapter (ADR-0018): detecteert gezicht én objecten (COCO) in de al gepubliceerde lokale cameratrack
@@ -75,22 +86,26 @@ export function useWaarnemingen({
         await video.play();
         const wasmFileset = await FilesetResolver.forVisionTasks(WASM_BASE);
         if (cancelled) return;
-        detector = await FaceDetector.createFromOptions(wasmFileset, {
-          baseOptions: { modelAssetPath: MODEL_URL },
-          runningMode: "VIDEO",
-        });
+        detector = await createWithGpuFallback(
+          (delegate) => FaceDetector.createFromOptions(wasmFileset, { baseOptions: { modelAssetPath: MODEL_URL, delegate }, runningMode: "VIDEO" }),
+          "Gezichtsdetectie (MediaPipe)",
+        );
         if (cancelled) {
           detector.close();
           return;
         }
         // Een falend objectmodel mag de (al werkende) gezichtsdetectie niet meeslepen: eigen try/catch.
         try {
-          objectDetector = await ObjectDetector.createFromOptions(wasmFileset, {
-            baseOptions: { modelAssetPath: OBJECT_MODEL_URL },
-            runningMode: "VIDEO",
-            scoreThreshold: OBJECT_MIN_SCORE,
-            maxResults: 10, // ruim: personen en meubels mogen een nieuw object niet uit de lijst drukken
-          });
+          objectDetector = await createWithGpuFallback(
+            (delegate) =>
+              ObjectDetector.createFromOptions(wasmFileset, {
+                baseOptions: { modelAssetPath: OBJECT_MODEL_URL, delegate },
+                runningMode: "VIDEO",
+                scoreThreshold: OBJECT_MIN_SCORE,
+                maxResults: 10, // ruim: personen en meubels mogen een nieuw object niet uit de lijst drukken
+              }),
+            "Objectdetectie (MediaPipe)",
+          );
           if (cancelled) {
             objectDetector.close();
             objectDetector = undefined;
@@ -98,6 +113,8 @@ export function useWaarnemingen({
         } catch (error) {
           console.error("Objectdetectie (MediaPipe) laden faalde:", error instanceof Error ? error.message : error);
         }
+        let lastObjectDetectT = 0;
+        let lastVisionObjects: VisionSnapshot["objects"] = [];
         interval = setInterval(() => {
           if (!detector || video.readyState < video.HAVE_CURRENT_DATA) return;
           const t = performance.now();
@@ -130,20 +147,22 @@ export function useWaarnemingen({
             };
           }
 
-          let visionObjects: VisionSnapshot["objects"] = [];
-          if (objectDetector) {
+          // Objectdetectie op ~1 Hz (OBJECT_DETECT_INTERVAL_MS): trager dan gezichtsdetectie, objecten
+          // veranderen traag. Tussen ticks in hergebruiken we de laatst bekende visionObjects.
+          if (objectDetector && t - lastObjectDetectT >= OBJECT_DETECT_INTERVAL_MS) {
+            lastObjectDetectT = t;
             const { detections: objectDetections } = objectDetector.detectForVideo(video, t);
             const metCategorie = objectDetections.filter((d) => d.categories.length > 0 && d.boundingBox);
             const gedetecteerd = metCategorie.map((d) => ({ category: d.categories[0]!.categoryName, score: d.categories[0]!.score }));
             for (const object of objects.update(gedetecteerd, t)) publish({ soort: "nieuw-object", object });
-            visionObjects = metCategorie.map((d) => ({ box: d.boundingBox!, name: d.categories[0]!.categoryName, score: d.categories[0]!.score }));
+            lastVisionObjects = metCategorie.map((d) => ({ box: d.boundingBox!, name: d.categories[0]!.categoryName, score: d.categories[0]!.score }));
           }
           if (vision) {
             const visionFaces = detections
               .map((d) => d.boundingBox)
               .filter((b): b is NonNullable<typeof b> => b != null)
               .map(({ originX, originY, width, height }) => ({ originX, originY, width, height }));
-            vision.current = { video, faces: visionFaces, objects: visionObjects };
+            vision.current = { video, faces: visionFaces, objects: lastVisionObjects };
           }
         }, DETECT_INTERVAL_MS);
       } catch (error) {

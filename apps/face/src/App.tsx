@@ -33,6 +33,10 @@ const AGENT_CHECK_MS = 5000;
 import { emotionBarGroups } from "./emotion-bars.js";
 import { FALLBACK_BASE } from "@animus/brain/mood";
 
+// Vorm van een useDataChannel-bericht, beperkt tot wat de listeners hieronder lezen; scheelt een
+// afhankelijkheid op het niet-gedeclareerde transitieve pakket @livekit/components-core.
+type DataMessage = { payload: Uint8Array; from?: { isAgent?: boolean } | null };
+
 type TokenSession = { serverUrl: string; token: string };
 // `values` (de volledige vector) voedt de balken; ontbreekt hij (debugpaneel), dan tonen we geen balken.
 type EmotionState = Pick<EmotionMessage, "emotion" | "intensity"> & { values?: Record<Emotion, number> };
@@ -63,95 +67,112 @@ function ConnectionStatus() {
 // Decodeert emotie-events van de agent (EmotionMessage op EMOTION_TOPIC) en
 // valideert ze, zodat een onverwacht/kapot bericht de face-app niet laat crashen.
 function EmotionListener({ onEmotion }: { onEmotion: (state: EmotionState) => void }) {
-  useDataChannel(EMOTION_TOPIC, (msg) => {
-    // Enkel de agent mag het gezicht aansturen, niet een andere deelnemer in de room.
-    if (!msg.from?.isAgent) return;
-    try {
-      const payload: unknown = JSON.parse(new TextDecoder().decode(msg.payload));
-      if (
-        payload !== null &&
-        typeof payload === "object" &&
-        "emotion" in payload &&
-        "intensity" in payload &&
-        isEmotion(payload.emotion) &&
-        typeof payload.intensity === "number"
-      ) {
-        const values = "values" in payload ? payload.values : undefined;
-        const valid =
-          values !== null && typeof values === "object" && EMOTIONS.every((e) => typeof (values as Record<string, unknown>)[e] === "number");
-        onEmotion({
-          emotion: payload.emotion,
-          intensity: payload.intensity,
-          values: valid ? (values as Record<Emotion, number>) : undefined,
-        });
-      } else {
-        console.error("Emotie-event heeft onverwachte vorm:", payload);
+  // useCallback: een nieuwe functie-identiteit per render laat useDataChannel telkens opnieuw inschrijven.
+  const handleMessage = useCallback(
+    (msg: DataMessage) => {
+      // Enkel de agent mag het gezicht aansturen, niet een andere deelnemer in de room.
+      if (!msg.from?.isAgent) return;
+      try {
+        const payload: unknown = JSON.parse(new TextDecoder().decode(msg.payload));
+        if (
+          payload !== null &&
+          typeof payload === "object" &&
+          "emotion" in payload &&
+          "intensity" in payload &&
+          isEmotion(payload.emotion) &&
+          typeof payload.intensity === "number"
+        ) {
+          const values = "values" in payload ? payload.values : undefined;
+          const valid =
+            values !== null && typeof values === "object" && EMOTIONS.every((e) => typeof (values as Record<string, unknown>)[e] === "number");
+          onEmotion({
+            emotion: payload.emotion,
+            intensity: payload.intensity,
+            values: valid ? (values as Record<Emotion, number>) : undefined,
+          });
+        } else {
+          console.error("Emotie-event heeft onverwachte vorm:", payload);
+        }
+      } catch (error) {
+        console.error("Emotie-event kon niet verwerkt worden:", error instanceof Error ? error.message : error);
       }
-    } catch (error) {
-      console.error("Emotie-event kon niet verwerkt worden:", error instanceof Error ? error.message : error);
-    }
-  });
+    },
+    [onEmotion],
+  );
+  useDataChannel(EMOTION_TOPIC, handleMessage);
   return null;
 }
 
 // Decodeert weergavetoestand-berichten van de agent (DisplayMessage op DISPLAY_TOPIC), met dezelfde validatie.
 function DisplayListener({ onDisplay, onName }: { onDisplay: (state: DisplayState) => void; onName: (name: string | null) => void }) {
-  useDataChannel(DISPLAY_TOPIC, (msg) => {
-    if (!msg.from?.isAgent) return;
-    try {
-      const payload: unknown = JSON.parse(new TextDecoder().decode(msg.payload));
-      if (payload !== null && typeof payload === "object" && "state" in payload && isDisplayState(payload.state)) {
-        onDisplay(payload.state);
-        if ("name" in payload && (typeof payload.name === "string" || payload.name === null)) onName(payload.name);
-      } else {
-        console.error("Display-event heeft onverwachte vorm:", payload);
+  const handleMessage = useCallback(
+    (msg: DataMessage) => {
+      if (!msg.from?.isAgent) return;
+      try {
+        const payload: unknown = JSON.parse(new TextDecoder().decode(msg.payload));
+        if (payload !== null && typeof payload === "object" && "state" in payload && isDisplayState(payload.state)) {
+          onDisplay(payload.state);
+          if ("name" in payload && (typeof payload.name === "string" || payload.name === null)) onName(payload.name);
+        } else {
+          console.error("Display-event heeft onverwachte vorm:", payload);
+        }
+      } catch (error) {
+        console.error("Display-event kon niet verwerkt worden:", error instanceof Error ? error.message : error);
       }
-    } catch (error) {
-      console.error("Display-event kon niet verwerkt worden:", error instanceof Error ? error.message : error);
-    }
-  });
+    },
+    [onDisplay, onName],
+  );
+  useDataChannel(DISPLAY_TOPIC, handleMessage);
   return null;
 }
 
 // Decodeert kenmerken-berichten van de agent (KenmerkenMessage op KENMERKEN_TOPIC, #105); `null` (niemand wakker)
 // laat het paneel verdwijnen.
 function KenmerkenListener({ onKenmerken }: { onKenmerken: (message: KenmerkenMessage | null) => void }) {
-  useDataChannel(KENMERKEN_TOPIC, (msg) => {
-    if (!msg.from?.isAgent) return;
-    try {
-      const payload: unknown = JSON.parse(new TextDecoder().decode(msg.payload));
-      if (payload === null) onKenmerken(null);
-      else if (isKenmerkenMessage(payload)) onKenmerken(payload);
-      else console.error("Kenmerken-event heeft onverwachte vorm:", payload);
-    } catch (error) {
-      console.error("Kenmerken-event kon niet verwerkt worden:", error instanceof Error ? error.message : error);
-    }
-  });
+  const handleMessage = useCallback(
+    (msg: DataMessage) => {
+      if (!msg.from?.isAgent) return;
+      try {
+        const payload: unknown = JSON.parse(new TextDecoder().decode(msg.payload));
+        if (payload === null) onKenmerken(null);
+        else if (isKenmerkenMessage(payload)) onKenmerken(payload);
+        else console.error("Kenmerken-event heeft onverwachte vorm:", payload);
+      } catch (error) {
+        console.error("Kenmerken-event kon niet verwerkt worden:", error instanceof Error ? error.message : error);
+      }
+    },
+    [onKenmerken],
+  );
+  useDataChannel(KENMERKEN_TOPIC, handleMessage);
   return null;
 }
 
 // Decodeert Galerij-berichten van de agent (GalleryMessage op GALLERY_TOPIC); oudere berichten zonder `graves` blijven geldig.
 function GalleryListener({ onGallery }: { onGallery: (message: GalleryMessage) => void }) {
-  useDataChannel(GALLERY_TOPIC, (msg) => {
-    if (!msg.from?.isAgent) return;
-    try {
-      const message = parseGalleryMessage(JSON.parse(new TextDecoder().decode(msg.payload)));
-      if (message) onGallery(message);
-      else console.error("Galerij-event heeft onverwachte vorm");
-    } catch (error) {
-      console.error("Galerij-event kon niet verwerkt worden:", error instanceof Error ? error.message : error);
-    }
-  });
+  const handleMessage = useCallback(
+    (msg: DataMessage) => {
+      if (!msg.from?.isAgent) return;
+      try {
+        const message = parseGalleryMessage(JSON.parse(new TextDecoder().decode(msg.payload)));
+        if (message) onGallery(message);
+        else console.error("Galerij-event heeft onverwachte vorm");
+      } catch (error) {
+        console.error("Galerij-event kon niet verwerkt worden:", error instanceof Error ? error.message : error);
+      }
+    },
+    [onGallery],
+  );
+  useDataChannel(GALLERY_TOPIC, handleMessage);
   return null;
 }
 
-// Leest het volume van de agent-audiotrack (buiten de room is er geen track, dus volume 0).
-function MouthVolumeListener({ onVolume }: { onVolume: (volume: number) => void }) {
+// Leest het volume van de agent-audiotrack (buiten de room is er geen track, dus volume 0) in een ref;
+// Face leest 'm in zijn eigen animatielus, dus dit schrijft nooit React-state en veroorzaakt geen re-render.
+function MouthVolumeListener({ mouthVolume }: { mouthVolume: { current: number } }) {
   const { audioTrack } = useVoiceAssistant();
   const volume = useTrackVolume(audioTrack);
-  // Op 2 decimalen afgerond: beperkt het aantal re-renders van het gezicht.
-  const rounded = Math.round(volume * 100) / 100;
-  useEffect(() => onVolume(rounded), [rounded, onVolume]);
+  // Op 2 decimalen afgerond: beperkt hoe vaak Face het ziet veranderen.
+  mouthVolume.current = Math.round(volume * 100) / 100;
   return null;
 }
 
@@ -183,21 +204,25 @@ function UserTextListener({ onText }: { onText: (text: string) => void }) {
 
 // Speelt bij een sound-event (SoundMessage op SOUND_TOPIC) een vooraf opgenomen clip af; niet tijdens slapend/reflecterend.
 function SoundListener({ display, onSound }: { display: DisplayState; onSound: () => void }) {
-  useDataChannel(SOUND_TOPIC, (msg) => {
-    if (msg.from?.isAgent) onSound();
-    if (!msg.from?.isAgent || display === "slapend" || display === "reflecterend") return;
-    try {
-      const payload: unknown = JSON.parse(new TextDecoder().decode(msg.payload));
-      if (payload !== null && typeof payload === "object" && "kind" in payload && isSoundKind(payload.kind)) {
-        // Autoplay is ontgrendeld door StartAudio; een geweigerde play() is geen fout voor de sessie.
-        void new Audio(clipUrl(payload.kind)).play().catch(() => {});
-      } else {
-        console.error("Sound-event heeft onverwachte vorm:", payload);
+  const handleMessage = useCallback(
+    (msg: DataMessage) => {
+      if (msg.from?.isAgent) onSound();
+      if (!msg.from?.isAgent || display === "slapend" || display === "reflecterend") return;
+      try {
+        const payload: unknown = JSON.parse(new TextDecoder().decode(msg.payload));
+        if (payload !== null && typeof payload === "object" && "kind" in payload && isSoundKind(payload.kind)) {
+          // Autoplay is ontgrendeld door StartAudio; een geweigerde play() is geen fout voor de sessie.
+          void new Audio(clipUrl(payload.kind)).play().catch(() => {});
+        } else {
+          console.error("Sound-event heeft onverwachte vorm:", payload);
+        }
+      } catch (error) {
+        console.error("Sound-event kon niet verwerkt worden:", error instanceof Error ? error.message : error);
       }
-    } catch (error) {
-      console.error("Sound-event kon niet verwerkt worden:", error instanceof Error ? error.message : error);
-    }
-  });
+    },
+    [display, onSound],
+  );
+  useDataChannel(SOUND_TOPIC, handleMessage);
   return null;
 }
 
@@ -369,7 +394,8 @@ export function App() {
   const attempts = useRef(0);
   const retryTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const sawAwake = useRef(false);
-  const [mouthVolume, setMouthVolume] = useState(0);
+  // Mondvolume uit MouthVolumeListener; ref zodat App niet per audioframe rendert (Face leest 'm zelf).
+  const mouthVolume = useRef(0);
   const [doodle, setDoodle] = useState(false);
   const [userText, setUserText] = useState<string>();
   const voice = useRef<VoiceReaction>({ startle: 0, lean: 0, alert: 0 });
@@ -388,6 +414,7 @@ export function App() {
   }, []);
   const onEmotion = useCallback((state: EmotionState) => { touch(); setEmotionState(state); }, [touch]);
   const onDisplay = useCallback((state: DisplayState) => { touch(); setDisplayState(state); }, [touch]);
+  const onGallery = useCallback((message: GalleryMessage) => { setBeings(message.beings); setGraves(message.graves); }, []);
 
   // wakker is de enige "stille" toestand; luisterend/spreekt tellen als activiteit, slapend/reflecterend blokkeren de doodle.
   useEffect(() => {
@@ -429,7 +456,7 @@ export function App() {
     setKenmerken(null);
     setBeings(null);
     setGraves([]);
-    setMouthVolume(0);
+    mouthVolume.current = 0;
     setUserText(undefined);
   }
 
@@ -522,9 +549,9 @@ export function App() {
             <DisplayListener onDisplay={onDisplay} onName={setName} />
             <KenmerkenListener onKenmerken={setKenmerken} />
             <UserTextListener onText={setUserText} />
-            <MouthVolumeListener onVolume={setMouthVolume} />
+            <MouthVolumeListener mouthVolume={mouthVolume} />
             <VoiceReactionListener reaction={voice} />
-            <GalleryListener onGallery={(message) => { setBeings(message.beings); setGraves(message.graves); }} />
+            <GalleryListener onGallery={onGallery} />
             <SoundListener display={displayState} onSound={touch} />
             <AgentWatchdog />
             <MicControl enabled={selectedId !== null} onError={setMicError} />

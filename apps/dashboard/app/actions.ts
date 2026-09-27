@@ -261,3 +261,15 @@ export async function cloneVoiceAction(_prev: ActionState, formData: FormData): 
     if (!(await getBrain().setVoiceProfile(id, { voice, description: null }))) return DYNIMO_GONE;
   });
 }
+
+// Modelwissel (#132): globaal Type2-model; een leeg veld = terug naar de standaard uit .env. Geldt vanaf de volgende beurt.
+export async function setType2Models(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  return run(async () => {
+    const field = (name: string) => String(formData.get(name) ?? "").trim() || null;
+    await getBrain().setType2Models({ light: field("light"), heavy: field("heavy") });
+  });
+}
+
+export async function resetType2Models(_prev: ActionState, _formData: FormData): Promise<ActionState> {
+  return run(() => getBrain().setType2Models({ light: null, heavy: null }));
+}

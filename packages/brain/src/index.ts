@@ -291,6 +291,9 @@ const WAKE_LOCK_KEY = 7_142_001;
 /** Postgres NOTIFY-kanaal voor toestandswijzigingen. De payload stuurt de consument (dynimo-watch.ts `routeNotifyPayload`): STATE_PREFIXES verversen enkel dat deel; elke andere payload (wakker/slapend/gedood/genesis) laat de wakkere Dynimo opnieuw lezen. */
 export const STATE_CHANNEL = "animus_state";
 
+/** Hoe lang een door de worker gemelde Reflectie (#125) het initiatief hoogstens blokkeert zonder "einde"-melding. */
+export const REMOTE_REFLECTION_TTL_MS = 5 * 60_000;
+
 /** Payload-prefixen op STATE_CHANNEL (#111): producer (dit bestand) en consument (dynimo-watch.ts `routeNotifyPayload`) delen deze, i.p.v. losse string-literals. */
 export const STATE_PREFIXES = {
   mood: "mood:",
@@ -533,8 +536,7 @@ export function createBrain(deps: {
         if (deps.jobs) await deps.jobs.enqueue("reflectie", { dynimoId: id, sleeping: true }, { deduplication: { id: `reflectie:${id}` } });
         else await reflectDynimo(id);
       } catch (error) {
-        const what = deps.jobs ? "inplannen" : "";
-        console.warn(`Reflectie${what ? ` ${what}` : ""} faalde voor Dynimo ${id}:`, error instanceof Error ? error.message : error);
+        console.warn(`Reflectie${deps.jobs ? " inplannen" : ""} faalde voor Dynimo ${id}:`, error instanceof Error ? error.message : error);
       }
     }
   }
@@ -749,16 +751,16 @@ ${fresh.map((memory) => `- (indruk ${memory.impression}) ${memory.text}`).join("
     }
   }
 
-  // Van buitenaf (#125: de agent op basis van een NOTIFY van de worker) bijwerken van dezelfde teller die
-  // reflectDynimo() intern gebruikt, zodat considerInitiative() ook een Reflectie in een ander proces respecteert.
+  // Reflecties in een ander proces (#125: de worker, gemeld via NOTIFY): per Dynimo tot wanneer ze blokkeren. Een
+  // vlag i.p.v. een teller (een herstarte job meldt twee keer "start" maar één keer "einde"), met een vervaltijd
+  // zodat een gecrashte worker of een gemiste "einde"-melding het initiatief niet voorgoed blokkeert.
+  const remoteReflecting = new Map<number, number>();
   function noteReflection(id: number, running: boolean): void {
-    if (running) {
-      reflecting.set(id, (reflecting.get(id) ?? 0) + 1);
-      return;
-    }
-    const left = (reflecting.get(id) ?? 0) - 1;
-    if (left > 0) reflecting.set(id, left);
-    else reflecting.delete(id);
+    if (running) remoteReflecting.set(id, now().getTime() + REMOTE_REFLECTION_TTL_MS);
+    else remoteReflecting.delete(id);
+  }
+  function isReflecting(id: number): boolean {
+    return reflecting.has(id) || (remoteReflecting.get(id) ?? 0) > now().getTime();
   }
 
   // Per-Dynimo sessiestaat: mag niet doorsijpelen naar een ander (of nieuw) wezen.
@@ -2050,7 +2052,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
   async function considerInitiative(aanleiding?: Aanleiding, options: { aanwezig?: number[] } = {}): Promise<string | null> {
     const [awake] = await deps.db.select().from(dynimos).where(isNotNull(dynimos.awakeSince));
     if (!awake) return null;
-    if (reflecting.has(awake.id)) return null;
+    if (isReflecting(awake.id)) return null;
     adopt(awake); // wisselen wist de pending-ids (en askedName) van de vorige Dynimo vóór we die van deze lezen
     // #114: vastleggen ná adopt() — een wissel die tijdens de (async) Type1-call gebeurt, mag deze check niet meer raken.
     const s = session;

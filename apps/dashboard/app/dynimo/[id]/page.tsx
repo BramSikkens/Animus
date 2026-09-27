@@ -14,12 +14,9 @@ import { speechProvider, voicesFor } from "@animus/brain/voice";
 import { dreams, drives, dynimos, familiarities, memories, persons } from "@animus/db/schema";
 import { db } from "../../../lib/db";
 import { formatDate, formatDateTime } from "../../../lib/format";
-import { getCatalog, getTier } from "../../../lib/voice-catalog";
 import { ActionForm } from "../../action-form";
 import { addMemory, forceMood, kill, removeMemory, setArchetype, setAxes, setFamiliarity, setMood, setVerstand, setVoice, sleep, wake } from "../../actions";
 import { MoodStrip } from "../../mood-strip";
-import { VoiceCatalog } from "../../voice-catalog";
-import { VoiceDesign } from "../../voice-design";
 
 export const dynamic = "force-dynamic";
 
@@ -142,14 +139,6 @@ export default async function DynimoPage({
 
   const provider = speechProvider(process.env);
   const voices = voicesFor(provider);
-  const catalog =
-    provider === "elevenlabs"
-      ? await getCatalog().then(
-          (list) => ({ list }),
-          (error: unknown) => ({ error: error instanceof Error ? error.message : "onbekende fout" }),
-        )
-      : null;
-  const freeTier = provider === "elevenlabs" && (await getTier()) === "free";
 
   return (
     <>
@@ -346,38 +335,21 @@ export default async function DynimoPage({
           <dt>Beschrijving</dt>
           <dd>{dynimo.voiceDescription ?? "geen"}</dd>
         </dl>
-        {catalog && "list" in catalog ? (
-          <VoiceCatalog
-            id={dynimo.id}
-            voices={catalog.list}
-            current={dynimo.voice}
-            description={dynimo.voiceDescription ?? ""}
-            hint={archetype?.voiceHint ?? ""}
-          />
-        ) : (
-          <>
-            {catalog && (
-              <p role="alert" className="error">
-                Stemcatalogus niet beschikbaar ({catalog.error}); vaste lijst getoond.
-              </p>
-            )}
-            <ActionForm action={setVoice} label="Stem zetten" pendingLabel="Zet…" id={dynimo.id}>
-              <select name="voice" aria-label="Stem" defaultValue={dynimo.voice ?? ""}>
-                <option value="">standaard</option>
-                {provider === "elevenlabs" && dynimo.voice && !voices.includes(dynimo.voice) && <option value={dynimo.voice}>{dynimo.voice} (uit catalogus)</option>}
-                {voices.map((voice) => (
-                  <option key={voice} value={voice}>
-                    {voice}
-                  </option>
-                ))}
-              </select>
-              <input name="voiceDescription" aria-label="Stembeschrijving" placeholder="Stembeschrijving (bv. warm, laag, rustig)" maxLength={500} defaultValue={dynimo.voiceDescription ?? ""} />
-            </ActionForm>
-          </>
-        )}
-        {provider === "elevenlabs" && (
-          <VoiceDesign blocked={freeTier} id={dynimo.id} name={dynimo.name} description={dynimo.voiceDescription ?? archetype?.voiceHint ?? ""} />
-        )}
+        <ActionForm action={setVoice} label="Stem zetten" pendingLabel="Zet…" id={dynimo.id}>
+          <select name="voice" aria-label="Stem" defaultValue={dynimo.voice ?? ""}>
+            <option value="">standaard</option>
+            {provider === "elevenlabs" && dynimo.voice && !voices.includes(dynimo.voice) && <option value={dynimo.voice}>{dynimo.voice} (uit catalogus)</option>}
+            {voices.map((voice) => (
+              <option key={voice} value={voice}>
+                {voice}
+              </option>
+            ))}
+          </select>
+          <input name="voiceDescription" aria-label="Stembeschrijving" placeholder="Stembeschrijving (bv. warm, laag, rustig)" maxLength={500} defaultValue={dynimo.voiceDescription ?? ""} />
+        </ActionForm>
+        <p className="small">
+          <Link href="/stemmen">Catalogus, ontwerpen en klonen op de Stemmen-pagina →</Link>
+        </p>
       </section>
 
       <section className="section">

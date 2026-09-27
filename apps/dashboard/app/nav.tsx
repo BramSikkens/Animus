@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 const LINKS = [
   { href: "/", label: "Dynimo's" },
   { href: "/personen", label: "Personen" },
+  { href: "/stemmen", label: "Stemmen" },
   { href: "/model", label: "Model" },
   { href: "/grafschriften", label: "Grafschriften" },
 ];

@@ -740,3 +740,10 @@ button:disabled {
     transition: none !important;
   }
 }
+
+/* ---------- Personen (#130) ---------- */
+
+.persons {
+  display: grid;
+  gap: var(--space-5);
+}

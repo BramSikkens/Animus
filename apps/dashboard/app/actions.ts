@@ -16,14 +16,15 @@ import { getCatalog } from "../lib/voice-catalog";
 export type ActionState = { error?: string };
 
 // Een string uit `work` is een foutmelding; gooit `work`, dan wordt de fout leesbaar getoond i.p.v. te crashen.
-async function run(work: () => Promise<string | void>, path = "/"): Promise<ActionState> {
+// Revalideert de hele schil (#128): elke pagina (overzicht, Dynimo, Personen, …) toont de wijziging meteen.
+async function run(work: () => Promise<string | void>): Promise<ActionState> {
   try {
     const error = await work();
     if (error) return { error };
   } catch (error) {
     return { error: error instanceof Error ? error.message : String(error) };
   }
-  revalidatePath(path);
+  revalidatePath("/", "layout");
   return {};
 }
 
@@ -176,7 +177,7 @@ export async function renamePerson(_prev: ActionState, formData: FormData): Prom
     if (id === null) return INVALID_PERSON;
     const name = String(formData.get("name") ?? "");
     if (!(await getBrain().renamePerson(id, name))) return "Ongeldige naam (of de Persoon bestaat niet meer).";
-  }, "/personen");
+  });
 }
 
 // Bevestiging zoals bij verwijderen: de exacte naam van de Persoon die verdwijnt (removeId), vóór het samenvoegen.
@@ -190,7 +191,7 @@ export async function mergePersons(_prev: ActionState, formData: FormData): Prom
       return "De naam klopt niet (of de Persoon bestaat niet meer). Er is niets samengevoegd.";
     }
     if (!(await getBrain().mergePersons(keepId, removeId))) return "Kan deze twee Personen niet samenvoegen.";
-  }, "/personen");
+  });
 }
 
 export async function relearnPerson(_prev: ActionState, formData: FormData): Promise<ActionState> {
@@ -198,7 +199,7 @@ export async function relearnPerson(_prev: ActionState, formData: FormData): Pro
     const id = parseId(formData);
     if (id === null) return INVALID_PERSON;
     if (!(await getBrain().relearnPerson(id))) return PERSON_GONE;
-  }, "/personen");
+  });
 }
 
 // Zoals kill(): de exacte naam ter bevestiging; de check gebeurt in de brain.
@@ -210,7 +211,7 @@ export async function deletePerson(_prev: ActionState, formData: FormData): Prom
     if (!(await getBrain().deletePerson(id, name))) {
       return "De naam klopt niet, of dit is de eigenaar (of de Persoon bestaat niet meer). Er is niets verwijderd.";
     }
-  }, "/personen");
+  });
 }
 
 // Stemontwerp (ElevenLabs). De API-key blijft server-side in process.env.

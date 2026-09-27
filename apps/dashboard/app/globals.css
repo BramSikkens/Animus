@@ -1,73 +1,94 @@
+/* Animus-dashboard: dezelfde wereld als het gezichtje (apps/face) — monochroom inkt op crème, 's avonds crème op inkt.
+   Eén set tokens; licht/donker volgt het systeem. Componenten staan onderaan, per naam. */
+
 :root {
-  --bg: #ffffff;
-  --fg: #111111;
-  --muted: #666666;
-  --border: #dddddd;
-  --bar-bg: #eeeeee;
-  --bar-fill: #111111;
+  color-scheme: light dark;
+
+  --bg: #f4efe3;
+  --surface: #fbf8f1;
+  --ink: #111111;
+  --ink-2: #5a554b;
+  --line: #d8d0bf;
+  --track: rgb(17 17 17 / 0.1);
+  --bar: #111111;
+  --danger: #9e2a1f;
+  --focus: #111111;
+  --glow: rgb(17 17 17 / 0.35);
+
+  --font: system-ui, -apple-system, "Segoe UI", sans-serif;
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-md: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.375rem;
+  --text-2xl: 1.75rem;
+
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+
+  --radius: 1rem;
+  --radius-sm: 0.5rem;
+  --pill: 999px;
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
     --bg: #111111;
-    --fg: #eeeeee;
-    --muted: #999999;
-    --border: #333333;
-    --bar-bg: #333333;
-    --bar-fill: #eeeeee;
+    --surface: #191918;
+    --ink: #f4efe3;
+    --ink-2: #a39d90;
+    --line: #2f2d29;
+    --track: rgb(244 239 227 / 0.14);
+    --bar: #f4efe3;
+    --danger: #f0897c;
+    --focus: #f4efe3;
+    --glow: rgb(244 239 227 / 0.6);
   }
 }
 
-* {
+*,
+*::before,
+*::after {
   box-sizing: border-box;
 }
 
 body {
   margin: 0;
   background: var(--bg);
-  color: var(--fg);
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: var(--ink);
+  font-family: var(--font);
+  font-size: var(--text-md);
   line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
 }
 
-main {
-  max-width: 40rem;
-  margin: 0 auto;
-  padding: 1.5rem 1rem 3rem;
+a {
+  color: inherit;
+  text-underline-offset: 0.2em;
 }
 
-h1 {
-  font-size: 1.5rem;
-  margin: 0 0 1.5rem;
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
 }
 
-h2 {
-  font-size: 1.1rem;
-  margin: 0 0 0.75rem;
-  border-bottom: 1px solid var(--border);
-  padding-bottom: 0.25rem;
-}
-
-section {
-  margin-bottom: 2rem;
-}
-
-dl {
+h1,
+h2,
+h3,
+h4 {
+  line-height: 1.2;
+  text-wrap: balance;
   margin: 0;
 }
 
-dt {
-  color: var(--muted);
-  font-size: 0.85rem;
-  margin-top: 0.75rem;
-}
-
-dt:first-child {
-  margin-top: 0;
-}
-
-dd {
-  margin: 0.15rem 0 0;
+p {
+  margin: 0;
 }
 
 ul {
@@ -76,54 +97,615 @@ ul {
   padding: 0;
 }
 
-li {
-  padding: 0.75rem 0;
-  border-bottom: 1px solid var(--border);
+/* ---------- Schil ---------- */
+
+.shell {
+  display: grid;
+  grid-template-columns: 11rem minmax(0, 1fr);
+  min-height: 100vh;
 }
 
-li:last-child {
-  border-bottom: none;
+.nav {
+  position: sticky;
+  top: 0;
+  align-self: start;
+  height: 100vh;
+  padding: var(--space-6) var(--space-4) var(--space-5) var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
 }
 
-li time {
+.nav-mark {
+  font-size: var(--text-lg);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  text-decoration: none;
+}
+
+.nav ul {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.nav a:not(.nav-mark) {
   display: block;
-  color: var(--muted);
-  font-size: 0.85rem;
-  margin-bottom: 0.25rem;
+  padding: var(--space-1) 0;
+  color: var(--ink-2);
+  text-decoration: none;
+  font-size: var(--text-sm);
+  transition: color 150ms var(--ease);
 }
 
-li h3 {
-  font-size: 1rem;
-  margin: 0 0 0.25rem;
+.nav a:not(.nav-mark):hover,
+.nav a[aria-current="page"] {
+  color: var(--ink);
 }
 
-.bar {
-  display: inline-block;
-  width: 8rem;
-  height: 0.6rem;
-  margin: 0 0.5rem;
-  background: var(--bar-bg);
-  border-radius: 0.3rem;
-  overflow: hidden;
-  vertical-align: middle;
+.nav a[aria-current="page"] {
+  font-weight: 600;
 }
 
-.bar-fill {
-  display: block;
-  height: 100%;
-  background: var(--bar-fill);
+.page {
+  padding: var(--space-6) var(--space-6) var(--space-7);
+  max-width: 76rem;
+  min-width: 0;
 }
 
-@media (max-width: 30rem) {
-  main {
-    padding: 1rem 0.75rem 2rem;
+.page-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3) var(--space-4);
+  margin-bottom: var(--space-6);
+}
+
+.page-head h1 {
+  font-size: var(--text-2xl);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.page-note {
+  color: var(--ink-2);
+  font-size: var(--text-sm);
+  max-width: 60ch;
+}
+
+@media (max-width: 48rem) {
+  .shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .nav {
+    position: static;
+    height: auto;
+    padding: var(--space-4);
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--space-2) var(--space-5);
+    border-bottom: 1px solid var(--line);
+  }
+
+  .nav ul {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: var(--space-1) var(--space-4);
+  }
+
+  .page {
+    padding: var(--space-5) var(--space-4) var(--space-6);
   }
 }
 
-.action { display: inline-flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-right: 0.75rem; }
-.error { color: #b3261e; margin: 0; }
+/* ---------- Sectie ---------- */
 
-.axis { margin: 0; }
-.slider { display: flex; align-items: center; gap: 0.5rem; width: 100%; }
+.section {
+  margin-top: var(--space-7);
+}
+
+.section:first-child {
+  margin-top: 0;
+}
+
+.section-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-4);
+  margin-bottom: var(--space-4);
+}
+
+.section-head h2 {
+  font-size: var(--text-lg);
+  font-weight: 600;
+}
+
+.muted {
+  color: var(--ink-2);
+}
+
+.small {
+  font-size: var(--text-sm);
+}
+
+.prose {
+  max-width: 68ch;
+  white-space: pre-wrap;
+}
+
+/* ---------- Kaart ---------- */
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: var(--space-5);
+}
+
+/* ---------- Statistiek ---------- */
+
+.stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-5);
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+}
+
+.stat dt {
+  font-size: var(--text-xs);
+  color: var(--ink-2);
+}
+
+.stat dd {
+  margin: 0;
+  font-size: var(--text-md);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- Badge ---------- */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0.05rem var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: var(--pill);
+  font-size: var(--text-xs);
+  color: var(--ink-2);
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.badge-strong {
+  border-color: var(--ink);
+  color: var(--ink);
+}
+
+.badge-danger {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+/* Wakker: een lichtbolletje, zoals op de Galerij-tegels van het gezichtje. */
+.awake-dot {
+  display: inline-block;
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  background: var(--ink);
+  box-shadow: 0 0 0.6rem var(--glow);
+  flex: none;
+}
+
+.asleep-dot {
+  display: inline-block;
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  border: 1px solid var(--ink-2);
+  flex: none;
+}
+
+/* ---------- Tabel ---------- */
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+
+.table th {
+  text-align: left;
+  font-weight: 500;
+  font-size: var(--text-xs);
+  color: var(--ink-2);
+  padding: 0 var(--space-3) var(--space-2) 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.table td {
+  padding: var(--space-3) var(--space-3) var(--space-3) 0;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+
+.table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- Formulier en knop ---------- */
+
+.action {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.action-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-3);
+  max-width: 32rem;
+}
+
+.action-stack > button {
+  align-self: flex-start;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-size: var(--text-sm);
+}
+
+.field-label {
+  color: var(--ink-2);
+  font-size: var(--text-xs);
+}
+
+input:not([type="range"]):not([type="hidden"]):not([type="checkbox"]),
+select,
+textarea {
+  font: inherit;
+  font-size: var(--text-sm);
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 0.4rem 0.6rem;
+  min-width: 0;
+  max-width: 100%;
+}
+
+input:not([type="range"]):hover,
+select:hover,
+textarea:hover {
+  border-color: var(--ink-2);
+}
+
+input[type="range"] {
+  accent-color: var(--ink);
+  width: 100%;
+  min-width: 6rem;
+}
+
+/* De knop van het gezichtje: pil, dunne inktrand, keert om bij hover. */
+button {
+  font: inherit;
+  font-size: var(--text-sm);
+  padding: 0.4rem 1.1rem;
+  border: 1px solid var(--ink);
+  border-radius: var(--pill);
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 150ms var(--ease), color 150ms var(--ease);
+}
+
+button:hover:not(:disabled) {
+  background: var(--ink);
+  color: var(--bg);
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: progress;
+}
+
+.button-danger {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.button-danger:hover:not(:disabled) {
+  background: var(--danger);
+  color: var(--bg);
+}
+
+.button-quiet {
+  border-color: var(--line);
+  color: var(--ink-2);
+}
+
+.error {
+  color: var(--danger);
+  font-size: var(--text-sm);
+  flex-basis: 100%;
+}
+
+.ok {
+  color: var(--ink-2);
+  font-size: var(--text-sm);
+}
+
 /* Emoties in tegengestelde paren staan naast elkaar (ADR-0015). */
-.slider-group { display: flex; gap: 1rem; width: 100%; }
+.slider {
+  display: grid;
+  grid-template-columns: 7rem minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+}
+
+.slider-group {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: var(--space-2) var(--space-5);
+}
+
+/* ---------- Stemmingsstrook ---------- */
+/* Paren als tegengestelde balk vanuit het midden (ADR-0015), de losse emoties als gewone balkjes; rust = 50 (ADR-0017). */
+
+.mood {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  gap: var(--space-1) var(--space-6);
+  font-size: var(--text-xs);
+  color: var(--ink-2);
+}
+
+.mood-pairs,
+.mood-singles {
+  display: grid;
+  gap: var(--space-1);
+  align-content: start;
+}
+
+.mood-pair {
+  display: grid;
+  grid-template-columns: 4rem minmax(0, 1fr) minmax(0, 1fr) 4rem;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.mood-pair > :first-child {
+  text-align: right;
+}
+
+.mood-single {
+  display: grid;
+  grid-template-columns: 6.5rem minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.mood-track {
+  position: relative;
+  height: 0.45rem;
+  background: var(--track);
+  border-radius: var(--pill);
+  overflow: hidden;
+}
+
+.mood-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  background: var(--bar);
+  border-radius: var(--pill);
+}
+
+.mood-track.to-left .mood-fill {
+  left: auto;
+  right: 0;
+}
+
+.mood-dominant {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+@media (max-width: 36rem) {
+  .mood {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .mood-pair {
+    grid-template-columns: 4.5rem minmax(0, 1fr) minmax(0, 1fr) 4.5rem;
+  }
+
+  .mood-single {
+    grid-template-columns: 4.5rem minmax(0, 1fr);
+  }
+}
+
+/* ---------- Levensband (Overzicht) ---------- */
+
+.bands {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.band {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(11rem, 15rem) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-4) var(--space-6);
+  padding: var(--space-4) var(--space-5);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  transition: border-color 150ms var(--ease), background 150ms var(--ease);
+}
+
+.band:hover {
+  border-color: var(--ink-2);
+}
+
+.band-awake {
+  background: var(--surface);
+  border-color: var(--ink);
+  padding-block: var(--space-5);
+}
+
+.band-asleep .mood,
+.band-asleep .band-meta {
+  opacity: 0.7;
+}
+
+.band-id {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.band-name {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-lg);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.band-awake .band-name {
+  font-size: var(--text-xl);
+}
+
+/* De hele band is klikbaar via de naam; de knoppen liggen erboven. */
+.band-name a {
+  text-decoration: none;
+}
+
+.band-name a::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: var(--radius);
+}
+
+.band-meta {
+  font-size: var(--text-sm);
+  color: var(--ink-2);
+}
+
+.band-actions {
+  position: relative;
+  z-index: 1;
+}
+
+.band-rest {
+  font-size: var(--text-sm);
+  color: var(--ink-2);
+}
+
+@media (max-width: 60rem) {
+  .band {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .band .mood,
+  .band-rest {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+}
+
+/* ---------- Leeg ---------- */
+
+.empty {
+  padding: var(--space-6) var(--space-5);
+  border: 1px dashed var(--line);
+  border-radius: var(--radius);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-3);
+  max-width: 40rem;
+}
+
+/* ---------- Grafschrift ---------- */
+
+.graves {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.grave {
+  display: grid;
+  gap: var(--space-2);
+  padding-bottom: var(--space-5);
+  border-bottom: 1px solid var(--line);
+}
+
+.grave h2 {
+  font-size: var(--text-lg);
+  font-weight: 600;
+}
+
+/* ---------- Definities ---------- */
+
+.defs {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--space-2) var(--space-5);
+  margin: 0;
+  font-size: var(--text-sm);
+}
+
+.defs dt {
+  color: var(--ink-2);
+}
+
+.defs dd {
+  margin: 0;
+}
+
+@media (max-width: 36rem) {
+  .defs {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+
+  .defs dd {
+    margin-bottom: var(--space-3);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+  }
+}

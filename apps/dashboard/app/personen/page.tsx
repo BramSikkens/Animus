@@ -10,13 +10,11 @@ export default async function PersonenPage() {
   const persons = await getBrain().listPersons();
 
   return (
-    <main>
-      <h1>Animus — Personen</h1>
-      <p>
-        <a href="/">← Terug naar het dashboard</a>
-      </p>
+    <>
+      <header className="page-head">
+        <h1>Personen</h1>
+      </header>
       <section>
-        <h2>Personen</h2>
         {persons.length ? (
           <ul>
             {persons.map((person) => (
@@ -63,6 +61,6 @@ export default async function PersonenPage() {
           <p>Nog geen Personen bekend.</p>
         )}
       </section>
-    </main>
+    </>
   );
 }

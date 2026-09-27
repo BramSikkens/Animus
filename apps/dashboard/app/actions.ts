@@ -103,7 +103,11 @@ export async function setFamiliarity(_prev: ActionState, formData: FormData): Pr
     if (id === null) return INVALID_ID;
     const familiarity = parseFamiliarity((name) => formData.get(name));
     if (familiarity === null) return "Ongeldige vertrouwdheid.";
-    if (!(await getBrain().setFamiliarity(id, familiarity))) return DYNIMO_GONE;
+    // Optioneel: Vertrouwdheid van een specifieke Persoon i.p.v. de eigenaar (Relaties-tabel op de Dynimo-pagina, #129).
+    const rawPersonId = formData.get("personId");
+    const personId = rawPersonId ? Number(rawPersonId) : undefined;
+    if (personId !== undefined && !(Number.isInteger(personId) && personId > 0)) return "Ongeldige Persoon.";
+    if (!(await getBrain().setFamiliarity(id, familiarity, personId))) return DYNIMO_GONE;
   });
 }
 

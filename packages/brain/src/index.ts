@@ -204,8 +204,8 @@ export type Brain = {
   setAxes(id: number, axes: Axes): Promise<boolean>;
   /** Dashboard: zet de TTS-stem (null = default van de agent); de agent past die direct toe. False bij een onbekende id. */
   setVoiceProfile(id: number, profile: { voice: string | null; description: string | null }): Promise<boolean>;
-  /** Dashboard-override: zet de Vertrouwdheid van de eigenaar (0–1). False bij een onbekende id. */
-  setFamiliarity(id: number, familiarity: number): Promise<boolean>;
+  /** Dashboard-override: zet de Vertrouwdheid van `personId` (default eigenaar, 0–1). False bij een onbekende id. */
+  setFamiliarity(id: number, familiarity: number, personId?: number): Promise<boolean>;
   /** Dashboard: Vertrouwdheid van `personId` (default eigenaar) met deze Dynimo; 0.2 zonder rij (#91). Leest de eigenaar enkel, maakt hem nooit aan (#111). */
   familiarityOf(dynimoId: number, personId?: number): Promise<number>;
   /** Naam van `personId` (default eigenaar), of null zonder rij; één lichte query, maakt de eigenaar nooit aan (#111). */
@@ -1379,11 +1379,11 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     }
   }
 
-  async function setFamiliarity(id: number, familiarity: number): Promise<boolean> {
+  async function setFamiliarity(id: number, familiarity: number, personId?: number): Promise<boolean> {
     // Geen omliggende transactie: upsertFamiliarity vangt een FK-violation (verwijderde Dynimo) zelf af en
     // geeft dan false terug; in een expliciete transactie zou die afgevangen fout de transactie toch in de
     // aborted-toestand laten (elke volgende statement, ook de notify, zou dan alsnog falen).
-    const ok = await upsertFamiliarity(id, await getOwnerId(), familiarity);
+    const ok = await upsertFamiliarity(id, personId ?? (await getOwnerId()), familiarity);
     // Payload "kenmerken:", zie notifyStateChange.
     if (ok) await notifyStateChange(deps.db, `${STATE_PREFIXES.kenmerken}${id}`);
     return ok;

@@ -4081,6 +4081,17 @@ describe("createBrain", () => {
           await client.end();
         }
       });
+
+      it("zet de Vertrouwdheid voor een opgegeven Persoon, laat de eigenaar ongemoeid (#129)", async () => {
+        const vero = await insertDynimo();
+        const [anna] = await db.insert(persons).values({ name: "Anna" }).returning();
+        const brain = brainWith();
+
+        expect(await brain.setFamiliarity(vero.id, 0.6, anna!.id)).toBe(true);
+
+        expect(await brain.familiarityOf(vero.id, anna!.id)).toBe(0.6);
+        expect(await brain.familiarityOf(vero.id)).toBe(0.2); // eigenaar (default) blijft ongemoeid
+      });
     });
 
     describe("setArchetype", () => {

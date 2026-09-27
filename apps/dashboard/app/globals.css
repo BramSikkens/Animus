@@ -211,6 +211,11 @@ ul {
   margin-top: 0;
 }
 
+/* Rustige verticale ritme tussen de directe kinderen van een sectie (kopjes, .defs, <details>, formulieren, …). */
+.section > * + * {
+  margin-top: var(--space-4);
+}
+
 .section-head {
   display: flex;
   flex-wrap: wrap;
@@ -245,6 +250,11 @@ ul {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: var(--space-5);
+}
+
+/* Gevaarzone (Dynimo-pagina, #129): dezelfde kaart, rand in de danger-kleur. */
+.card-danger {
+  border-color: var(--danger);
 }
 
 /* ---------- Statistiek ---------- */
@@ -547,6 +557,27 @@ button:disabled {
   .mood-single {
     grid-template-columns: 4.5rem minmax(0, 1fr);
   }
+}
+
+/* ---------- Persoonlijkheidsas (Dynimo-pagina, #129) ---------- */
+/* Zelfde balk-look als de Stemmingsstrook (.mood-track/.mood-fill), maar één balk tussen twee letters. */
+
+.page-head h1.band-name {
+  font-size: var(--text-2xl);
+}
+
+.axis-bar {
+  max-width: 28rem;
+  display: grid;
+  grid-template-columns: 1.5rem minmax(0, 1fr) 1.5rem;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--ink-2);
+}
+
+.axis-bar > :last-child {
+  text-align: right;
 }
 
 /* ---------- Levensband (Overzicht) ---------- */

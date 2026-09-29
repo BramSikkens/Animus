@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { desc } from "drizzle-orm";
-import { formatAge } from "@animus/brain/age";
+import { formatAge } from "@animus/core/age";
 import { epitaphs } from "@animus/db/schema";
 import { db } from "../../lib/db";
 import { formatDate } from "../../lib/format";

@@ -5,8 +5,8 @@ Tot fase 3 draaide het zware achtergrondwerk in het proces dat het aanvroeg. De 
 **Besluit.** Achtergrondtaken lopen via BullMQ op Redis (docker-compose, enkel op 127.0.0.1).
 - **Via de wachtrij:** Reflectie (slaap en stilte), backfill, Herinnering opslaan.
 - **Niet via de wachtrij:** de beurt zelf en het stemontwerp. Daar wacht iemand live op het resultaat, en een wachtrij voegt enkel latency toe.
-- **Eén queue** (`animus`); de jobs onderscheiden zich op naam, met getypeerde payloads in `packages/brain/src/jobs.ts`.
-- **Uitvoering:** enkel `apps/worker` voert de jobs uit, met een eigen brain-instantie. Agent, dashboard en CLI's plannen alleen in. Uitzondering: `pnpm backfill --direct` draait de backfill in-process, om zonder worker te kunnen. `pnpm dev` start de worker mee; bij Ctrl-C maakt hij lopende jobs af en sluit hij zijn verbindingen.
+- **Eén queue** (`animus`); de jobs onderscheiden zich op naam, met getypeerde payloads in `packages/core/src/jobs.ts`.
+- **Uitvoering:** enkel `apps/worker` voert de jobs uit, met een eigen Animus-instantie. Agent, dashboard en CLI's plannen alleen in. Uitzondering: `pnpm backfill --direct` draait de backfill in-process, om zonder worker te kunnen. `pnpm dev` start de worker mee; bij Ctrl-C maakt hij lopende jobs af en sluit hij zijn verbindingen.
 - **Retry/backoff:** standaard 5 pogingen, exponentieel vanaf 2 s (`DEFAULT_JOB_OPTIONS`). Na de laatste poging wordt de fout gelogd; niets anders breekt.
 - **Deduplicatie** via BullMQ's `deduplication: { id }` (bv. `reflectie:<id>`): zolang zo'n job wacht of loopt, wordt een nieuwe met dezelfde id genegeerd. Zo loopt er hoogstens één Reflectie en één backfill per Dynimo tegelijk. Een slaap-Reflectie die samenvalt met een nog lopende stilte-Reflectie valt dus weg; die verwerkt dezelfde nieuwe Herinneringen, enkel de droomkans vervalt.
 - **Blokkade van het initiatief:** de worker meldt `reflectie:start:<id>`/`reflectie:einde:<id>` op het toestandskanaal; de agent blokkeert het initiatief van die Dynimo tot "einde", hoogstens `REMOTE_REFLECTION_TTL_MS` (5 min) voor het geval de worker crasht of een melding gemist wordt.

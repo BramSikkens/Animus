@@ -1,5 +1,5 @@
-import type { DisplayState } from "@animus/brain/display";
-import type { Emotion } from "@animus/brain/emotion";
+import type { DisplayState } from "@animus/core/display";
+import type { Emotion } from "@animus/core/emotion";
 
 /** Overlay-offsets: browRaise in viewBox-eenheden (omhoog), frown 0..1 (brauw omlaag), smile (extra mondkromming, Keyframe-`curve`-eenheden). */
 export type MicroExpression = { browRaise: number; frown: number; smile: number };

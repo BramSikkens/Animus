@@ -12,12 +12,12 @@ import {
   useVoiceAssistant,
 } from "@livekit/components-react";
 import { ConnectionState, type LocalAudioTrack } from "livekit-client";
-import { DISPLAY_STATES, isDisplayState, type DisplayState } from "@animus/brain/display";
+import { DISPLAY_STATES, isDisplayState, type DisplayState } from "@animus/core/display";
 import { DISPLAY_TOPIC } from "@animus/protocol/display";
 import { GALLERY_TOPIC, parseGalleryMessage, type GalleryBeing, type GalleryGrave, type GalleryMessage } from "@animus/protocol/gallery";
 import { justWoken, screenFor, selectionLost } from "./gallery-screen.js";
 import { Gallery, useSendCommand } from "./Gallery.js";
-import { EMOTION_TOPIC, EMOTIONS, isEmotion, type Emotion, type EmotionMessage } from "@animus/brain/emotion";
+import { EMOTION_TOPIC, EMOTIONS, isEmotion, type Emotion, type EmotionMessage } from "@animus/core/emotion";
 import { isKenmerkenMessage, KENMERKEN_TOPIC, type KenmerkenMessage } from "@animus/protocol/kenmerken";
 import { kenmerkenPanel } from "./kenmerken-panel.js";
 import { doodleActive } from "./face/doodle.js";
@@ -33,7 +33,7 @@ const MAX_RECONNECTS = 3;
 const RECONNECT_DELAY_MS = 2000;
 const AGENT_CHECK_MS = 5000;
 import { emotionBarGroups } from "./emotion-bars.js";
-import { FALLBACK_BASE } from "@animus/brain/mood";
+import { FALLBACK_BASE } from "@animus/core/mood";
 
 // Vorm van een useDataChannel-bericht, beperkt tot wat de listeners hieronder lezen; scheelt een
 // afhankelijkheid op het niet-gedeclareerde transitieve pakket @livekit/components-core.

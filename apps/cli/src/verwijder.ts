@@ -1,4 +1,4 @@
-import { openBrain, openDb } from "./bootstrap.js";
+import { openAnimus, openDb } from "./bootstrap.js";
 import { createInterface } from "node:readline/promises";
 import { migrate } from "@animus/db";
 
@@ -6,8 +6,8 @@ async function main(): Promise<void> {
   const db = openDb();
   await migrate(db);
   try {
-    const brain = openBrain(db);
-    const dynimos = await brain.list();
+    const animus = openAnimus(db);
+    const dynimos = await animus.list();
     if (dynimos.length === 0) {
       console.log("Er is geen Dynimo om te doden.");
       return;
@@ -21,7 +21,7 @@ async function main(): Promise<void> {
     rl.close();
 
     const target = dynimos.find((dynimo) => dynimo.name === answer);
-    const epitaph = target && (await brain.kill(target.id, answer));
+    const epitaph = target && (await animus.kill(target.id, answer));
     if (!epitaph) {
       console.log("Naam klopt niet. Er is niets verwijderd.");
       return;

@@ -1,11 +1,11 @@
 import { ReadableStream } from "node:stream/web";
 import { describe, expect, it } from "vitest";
-import type { BrainEvent } from "@animus/brain";
+import type { AnimusEvent } from "@animus/core";
 import { textStream } from "./text-stream.js";
 
 const VALUES = { blij: 0, boos: 0, verrast: 0, kalm: 0, verveeld: 0, nieuwsgierig: 0, bang: 0, droevig: 0, vredig: 0, druk: 0 };
 
-async function* gen(events: BrainEvent[]): AsyncGenerator<BrainEvent> {
+async function* gen(events: AnimusEvent[]): AsyncGenerator<AnimusEvent> {
   for (const event of events) yield event;
 }
 
@@ -17,7 +17,7 @@ async function collect(stream: ReadableStream<string>): Promise<string[]> {
 
 describe("textStream", () => {
   it("geeft alleen text-deltas door, in volgorde", async () => {
-    const events: BrainEvent[] = [
+    const events: AnimusEvent[] = [
       { type: "text", delta: "Hallo" },
       { type: "text", delta: " daar" },
     ];
@@ -26,7 +26,7 @@ describe("textStream", () => {
   });
 
   it("slaat mood- en tool-*-events over", async () => {
-    const events: BrainEvent[] = [
+    const events: AnimusEvent[] = [
       { type: "mood", emotion: "blij", intensity: 0.8, values: VALUES },
       { type: "text", delta: "Hoi" },
       { type: "tool-call", toolName: "huidige_tijd", input: {} },
@@ -38,16 +38,16 @@ describe("textStream", () => {
   });
 
   it("eindigt de stream netjes als de bron gooit, zonder de consumer te laten crashen", async () => {
-    async function* throwing(): AsyncGenerator<BrainEvent> {
+    async function* throwing(): AsyncGenerator<AnimusEvent> {
       yield { type: "text", delta: "Voor de fout" };
-      throw new Error("brain.hear() faalde");
+      throw new Error("animus.hear() faalde");
     }
     const chunks = await collect(textStream(throwing()));
     expect(chunks).toEqual(["Voor de fout"]);
   });
 
   it("roept onMood aan met de emotie, intensiteit en de volledige vector", async () => {
-    const events: BrainEvent[] = [
+    const events: AnimusEvent[] = [
       { type: "mood", emotion: "blij", intensity: 0.8, values: VALUES },
       { type: "text", delta: "Hoi" },
     ];
@@ -57,7 +57,7 @@ describe("textStream", () => {
   });
 
   it("roept onMood aan vóór de eerste tekst gelezen kan worden", async () => {
-    const events: BrainEvent[] = [
+    const events: AnimusEvent[] = [
       { type: "mood", emotion: "boos", intensity: 0.5, values: VALUES },
       { type: "text", delta: "Hoi" },
     ];
@@ -71,7 +71,7 @@ describe("textStream", () => {
   });
 
   it("werkt zonder onMood zoals voorheen", async () => {
-    const events: BrainEvent[] = [
+    const events: AnimusEvent[] = [
       { type: "mood", emotion: "kalm", intensity: 0.3, values: VALUES },
       { type: "text", delta: "Hoi" },
     ];
@@ -80,7 +80,7 @@ describe("textStream", () => {
   });
 
   it("roept onSound aan met de soort en houdt het event uit de tekst", async () => {
-    const events: BrainEvent[] = [
+    const events: AnimusEvent[] = [
       { type: "mood", emotion: "boos", intensity: 0.8, values: VALUES },
       { type: "sound", kind: "brommen" },
       { type: "text", delta: "Hoi" },
@@ -92,7 +92,7 @@ describe("textStream", () => {
   });
 
   it("roept onLook aan bij een kijk-event en houdt het event uit de tekst", async () => {
-    const events: BrainEvent[] = [
+    const events: AnimusEvent[] = [
       { type: "kijk" },
       { type: "text", delta: "Hoi" },
     ];
@@ -103,13 +103,13 @@ describe("textStream", () => {
   });
 
   it("werkt zonder onLook zoals voorheen", async () => {
-    const events: BrainEvent[] = [{ type: "kijk" }, { type: "text", delta: "Hoi" }];
+    const events: AnimusEvent[] = [{ type: "kijk" }, { type: "text", delta: "Hoi" }];
     const chunks = await collect(textStream(gen(events)));
     expect(chunks).toEqual(["Hoi"]);
   });
 
   it("roept onPersoon aan bij een persoon-event en houdt het event uit de tekst", async () => {
-    const events: BrainEvent[] = [
+    const events: AnimusEvent[] = [
       { type: "persoon", personId: 7, naam: "Anna" },
       { type: "text", delta: "Hoi" },
     ];
@@ -120,20 +120,20 @@ describe("textStream", () => {
   });
 
   it("werkt zonder onPersoon zoals voorheen", async () => {
-    const events: BrainEvent[] = [{ type: "persoon", personId: 7, naam: "Anna" }, { type: "text", delta: "Hoi" }];
+    const events: AnimusEvent[] = [{ type: "persoon", personId: 7, naam: "Anna" }, { type: "text", delta: "Hoi" }];
     const chunks = await collect(textStream(gen(events)));
     expect(chunks).toEqual(["Hoi"]);
   });
 
   it("roept onDone aan zodra de beurt (de bron) afgelopen is", async () => {
-    const events: BrainEvent[] = [{ type: "text", delta: "Hoi" }];
+    const events: AnimusEvent[] = [{ type: "text", delta: "Hoi" }];
     let done = false;
     await collect(textStream(gen(events), { onDone: () => { done = true; } }));
     expect(done).toBe(true);
   });
 
   it("roept onDone ook aan bij cancel() (onderbroken beurt, barge-in), precies één keer", async () => {
-    async function* neverEnding(): AsyncGenerator<BrainEvent> {
+    async function* neverEnding(): AsyncGenerator<AnimusEvent> {
       yield { type: "text", delta: "Hoi" };
       await new Promise(() => {}); // blijft hangen tot cancel() de generator afsluit
     }

@@ -1,4 +1,4 @@
-import type { Gesprekspartner } from "@animus/brain/perception";
+import type { Gesprekspartner } from "@animus/core/perception";
 
 /**
  * Beslisregel voor de Gesprekspartner van een beurt (CONTEXT.md, #92/#93/#115): een zekere stemidentificatie bepaalt

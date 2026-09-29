@@ -1,4 +1,4 @@
-import { cached, fetchCatalog, fetchTier } from "@animus/brain/voice-catalog";
+import { cached, fetchCatalog, fetchTier } from "@animus/core/voice-catalog";
 
 // Server-only: de API-key blijft in process.env en gaat nooit naar de client. 1 uur cache; Nederlands is de hoofdtaal.
 const key = () => process.env.ELEVENLABS_API_KEY ?? "";

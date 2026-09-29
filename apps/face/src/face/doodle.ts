@@ -1,4 +1,4 @@
-import type { DisplayState } from "@animus/brain/display";
+import type { DisplayState } from "@animus/core/display";
 
 /** Doodle-modus: lang genoeg stil, en niet reflecterend (wint) of slapend (houdt het slaapgezicht). */
 export function doodleActive({ idleMs, thresholdMs, display }: { idleMs: number; thresholdMs: number; display: DisplayState }): boolean {

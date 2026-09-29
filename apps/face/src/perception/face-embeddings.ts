@@ -4,7 +4,7 @@ import type Human from "@vladmandic/human";
 const HUMAN_VERSION = "3.3.6";
 // jsDelivr, gepind op dezelfde versie (research-doc: geen eigen modelhosting nodig voor deze fase).
 const MODEL_BASE_PATH = `https://cdn.jsdelivr.net/npm/@vladmandic/human@${HUMAN_VERSION}/models/`;
-// Moet gelijk zijn aan de bovengrens van Waarneming.aantal (packages/brain/src/perception.ts).
+// Moet gelijk zijn aan de bovengrens van Waarneming.aantal (packages/core/src/perception.ts).
 const MAX_FACES = 10;
 
 type HumanInstance = InstanceType<typeof Human>;

@@ -1,4 +1,4 @@
-import type { DisplayState } from "@animus/brain/display";
+import type { DisplayState } from "@animus/core/display";
 
 /**
  * Houdt bij wanneer het gezichtje "reflecterend" toont (Reflectie bij stilte, #28) en zorgt dat een verlopen

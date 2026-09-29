@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { motion, useAnimationFrame, useMotionValue, useReducedMotion, type MotionValue } from "motion/react";
-import type { DisplayState } from "@animus/brain/display";
-import type { Emotion } from "@animus/brain/emotion";
+import type { DisplayState } from "@animus/core/display";
+import type { Emotion } from "@animus/core/emotion";
 import { doodlePath } from "./doodle.js";
 import { facePointer, gazeOffset, IDLE_PUPIL_WHILE_TRACKING, pupilPosition } from "./gaze.js";
 import { idleOffsets } from "./idle.js";

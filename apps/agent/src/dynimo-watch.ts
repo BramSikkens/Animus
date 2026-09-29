@@ -1,7 +1,7 @@
 import postgres from "postgres";
-import { STATE_CHANNEL, STATE_PREFIXES, type Brain, type Dynimo } from "@animus/brain";
-import type { DisplayState } from "@animus/brain/display";
-import { displayMoodOfRow, type Mood } from "@animus/brain/mood";
+import { STATE_CHANNEL, STATE_PREFIXES, type Animus, type Dynimo } from "@animus/core";
+import type { DisplayState } from "@animus/core/display";
+import { displayMoodOfRow, type Mood } from "@animus/core/mood";
 
 export type DynimoState = {
   /** Identiteit van de huidige Wakker-generatie; verandert bij wisselen, slapen of gedood worden. */
@@ -20,8 +20,8 @@ export type DynimoState = {
 };
 
 /** Leest vers uit de database (ook de Stemming, die met de tijd uitdooft). */
-export async function readState(brain: Brain): Promise<DynimoState> {
-  const awake = (await brain.list()).find((dynimo) => dynimo.awakeSince);
+export async function readState(animus: Animus): Promise<DynimoState> {
+  const awake = (await animus.list()).find((dynimo) => dynimo.awakeSince);
   return awake
     ? { key: `${awake.id}:${awake.awakeSince!.getTime()}`, display: "wakker", mood: displayMoodOfRow(awake, new Date()), name: awake.name, voice: awake.voice, expressiveness: awake.axisExpressiveness, row: awake }
     : { key: "none", display: "slapend", mood: null, name: null, voice: null, expressiveness: 0.5, row: null };
@@ -70,12 +70,12 @@ export function routeNotifyPayload(payload: string, handlers: NotifyHandlers): v
 
 /**
  * Luistert (Postgres LISTEN/NOTIFY) naar toestandswijzigingen van de Dynimo's en roept `onChange` aan
- * zodra de wakkere Dynimo verandert. Eigen connectie, los van de brain-verbinding.
+ * zodra de wakkere Dynimo verandert. Eigen connectie, los van de Animus-verbinding.
  */
 export async function watchDynimos(
   options: Omit<NotifyHandlers, "check"> & {
     databaseUrl: string;
-    brain: Brain;
+    animus: Animus;
     onChange: (state: DynimoState) => void;
   },
 ): Promise<{ current: () => DynimoState; close: () => Promise<void> }> {
@@ -88,7 +88,7 @@ export async function watchDynimos(
   function check(): Promise<void> {
     queue = queue.then(async () => {
       try {
-        const next = await readState(options.brain);
+        const next = await readState(options.animus);
         if (next.key === last?.key) return;
         const previous = last;
         last = next;

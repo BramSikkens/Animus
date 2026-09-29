@@ -1,16 +1,16 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { parseArchetypeId } from "@animus/brain/archetypes";
-import { isEmotion } from "@animus/brain/emotion";
-import { parseMoodValues } from "@animus/brain/mood";
-import { parseFamiliarity } from "@animus/brain/familiarity";
-import { parseAxes } from "@animus/brain/personality";
-import { parseVerstand } from "@animus/brain/verstand";
-import { adoptVoice, cloneVoice, designVoice, saveDesignedVoice, type DesignPreview } from "@animus/brain/voice-design";
-import { parseVoice, speechProvider, voiceInputError } from "@animus/brain/voice";
-import { unusableVoiceError } from "@animus/brain/voice-catalog";
-import { getBrain } from "../lib/brain";
+import { parseArchetypeId } from "@animus/core/archetypes";
+import { isEmotion } from "@animus/core/emotion";
+import { parseMoodValues } from "@animus/core/mood";
+import { parseFamiliarity } from "@animus/core/familiarity";
+import { parseAxes } from "@animus/core/personality";
+import { parseVerstand } from "@animus/core/verstand";
+import { adoptVoice, cloneVoice, designVoice, saveDesignedVoice, type DesignPreview } from "@animus/core/voice-design";
+import { parseVoice, speechProvider, voiceInputError } from "@animus/core/voice";
+import { unusableVoiceError } from "@animus/core/voice-catalog";
+import { getAnimus } from "../lib/animus";
 import { getCatalog } from "../lib/voice-catalog";
 
 export type ActionState = { error?: string };
@@ -37,7 +37,7 @@ const INVALID_ID = "Ongeldige Dynimo.";
 
 export async function bringToLife(_prev: ActionState, _formData: FormData): Promise<ActionState> {
   return run(async () => {
-    await getBrain().bringToLife();
+    await getAnimus().bringToLife();
   });
 }
 
@@ -45,19 +45,19 @@ export async function wake(_prev: ActionState, formData: FormData): Promise<Acti
   return run(async () => {
     const id = parseId(formData);
     if (id === null) return INVALID_ID;
-    if (!(await getBrain().wake(id))) return "Deze Dynimo bestaat niet meer.";
+    if (!(await getAnimus().wake(id))) return "Deze Dynimo bestaat niet meer.";
   });
 }
 
 export async function sleep(_prev: ActionState, _formData: FormData): Promise<ActionState> {
-  return run(() => getBrain().sleep());
+  return run(() => getAnimus().sleep());
 }
 
 export async function kill(_prev: ActionState, formData: FormData): Promise<ActionState> {
   return run(async () => {
     const id = parseId(formData);
     if (id === null) return INVALID_ID;
-    if (!(await getBrain().kill(id, String(formData.get("name") ?? "")))) {
+    if (!(await getAnimus().kill(id, String(formData.get("name") ?? "")))) {
       return "De naam klopt niet (of de Dynimo bestaat niet meer). Er is niets verwijderd.";
     }
   });
@@ -73,7 +73,7 @@ export async function forceMood(_prev: ActionState, formData: FormData): Promise
     const intensity = Number(formData.get("intensity"));
     if (!isEmotion(emotion)) return "Ongeldige emotie.";
     if (!(intensity >= 0 && intensity <= 1)) return "Intensiteit moet tussen 0 en 1 liggen.";
-    if (!(await getBrain().forceMood(id, emotion, intensity))) return DYNIMO_GONE;
+    if (!(await getAnimus().forceMood(id, emotion, intensity))) return DYNIMO_GONE;
   });
 }
 
@@ -83,7 +83,7 @@ export async function setMood(_prev: ActionState, formData: FormData): Promise<A
     if (id === null) return INVALID_ID;
     const values = parseMoodValues((name) => formData.get(name));
     if (!values) return "Ongeldige emotiewaarden.";
-    if (!(await getBrain().setMood(id, values))) return DYNIMO_GONE;
+    if (!(await getAnimus().setMood(id, values))) return DYNIMO_GONE;
   });
 }
 
@@ -93,7 +93,7 @@ export async function setAxes(_prev: ActionState, formData: FormData): Promise<A
     if (id === null) return INVALID_ID;
     const axes = parseAxes((name) => formData.get(name));
     if (!axes) return "Ongeldige persoonlijkheidsassen.";
-    if (!(await getBrain().setAxes(id, axes))) return DYNIMO_GONE;
+    if (!(await getAnimus().setAxes(id, axes))) return DYNIMO_GONE;
   });
 }
 
@@ -107,7 +107,7 @@ export async function setFamiliarity(_prev: ActionState, formData: FormData): Pr
     const rawPersonId = formData.get("personId");
     const personId = rawPersonId ? Number(rawPersonId) : undefined;
     if (personId !== undefined && !(Number.isInteger(personId) && personId > 0)) return "Ongeldige Persoon.";
-    if (!(await getBrain().setFamiliarity(id, familiarity, personId))) return DYNIMO_GONE;
+    if (!(await getAnimus().setFamiliarity(id, familiarity, personId))) return DYNIMO_GONE;
   });
 }
 
@@ -117,7 +117,7 @@ export async function setVerstand(_prev: ActionState, formData: FormData): Promi
     if (id === null) return INVALID_ID;
     const verstand = parseVerstand((name) => formData.get(name));
     if (verstand === null) return "Ongeldig Verstand.";
-    if (!(await getBrain().setVerstand(id, verstand))) return DYNIMO_GONE;
+    if (!(await getAnimus().setVerstand(id, verstand))) return DYNIMO_GONE;
   });
 }
 
@@ -127,7 +127,7 @@ export async function setArchetype(_prev: ActionState, formData: FormData): Prom
     if (id === null) return INVALID_ID;
     const archetype = parseArchetypeId(formData.get("archetype"));
     if (!archetype) return "Ongeldig archetype.";
-    if (!(await getBrain().setArchetype(id, archetype))) return DYNIMO_GONE;
+    if (!(await getAnimus().setArchetype(id, archetype))) return DYNIMO_GONE;
   });
 }
 
@@ -148,7 +148,7 @@ export async function setVoice(_prev: ActionState, formData: FormData): Promise<
       if (picked) voice = await adoptVoice(fetch, elevenKey(), picked);
     }
     const description = String(formData.get("voiceDescription") ?? "").trim().slice(0, 500) || null;
-    if (!(await getBrain().setVoiceProfile(id, { voice, description }))) return DYNIMO_GONE;
+    if (!(await getAnimus().setVoiceProfile(id, { voice, description }))) return DYNIMO_GONE;
   });
 }
 
@@ -158,7 +158,7 @@ export async function addMemory(_prev: ActionState, formData: FormData): Promise
     if (id === null) return INVALID_ID;
     const text = String(formData.get("text") ?? "").trim();
     if (!text) return "Vul een tekst in.";
-    if (!(await getBrain().addMemory(id, text))) return DYNIMO_GONE;
+    if (!(await getAnimus().addMemory(id, text))) return DYNIMO_GONE;
   });
 }
 
@@ -167,11 +167,11 @@ export async function removeMemory(_prev: ActionState, formData: FormData): Prom
     const id = parseId(formData);
     const memoryId = Number(formData.get("memoryId"));
     if (id === null || !Number.isInteger(memoryId)) return "Ongeldige Herinnering.";
-    if (!(await getBrain().removeMemory(id, memoryId))) return "Deze Herinnering bestaat niet (meer).";
+    if (!(await getAnimus().removeMemory(id, memoryId))) return "Deze Herinnering bestaat niet (meer).";
   });
 }
 
-// Personen (#95): server actions dun bovenop de brain-functies.
+// Personen (#95): server actions dun bovenop de Animus-functies.
 const INVALID_PERSON = "Ongeldige Persoon.";
 const PERSON_GONE = "Deze Persoon bestaat niet (meer).";
 
@@ -180,7 +180,7 @@ export async function renamePerson(_prev: ActionState, formData: FormData): Prom
     const id = parseId(formData);
     if (id === null) return INVALID_PERSON;
     const name = String(formData.get("name") ?? "");
-    if (!(await getBrain().renamePerson(id, name))) return "Ongeldige naam (of de Persoon bestaat niet meer).";
+    if (!(await getAnimus().renamePerson(id, name))) return "Ongeldige naam (of de Persoon bestaat niet meer).";
   });
 }
 
@@ -190,11 +190,11 @@ export async function mergePersons(_prev: ActionState, formData: FormData): Prom
     const keepId = parseId(formData);
     const removeId = Number(formData.get("removeId"));
     if (keepId === null || !Number.isInteger(removeId) || removeId <= 0) return INVALID_PERSON;
-    const remove = (await getBrain().listPersons()).find((person) => person.id === removeId);
+    const remove = (await getAnimus().listPersons()).find((person) => person.id === removeId);
     if (!remove || remove.name !== String(formData.get("name") ?? "")) {
       return "De naam klopt niet (of de Persoon bestaat niet meer). Er is niets samengevoegd.";
     }
-    if (!(await getBrain().mergePersons(keepId, removeId))) return "Kan deze twee Personen niet samenvoegen.";
+    if (!(await getAnimus().mergePersons(keepId, removeId))) return "Kan deze twee Personen niet samenvoegen.";
   });
 }
 
@@ -202,17 +202,17 @@ export async function relearnPerson(_prev: ActionState, formData: FormData): Pro
   return run(async () => {
     const id = parseId(formData);
     if (id === null) return INVALID_PERSON;
-    if (!(await getBrain().relearnPerson(id))) return PERSON_GONE;
+    if (!(await getAnimus().relearnPerson(id))) return PERSON_GONE;
   });
 }
 
-// Zoals kill(): de exacte naam ter bevestiging; de check gebeurt in de brain.
+// Zoals kill(): de exacte naam ter bevestiging; de check gebeurt in de Animus.
 export async function deletePerson(_prev: ActionState, formData: FormData): Promise<ActionState> {
   return run(async () => {
     const id = parseId(formData);
     if (id === null) return INVALID_PERSON;
     const name = String(formData.get("name") ?? "");
-    if (!(await getBrain().deletePerson(id, name))) {
+    if (!(await getAnimus().deletePerson(id, name))) {
       return "De naam klopt niet, of dit is de eigenaar (of de Persoon bestaat niet meer). Er is niets verwijderd.";
     }
   });
@@ -245,7 +245,7 @@ export async function applyDesignedVoice(_prev: ActionState, formData: FormData)
     const invalid = voiceInputError({ name, description, generatedVoiceId });
     if (invalid) return invalid;
     const voice = await saveDesignedVoice(fetch, elevenKey(), { name, description, generatedVoiceId });
-    if (!(await getBrain().setVoiceProfile(id, { voice, description: description || null }))) return DYNIMO_GONE;
+    if (!(await getAnimus().setVoiceProfile(id, { voice, description: description || null }))) return DYNIMO_GONE;
   });
 }
 
@@ -258,7 +258,7 @@ export async function cloneVoiceAction(_prev: ActionState, formData: FormData): 
     const invalid = voiceInputError({ name });
     if (invalid) return invalid;
     const voice = await cloneVoice(fetch, elevenKey(), { name, files, consent: formData.get("consent") === "on" });
-    if (!(await getBrain().setVoiceProfile(id, { voice, description: null }))) return DYNIMO_GONE;
+    if (!(await getAnimus().setVoiceProfile(id, { voice, description: null }))) return DYNIMO_GONE;
   });
 }
 
@@ -266,10 +266,10 @@ export async function cloneVoiceAction(_prev: ActionState, formData: FormData): 
 export async function setType2Models(_prev: ActionState, formData: FormData): Promise<ActionState> {
   return run(async () => {
     const field = (name: string) => String(formData.get(name) ?? "").trim() || null;
-    await getBrain().setType2Models({ light: field("light"), heavy: field("heavy") });
+    await getAnimus().setType2Models({ light: field("light"), heavy: field("heavy") });
   });
 }
 
 export async function resetType2Models(_prev: ActionState, _formData: FormData): Promise<ActionState> {
-  return run(() => getBrain().setType2Models({ light: null, heavy: null }));
+  return run(() => getAnimus().setType2Models({ light: null, heavy: null }));
 }

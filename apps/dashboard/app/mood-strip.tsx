@@ -1,4 +1,4 @@
-import { EMOTION_GROUPS, type Emotion } from "@animus/brain/emotion";
+import { EMOTION_GROUPS, type Emotion } from "@animus/core/emotion";
 
 // Stemmingsstrook: een paar (ADR-0015) als tegengestelde balk vanuit het midden, losse emoties als gewoon balkje.
 export function MoodStrip({ values, dominant }: { values: Record<Emotion, number>; dominant?: Emotion }) {

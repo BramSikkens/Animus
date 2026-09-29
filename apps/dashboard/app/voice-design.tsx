@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState, useState } from "react";
-import { FREE_TIER_MESSAGE } from "@animus/brain/voice-catalog";
+import { FREE_TIER_MESSAGE } from "@animus/core/voice-catalog";
 import { ActionForm } from "./action-form";
 import { cloneVoiceAction, designVoiceAction, applyDesignedVoice } from "./actions";
 import type { DynimoOption } from "./voice-catalog";

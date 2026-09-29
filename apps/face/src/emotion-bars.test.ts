@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { EMOTIONS, EMOTION_PAIRS, type Emotion } from "@animus/brain/emotion";
+import { EMOTIONS, EMOTION_PAIRS, type Emotion } from "@animus/core/emotion";
 import { emotionBarGroups } from "./emotion-bars.js";
 
 const zeros = Object.fromEntries(EMOTIONS.map((e) => [e, 0])) as Record<Emotion, number>;

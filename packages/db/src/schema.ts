@@ -27,7 +27,7 @@ export const dynimos = pgTable(
     seed: text("seed").notNull(),
     bornAt: timestamp("born_at", { withTimezone: true }).notNull(),
     // Basisemotie: het temperament waar de Stemming naartoe uitdooft. NULL = nog te backfillen.
-    // De waarden spiegelen EMOTIONS uit @animus/brain (db kan de brain niet importeren).
+    // De waarden spiegelen EMOTIONS uit @animus/core (db kan de Animus niet importeren).
     baseEmotion: text("base_emotion"),
     // Stemming: vector {emotie: 0–100} voor alle emoties, plus het tijdstip; de waarden doven uit (zie mood.ts).
     // Beide samen NULL of gezet.
@@ -54,7 +54,7 @@ export const dynimos = pgTable(
     voice: text("voice"),
     // Vrije stembeschrijving (#62), input voor Voice Design (#64). NULL = geen.
     voiceDescription: text("voice_description"),
-    // Archetype (#60): id uit @animus/brain/archetypes; startpunt voor assen/spreekstijl, geen pinning. NULL = geen.
+    // Archetype (#60): id uit @animus/core/archetypes; startpunt voor assen/spreekstijl, geen pinning. NULL = geen.
     archetype: text("archetype"),
     // Verstand (#96/#97): 0–1, hoe inhoudelijk hij antwoordt (los van hoe hij praat, zie verstand.ts). NULL = nog te
     // backfillen; telt tot dan als 0.5 (middenband, gedrag zoals nu).
@@ -238,7 +238,7 @@ export const dreams = pgTable(
 );
 
 // Grafschrift van een verwijderd wezen (ADR-0003). Bewust géén relatie met identity/memories,
-// en het brein leest deze tabel nooit — enkel het dashboard. Leeftijd = deleted_at − born_at (ADR-0002).
+// en de Animus leest deze tabel nooit — enkel het dashboard. Leeftijd = deleted_at − born_at (ADR-0002).
 export const epitaphs = pgTable("epitaphs", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),

@@ -1,8 +1,8 @@
 import Link from "next/link";
-import { formatAge } from "@animus/brain/age";
-import { getArchetype } from "@animus/brain/archetypes";
-import { displayMoodOfRow, moodOfRow } from "@animus/brain/mood";
-import { mbtiType, rowAxes } from "@animus/brain/personality";
+import { formatAge } from "@animus/core/age";
+import { getArchetype } from "@animus/core/archetypes";
+import { displayMoodOfRow, moodOfRow } from "@animus/core/mood";
+import { mbtiType, rowAxes } from "@animus/core/personality";
 import { dynimos } from "@animus/db/schema";
 import { db } from "../lib/db";
 import { ActionForm } from "./action-form";

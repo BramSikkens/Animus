@@ -1,9 +1,9 @@
 import { ReadableStream } from "node:stream/web";
-import type { Brain } from "@animus/brain";
-import type { Gesprekspartner } from "@animus/brain/perception";
+import type { Animus } from "@animus/core";
+import type { Gesprekspartner } from "@animus/core/perception";
 import { LOOK_TOPIC } from "@animus/protocol/perception";
 import { SOUND_TOPIC, type SoundMessage } from "@animus/protocol/sound";
-import { EMOTION_TOPIC, type EmotionMessage } from "@animus/brain/emotion";
+import { EMOTION_TOPIC, type EmotionMessage } from "@animus/core/emotion";
 import { llm, voice, type ChatContext, type ChatMessage, type JobContext, type ToolContext } from "@livekit/agents";
 import { withFaceExpressiveness } from "./state-republish.js";
 import { decideGesprekspartner } from "./gesprekspartner.js";
@@ -15,18 +15,18 @@ import { textStream } from "./text-stream.js";
 // LiveKit genereert enkel een antwoord als er een LLM gezet is (agent_activity.userTurnCompleted:
 // `if (this.llm === undefined) return`), ook al vervangt llmNode het LLM-pad volledig. Zonder
 // deze placeholder blijft de agent stil na elke beurt. chat() wordt nooit aangeroepen.
-class BrainPlaceholderLLM extends llm.LLM {
+class AnimusPlaceholderLLM extends llm.LLM {
   label(): string {
-    return "animus-brain";
+    return "animus";
   }
 
   chat(): never {
-    throw new Error("BrainPlaceholderLLM.chat() mag niet aangeroepen worden: llmNode draait het brein.");
+    throw new Error("AnimusPlaceholderLLM.chat() mag niet aangeroepen worden: llmNode draait de Animus.");
   }
 }
 
 export type AnimusAgentOptions = {
-  brain: Brain;
+  animus: Animus;
   room: JobContext["room"];
   onUtterance: () => void;
   onMoodValues: (values: EmotionMessage["values"]) => void;
@@ -39,7 +39,7 @@ export type AnimusAgentOptions = {
 };
 
 export class AnimusAgent extends voice.Agent {
-  readonly #brain: Brain;
+  readonly #animus: Animus;
   readonly #room: JobContext["room"];
   readonly #onUtterance: () => void;
   readonly #onMoodValues: (values: EmotionMessage["values"]) => void;
@@ -56,11 +56,11 @@ export class AnimusAgent extends voice.Agent {
   // vorige nog loopt (die kan de profiler intern al hebben afgerond en losgelaten).
   #enrolling = false;
 
-  constructor({ brain, room, onUtterance, onMoodValues, getExpressiveness = () => 0.5, speaker, faces, cameraActive = () => false, onBeurtAfgelopen = () => {} }: AnimusAgentOptions) {
+  constructor({ animus, room, onUtterance, onMoodValues, getExpressiveness = () => 0.5, speaker, faces, cameraActive = () => false, onBeurtAfgelopen = () => {} }: AnimusAgentOptions) {
     // instructions is verplicht op voice.Agent, maar onbenut: llmNode hieronder draait i.p.v. het
-    // ingebouwde LLM-pad de brein-kern.
-    super({ instructions: "Animus", llm: new BrainPlaceholderLLM() });
-    this.#brain = brain;
+    // ingebouwde LLM-pad de Animus.
+    super({ instructions: "Animus", llm: new AnimusPlaceholderLLM() });
+    this.#animus = animus;
     this.#room = room;
     this.#onUtterance = onUtterance;
     this.#onMoodValues = onMoodValues;
@@ -147,8 +147,8 @@ export class AnimusAgent extends voice.Agent {
       }
     }
 
-    // tool-*-events uit brain.hear() worden hier genegeerd (ticket #7).
-    return textStream(this.#brain.hear(text, { initiatief: initiative !== undefined, gesprekspartner, ...(aanwezig.length > 0 && { aanwezig }) }), {
+    // tool-*-events uit animus.hear() worden hier genegeerd (ticket #7).
+    return textStream(this.#animus.hear(text, { initiatief: initiative !== undefined, gesprekspartner, ...(aanwezig.length > 0 && { aanwezig }) }), {
       // Na afloop van de beurt (#105): de kenmerken opnieuw publiceren met de Gesprekspartner van déze beurt,
       // want de Vertrouwdheid kan tijdens de beurt verschoven zijn.
       onDone: () => this.#onBeurtAfgelopen(gesprekspartner),

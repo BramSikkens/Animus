@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
-import { type2Catalog } from "@animus/brain/config";
-import { getBrain } from "../../lib/brain";
+import { type2Catalog } from "@animus/core/config";
+import { getAnimus } from "../../lib/animus";
 import { ActionForm } from "../action-form";
 import { resetType2Models, setType2Models } from "../actions";
 
@@ -14,9 +14,9 @@ const SLOTS = [
 
 // Modelwissel (#132): het globale Type2-model voor wie er wakker is. Elke Herinnering onthoudt welk model haar schreef.
 export default async function ModelPage() {
-  const brain = getBrain();
-  const available = brain.availableModels();
-  const active = await brain.type2Models();
+  const animus = getAnimus();
+  const available = animus.availableModels();
+  const active = await animus.type2Models();
   const { defaults } = type2Catalog();
 
   return (

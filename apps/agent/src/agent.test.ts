@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { ChatContext, ToolContext, type JobContext } from "@livekit/agents";
-import type { Brain, BrainEvent } from "@animus/brain";
-import type { Gesprekspartner } from "@animus/brain/perception";
+import type { Animus, AnimusEvent } from "@animus/core";
+import type { Gesprekspartner } from "@animus/core/perception";
 import { createFaces } from "./faces.js";
 import { AnimusAgent, type AnimusAgentOptions } from "./animus-agent.js";
 import type { SpeakerId } from "./speaker-id.js";
 
-async function* gen(events: BrainEvent[]): AsyncGenerator<BrainEvent> {
+async function* gen(events: AnimusEvent[]): AsyncGenerator<AnimusEvent> {
   for (const event of events) yield event;
 }
 
@@ -18,12 +18,12 @@ function chatCtxWith(text: string): ChatContext {
 
 describe("AnimusAgent.llmNode", () => {
   it("meldt na leerKennen (persoon-event) de nieuwe Persoon als Gesprekspartner van déze beurt, niet het onbekende signaal van vóór het antwoord", async () => {
-    const brain = { hear: () => gen([{ type: "persoon", personId: 42, naam: "Anna" }, { type: "text", delta: "Hoi Anna" }]) } as unknown as Brain;
+    const animus = { hear: () => gen([{ type: "persoon", personId: 42, naam: "Anna" }, { type: "text", delta: "Hoi Anna" }]) } as unknown as Animus;
     const room = { localParticipant: undefined } as unknown as JobContext["room"];
     const faces = createFaces();
     faces.record(null, Date.now(), 1); // onbekend gezicht in beeld -> gesprekspartner start als onbekend
     const reported: Gesprekspartner[] = [];
-    const agent = new AnimusAgent({ brain, room, onUtterance: () => {}, onMoodValues: () => {}, faces, onBeurtAfgelopen: (g) => reported.push(g) });
+    const agent = new AnimusAgent({ animus, room, onUtterance: () => {}, onMoodValues: () => {}, faces, onBeurtAfgelopen: (g) => reported.push(g) });
 
     const stream = agent.llmNode(chatCtxWith("Ik ben Anna"), ToolContext.empty());
     for await (const _chunk of (await stream)!) {
@@ -36,16 +36,16 @@ describe("AnimusAgent.llmNode", () => {
   // Stem-inschrijving (#107): beurt 1 leert Anna (42) kennen, daarna blijft haar stem onherkend.
   function enrollingSetup(enrollStatus: "bezig" | "opgegeven") {
     const heard: { gesprekspartner?: Gesprekspartner }[] = [];
-    const brain = {
+    const animus = {
       hear: (_text: string, options: { gesprekspartner?: Gesprekspartner }) => {
         heard.push(options);
         return gen(heard.length === 1 ? [{ type: "persoon", personId: 42, naam: "Anna" }] : [{ type: "text", delta: "Ja" }]);
       },
-    } as unknown as Brain;
+    } as unknown as Animus;
     const room = { localParticipant: undefined } as unknown as JobContext["room"];
     const speakerId = { identify: () => null, enroll: async () => enrollStatus, reload: async () => {}, dispose: () => {} } satisfies SpeakerId;
     const audio = { drain: () => new Int16Array(16) } as unknown as NonNullable<AnimusAgentOptions["speaker"]>["audio"];
-    const agent = new AnimusAgent({ brain, room, onUtterance: () => {}, onMoodValues: () => {}, speaker: { speakerId, audio }, faces: createFaces() });
+    const agent = new AnimusAgent({ animus, room, onUtterance: () => {}, onMoodValues: () => {}, speaker: { speakerId, audio }, faces: createFaces() });
     const turn = async (text: string): Promise<void> => {
       for await (const _chunk of (await agent.llmNode(chatCtxWith(text), ToolContext.empty()))!) {
         // uitlezen
@@ -80,9 +80,9 @@ describe("AnimusAgent.llmNode", () => {
 
   it("een actieve camera zonder gezicht in beeld en zonder stemherkenning maakt de Gesprekspartner onbekend, niet de eigenaar (#115)", async () => {
     const heard: { gesprekspartner?: Gesprekspartner }[] = [];
-    const brain = { hear: (_text: string, options: { gesprekspartner?: Gesprekspartner }) => (heard.push(options), gen([{ type: "text", delta: "Ja" }])) } as unknown as Brain;
+    const animus = { hear: (_text: string, options: { gesprekspartner?: Gesprekspartner }) => (heard.push(options), gen([{ type: "text", delta: "Ja" }])) } as unknown as Animus;
     const room = { localParticipant: undefined } as unknown as JobContext["room"];
-    const agent = new AnimusAgent({ brain, room, onUtterance: () => {}, onMoodValues: () => {}, faces: createFaces(), cameraActive: () => true });
+    const agent = new AnimusAgent({ animus, room, onUtterance: () => {}, onMoodValues: () => {}, faces: createFaces(), cameraActive: () => true });
 
     for await (const _chunk of (await agent.llmNode(chatCtxWith("Hallo"), ToolContext.empty()))!) {
       // uitlezen

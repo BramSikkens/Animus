@@ -1,19 +1,19 @@
 import { fileURLToPath } from "node:url";
-import { createBrain, defaultVoiceDeps } from "@animus/brain";
-import type { DisplayState } from "@animus/brain/display";
+import { createAnimus, defaultVoiceDeps } from "@animus/core";
+import type { DisplayState } from "@animus/core/display";
 import { DISPLAY_TOPIC, type DisplayMessage } from "@animus/protocol/display";
 import { COMMAND_TOPIC, GALLERY_TOPIC, type GalleryMessage } from "@animus/protocol/gallery";
-import type { Aanleiding, Gesprekspartner } from "@animus/brain/perception";
+import type { Aanleiding, Gesprekspartner } from "@animus/core/perception";
 import { decodeEmbedding, isWaarneming, PERCEPTION_TOPIC } from "@animus/protocol/perception";
-import { EMOTION_TOPIC } from "@animus/brain/emotion";
+import { EMOTION_TOPIC } from "@animus/core/emotion";
 import { KENMERKEN_TOPIC, type KenmerkenMessage } from "@animus/protocol/kenmerken";
-import { initiativeFactor } from "@animus/brain/behavior";
+import { initiativeFactor } from "@animus/core/behavior";
 import { isEigenaar, livekitEnv } from "@animus/protocol/security";
-import { moodOfRow } from "@animus/brain/mood";
-import { rowAxes } from "@animus/brain/personality";
-import { resolveVoice, speechProvider } from "@animus/brain/voice";
-import { EMBEDDING_MODEL, loadType2Config, TYPE1_MODEL, type2Catalog } from "@animus/brain/config";
-import { createJobQueue } from "@animus/brain/jobs";
+import { moodOfRow } from "@animus/core/mood";
+import { rowAxes } from "@animus/core/personality";
+import { resolveVoice, speechProvider } from "@animus/core/voice";
+import { EMBEDDING_MODEL, loadType2Config, TYPE1_MODEL, type2Catalog } from "@animus/core/config";
+import { createJobQueue } from "@animus/core/jobs";
 import { createDb, migrate } from "@animus/db";
 import { cli, defineAgent, ServerOptions, voice, type JobContext, type JobProcess, type VAD } from "@livekit/agents";
 import * as deepgram from "@livekit/agents-plugin-deepgram";
@@ -36,7 +36,7 @@ import { createFaces, parseFaceMatchDistance } from "./faces.js";
 import { parseSpeakerMatchThreshold, type SpeakerId } from "./speaker-id.js";
 import { createSpeakerAudio } from "./speaker-audio.js";
 import { voiceSettingsFor } from "./voice-emotion.js";
-import { pacingFor, withPacingSpeed } from "@animus/brain/speech-pacing";
+import { pacingFor, withPacingSpeed } from "@animus/core/speech-pacing";
 import { applyTtsEmotion, applyTtsVoice } from "./tts-voice.js";
 import { resolveDisplay, voiceDisplay } from "./voice-display.js";
 import { AnimusAgent } from "./animus-agent.js";
@@ -97,7 +97,7 @@ export default defineAgent<AgentUserData>({
     const db = createDb(databaseUrl);
     await migrate(db);
 
-    // Kijken (ADR-0018/0019): het laatste camerabeeld van de room, vóór createBrain zodat lookFrame meteen mee kan.
+    // Kijken (ADR-0018/0019): het laatste camerabeeld van de room, vóór createAnimus zodat lookFrame meteen mee kan.
     const frames = createFrameSource(ctx.room);
     // Gezichtsherkenning (#93, ADR-0020): drempel via env, afgeleid van Human's similarity-vuistregel.
     const faceMatchDistanceConfig = parseFaceMatchDistance(process.env.FACE_MATCH_DISTANCE);
@@ -106,16 +106,16 @@ export default defineAgent<AgentUserData>({
     // Reflectie via de wachtrij (#125, ADR-0022): de agent plant enkel in, de worker voert uit.
     const jobs = createJobQueue({ connection: process.env.REDIS_URL ?? "redis://localhost:6379" });
 
-    // In-process (spec: geen aparte brein-API); elke job krijgt zijn eigen brein-instantie.
+    // In-process (spec: geen aparte Animus-API); elke job krijgt zijn eigen Animus-instantie.
     // voices: een geboorte vanuit de Galerij kiest net als in het dashboard een stem.
-    const brain = createBrain({ db, type1: TYPE1_MODEL, type2: loadType2Config(), type2Catalog: type2Catalog(), embedder: EMBEDDING_MODEL, voices: defaultVoiceDeps(process.env), lookFrame: () => frames.latest(), faceMatchDistance: faceMatchDistanceConfig.distance, jobs });
+    const animus = createAnimus({ db, type1: TYPE1_MODEL, type2: loadType2Config(), type2Catalog: type2Catalog(), embedder: EMBEDDING_MODEL, voices: defaultVoiceDeps(process.env), lookFrame: () => frames.latest(), faceMatchDistance: faceMatchDistanceConfig.distance, jobs });
 
     ctx.addShutdownCallback(async () => frames.dispose());
     ctx.addShutdownCallback(async () => {
       // Shutdown-callbacks draaien parallel (Promise.allSettled): settled() moet hier, vóór db.$client.end(),
       // wachten in dezelfde callback — anders gaan Herinneringen die nog op de achtergrond opslaan (#109) verloren.
       // Idem de wachtrij (#126): settled() wacht op job-resultaten, dus pas daarna de Redis-verbindingen sluiten.
-      await brain.settled();
+      await animus.settled();
       await jobs.close();
       await db.$client.end();
     });
@@ -135,8 +135,8 @@ export default defineAgent<AgentUserData>({
       turnHandling: {
         // Het top-level `turnDetection` is deprecated; koppelen via turnHandling.
         turnDetection: new livekit.turnDetector.MultilingualModel(),
-        // preemptiveGeneration draait llmNode (dus brain.hear()) speculatief vóórdat de beurt
-        // bevestigd is; brain.hear() heeft side effects (Type1-call, DB-schrijven, geheugen
+        // preemptiveGeneration draait llmNode (dus animus.hear()) speculatief vóórdat de beurt
+        // bevestigd is; animus.hear() heeft side effects (Type1-call, DB-schrijven, geheugen
         // opslaan) die niet ongedaan te maken zijn als LiveKit de speculatieve beurt weggooit.
         // Niet in het ticket beschreven — hier bewust uitgezet i.p.v. de default (true).
         preemptiveGeneration: { enabled: false },
@@ -154,8 +154,8 @@ export default defineAgent<AgentUserData>({
         speakerId = createEagleSpeakerId({
           accessKey: process.env.PICOVOICE_ACCESS_KEY,
           threshold: speakerThreshold.threshold,
-          loadProfiles: () => brain.voiceProfiles(),
-          saveProfile: (personId, profile) => brain.addVoiceProfile(personId, profile),
+          loadProfiles: () => animus.voiceProfiles(),
+          saveProfile: (personId, profile) => animus.addVoiceProfile(personId, profile),
         });
         await speakerId.reload();
         const audio = createSpeakerAudio(ctx.room, () => session.userState === "speaking");
@@ -208,7 +208,7 @@ export default defineAgent<AgentUserData>({
     // Enkel wat vervaagt (#111): de 5s-ronde gebruikt alleen dit, niet de kenmerken (die vragen een aparte, tragere lezing).
     const publishMood = async (): Promise<void> => {
       try {
-        const state = await readState(brain);
+        const state = await readState(animus);
         publish(DISPLAY_TOPIC, { state: effectiveDisplay(state), name: state.name });
         publish(EMOTION_TOPIC, withFaceExpressiveness(emotionMessageFor(state.mood), state.expressiveness));
       } catch (error) {
@@ -219,9 +219,9 @@ export default defineAgent<AgentUserData>({
     // Ververst bij NOTIFY ("kenmerken:"/"persons:"), na een beurt en via een trage verversing (~60s) — niet elke 5s.
     const publishKenmerken = async (): Promise<void> => {
       try {
-        const state = await readState(brain);
+        const state = await readState(animus);
         const vertrouwdheid = state.row
-          ? await vertrouwdheidFor({ familiarityOf: brain.familiarityOf, personName: brain.personName }, state.row.id, lastGesprekspartner)
+          ? await vertrouwdheidFor({ familiarityOf: animus.familiarityOf, personName: animus.personName }, state.row.id, lastGesprekspartner)
           : { onbekend: true as const };
         publish(KENMERKEN_TOPIC, kenmerkenMessageFor(state.row, vertrouwdheid));
       } catch (error) {
@@ -237,16 +237,16 @@ export default defineAgent<AgentUserData>({
     // Galerij: alle levende Dynimo's (naam, wakker) voor het startscherm van het gezichtje.
     const publishGallery = async (): Promise<void> => {
       try {
-        // Grafschriften lees ik hier rechtstreeks (ADR-0003: het brein leest die tabel nooit).
+        // Grafschriften lees ik hier rechtstreeks (ADR-0003: de Animus leest die tabel nooit).
         const graves = await db.query.epitaphs.findMany({ orderBy: (e, { desc }) => desc(e.deletedAt), limit: MAX_GRAVES });
-        publish(GALLERY_TOPIC, galleryMessageFor(await brain.list(), graves));
+        publish(GALLERY_TOPIC, galleryMessageFor(await animus.list(), graves));
       } catch (error) {
         console.error("Galerij publiceren faalde:", error instanceof Error ? error.message : error);
       }
     };
     // Commando's van het gezichtje (enkel van een eigenaar-identity, #116): birth/wake/sleep/kill; handler valideert zelf.
     const handleCommand = createCommandHandler({
-      brain,
+      animus,
       publishGallery: () => void publishGallery(),
       onError: (error) => console.error("Commando uitvoeren faalde:", error instanceof Error ? error.message : error),
     });
@@ -269,11 +269,11 @@ export default defineAgent<AgentUserData>({
       thresholdMs: silenceConfig.ms,
       // De worker voert de Reflectie uit en meldt start/einde zelf op het toestandskanaal (watchDynimos' onReflectie
       // hieronder); hier enkel nog inplannen.
-      onSilence: () => void brain.reflect({ aanwezig: faces.seenAny() ? faces.present(Date.now()) : undefined }),
+      onSilence: () => void animus.reflect({ aanwezig: faces.seenAny() ? faces.present(Date.now()) : undefined }),
     });
     ctx.addShutdownCallback(async () => silence.dispose());
 
-    // Initiatief: periodiek vraagt de brain (Type1) of de wakkere Dynimo iets wil zeggen; zo ja, dan spreekt hij
+    // Initiatief: periodiek vraagt de Animus (Type1) of de wakkere Dynimo iets wil zeggen; zo ja, dan spreekt hij
     // uit zichzelf. Enkel bij stilte (agent niet speaking/thinking, gebruiker niet aan het praten); de frequentie
     // volgt de N/P-kant van de Persoonlijkheid.
     const initiativeBaseMs = parseInitiativeMinutes(process.env.INITIATIVE_CHECK_MINUTES);
@@ -291,13 +291,13 @@ export default defineAgent<AgentUserData>({
     let initiativeAxes: ReturnType<typeof rowAxes> = null;
     let initiativeMoodFactor = 1;
     const refreshInitiativeAxes = async (): Promise<void> => {
-      const awake = (await brain.list()).find((dynimo) => dynimo.awakeSince);
+      const awake = (await animus.list()).find((dynimo) => dynimo.awakeSince);
       initiativeAxes = rowAxes(awake ?? { axisIe: null, axisSn: null, axisTf: null, axisJp: null, axisReactivity: 0.5, axisExpressiveness: 0.5 });
       // Zeer blij: vaker eigen initiatief (behavior.ts).
       initiativeMoodFactor = awake && initiativeAxes ? initiativeFactor(moodOfRow(awake, new Date()).values, initiativeAxes) : 1;
     };
     const animusAgent = new AnimusAgent({
-      brain,
+      animus,
       room: ctx.room,
       onUtterance: () => {
         silence.reset();
@@ -333,7 +333,7 @@ export default defineAgent<AgentUserData>({
       initiativeInFlight = true;
       try {
         await refreshInitiativeAxes();
-        const instruction = await brain.considerInitiative(aanleiding, { aanwezig: faces.seenAny() ? faces.present(Date.now()) : undefined });
+        const instruction = await animus.considerInitiative(aanleiding, { aanwezig: faces.seenAny() ? faces.present(Date.now()) : undefined });
         // Opnieuw controleren: de check duurde even, misschien is er intussen iemand gaan praten.
         if (!instruction || !isQuiet()) return;
         animusAgent.queueInitiative(instruction);
@@ -367,7 +367,7 @@ export default defineAgent<AgentUserData>({
         const decoded = decodeEmbedding(parsed.embedding);
         if (!decoded) return; // al gevalideerd door isWaarneming; defensief
         const aantal = parsed.aantal;
-        brain
+        animus
           .recognizeFaces([decoded])
           .then(([personId]) => {
             faces.record(personId ?? null, Date.now(), aantal);
@@ -411,10 +411,10 @@ export default defineAgent<AgentUserData>({
     });
 
     // Volgt de wakkere Dynimo (dashboard-acties komen binnen via Postgres NOTIFY): een wissel breekt het
-    // lopende antwoord af (zoals barge-in; de brain-stream sluit via textStream) en zet het gezichtje om.
+    // lopende antwoord af (zoals barge-in; de Animus-stream sluit via textStream) en zet het gezichtje om.
     watcher = await watchDynimos({
       databaseUrl,
-      brain,
+      animus,
       onMood: () => void publishMood(),
       // Assen/Verstand/Vertrouwdheid gewijzigd (ook "persons:", #111 criterium 3): kenmerken ververst, én de
       // gecachete assen (Expressiviteit voor gezicht én TTS), zodat die niet tussen oud en nieuw springen.
@@ -426,14 +426,14 @@ export default defineAgent<AgentUserData>({
       // Reflectie van de worker (#125): de initiatief-blokkade volgt altijd, het "reflecterend"-gezicht enkel als
       // het de huidige wakkere Dynimo is (een Reflectie bij slapen/wisselen hoort niet meer bij de huidige generatie).
       onReflectie: (phase, dynimoId) => {
-        brain.noteReflection(dynimoId, phase === "start");
+        animus.noteReflection(dynimoId, phase === "start");
         const state = watcher.current();
         if (state.row?.id !== dynimoId) return;
         if (phase === "start") reflectionDisplay.onStart(state.key);
         else reflectionDisplay.onFinish(state.key);
       },
       onVoice: () =>
-        void readState(brain)
+        void readState(animus)
           .then((state) => applyVoice(state.voice))
           .catch((error: unknown) => console.warn("Stem herladen faalde:", error instanceof Error ? error.message : error)),
       // Personen samengevoegd/verwijderd/opnieuw geleerd (#95): Stemprofielen, de gezien-bijhouding en een lopende

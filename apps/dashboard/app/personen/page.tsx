@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { getBrain } from "../../lib/brain";
+import { getAnimus } from "../../lib/animus";
 import { formatDate } from "../../lib/format";
 import { ActionForm } from "../action-form";
 import { deletePerson, mergePersons, relearnPerson, renamePerson } from "../actions";
@@ -8,9 +8,9 @@ export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = { title: "Personen" };
 
-// Personen (#95, herontwerp #130): dun bovenop de brain-functies, in het nieuwe visuele systeem (#128/#129).
+// Personen (#95, herontwerp #130): dun bovenop de Animus-functies, in het nieuwe visuele systeem (#128/#129).
 export default async function PersonenPage() {
-  const persons = await getBrain().listPersons();
+  const persons = await getAnimus().listPersons();
 
   // Dubbele namen (hoofdletterongevoelig, getrimd) vallen op met een badge en een samenvoeg-snelkoppeling.
   const namesakesOf = (person: (typeof persons)[number]) => {

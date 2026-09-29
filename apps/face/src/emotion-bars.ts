@@ -1,4 +1,4 @@
-import { EMOTION_GROUPS, type Emotion } from "@animus/brain/emotion";
+import { EMOTION_GROUPS, type Emotion } from "@animus/core/emotion";
 
 export type EmotionBar = { emotion: Emotion; value: number };
 

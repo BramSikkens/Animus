@@ -1,7 +1,7 @@
-import { openBrain, openDb, openJobQueue } from "./bootstrap.js";
+import { openAnimus, openDb, openJobQueue } from "./bootstrap.js";
 import { createInterface } from "node:readline/promises";
 import { migrate } from "@animus/db";
-import { formatAge } from "@animus/brain";
+import { formatAge } from "@animus/core";
 
 async function main(): Promise<void> {
   const db = openDb();
@@ -9,8 +9,8 @@ async function main(): Promise<void> {
 
   // Reflectie via de wachtrij (#125): enkel inplannen, de worker voert 'm uit.
   const jobs = openJobQueue();
-  const brain = openBrain(db, jobs);
-  const awake = (await brain.list()).find((dynimo) => dynimo.awakeSince);
+  const animus = openAnimus(db, jobs);
+  const awake = (await animus.list()).find((dynimo) => dynimo.awakeSince);
 
   if (awake) {
     console.log(`Je praat met ${awake.name}.`);
@@ -26,9 +26,9 @@ async function main(): Promise<void> {
   for await (const line of rl) {
     if (line.trim()) {
       // Het dashboard kan intussen een andere Dynimo wekken: de naam elke regel opnieuw ophalen.
-      const name = (await brain.list()).find((dynimo) => dynimo.awakeSince)?.name;
+      const name = (await animus.list()).find((dynimo) => dynimo.awakeSince)?.name;
       let heard = false;
-      for await (const event of brain.hear(line)) {
+      for await (const event of animus.hear(line)) {
         heard = true;
         if (event.type === "mood") {
           process.stdout.write(`(${event.emotion} ${event.intensity.toFixed(2)}) ${name}: `);
@@ -42,7 +42,7 @@ async function main(): Promise<void> {
     }
     rl.prompt();
   }
-  await brain.settled();
+  await animus.settled();
   await jobs.close();
   await db.$client.end();
 }

@@ -36,7 +36,7 @@ export function parseCommand(value: unknown): GalleryCommand | null {
   const { type, id, name } = value as Record<string, unknown>;
   if (type === "birth") return { type };
   if (typeof id !== "number" || !Number.isInteger(id)) return null;
-  // kill vraagt de bevestigde naam mee; het brein vergelijkt die zelf met de database.
+  // kill vraagt de bevestigde naam mee; de Animus vergelijkt die zelf met de database.
   if (type === "kill") return typeof name === "string" ? { type, id, name } : null;
   if (type !== "wake" && type !== "sleep") return null;
   return { type, id };

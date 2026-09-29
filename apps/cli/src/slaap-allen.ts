@@ -1,4 +1,4 @@
-import { openBrain, openDb, openJobQueue } from "./bootstrap.js";
+import { openAnimus, openDb, openJobQueue } from "./bootstrap.js";
 import { isNotNull } from "drizzle-orm";
 import { migrate } from "@animus/db";
 import { dynimos } from "@animus/db/schema";
@@ -11,14 +11,14 @@ async function main(): Promise<void> {
   try {
     await migrate(db);
     try {
-      // Via de brain: de vorige wakkere Dynimo krijgt zo zijn Reflectie voor het slapen.
-      const brain = openBrain(db, jobs);
-      await brain.sleep();
+      // Via de Animus: de vorige wakkere Dynimo krijgt zo zijn Reflectie voor het slapen.
+      const animus = openAnimus(db, jobs);
+      await animus.sleep();
     } catch (error) {
       // Geen modelconfig (of de call faalde): dev mag nooit breken, dus terugval op direct slapen zonder Reflectie.
-      console.warn(`Slapen via de brain mislukte (${error instanceof Error ? error.message : error}); direct slapen zonder Reflectie.`);
+      console.warn(`Slapen via de Animus mislukte (${error instanceof Error ? error.message : error}); direct slapen zonder Reflectie.`);
     }
-    // Idempotent vangnet: ook na een geslaagde brain.sleep() staat niemand meer wakker.
+    // Idempotent vangnet: ook na een geslaagde animus.sleep() staat niemand meer wakker.
     await db.update(dynimos).set({ awakeSince: null }).where(isNotNull(dynimos.awakeSince));
   } finally {
     await jobs.close();

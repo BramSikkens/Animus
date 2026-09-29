@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Dynimo } from "@animus/brain";
+import type { Dynimo } from "@animus/core";
 import { createStateRepublisher, emotionMessageFor, kenmerkenMessageFor, withFaceExpressiveness } from "./state-republish.js";
 
 describe("createStateRepublisher", () => {

@@ -1,4 +1,4 @@
-import type { Aanleiding } from "@animus/brain/perception";
+import type { Aanleiding } from "@animus/core/perception";
 import type { Waarneming } from "@animus/protocol/perception";
 
 export const DEFAULT_RETURN_AFTER_MINUTES = 10;

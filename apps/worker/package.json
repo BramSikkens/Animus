@@ -7,7 +7,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@animus/brain": "workspace:*",
+    "@animus/core": "workspace:*",
     "@animus/db": "workspace:*"
   },
   "devDependencies": {

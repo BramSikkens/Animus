@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Emotion } from "@animus/brain/emotion";
+import type { Emotion } from "@animus/core/emotion";
 import { microExpression } from "./micro.js";
 
 const values = (over: Partial<Record<Emotion, number>> = {}) => ({ ...over }) as Record<Emotion, number>;

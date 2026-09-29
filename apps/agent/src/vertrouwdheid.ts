@@ -1,5 +1,5 @@
 import type { Vertrouwdheid } from "@animus/protocol/kenmerken";
-import type { Gesprekspartner } from "@animus/brain/perception";
+import type { Gesprekspartner } from "@animus/core/perception";
 
 export type VertrouwdheidDeps = {
   familiarityOf: (dynimoId: number, personId?: number) => Promise<number>;

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { filterVoices, FREE_TIER_MESSAGE, type CatalogVoice } from "@animus/brain/voice-catalog";
+import { filterVoices, FREE_TIER_MESSAGE, type CatalogVoice } from "@animus/core/voice-catalog";
 import { ActionForm } from "./action-form";
 import { setVoice } from "./actions";
 

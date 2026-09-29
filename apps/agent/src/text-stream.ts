@@ -1,7 +1,7 @@
 import { ReadableStream } from "node:stream/web";
-import type { BrainEvent } from "@animus/brain";
-import type { EmotionMessage } from "@animus/brain/emotion";
-import type { SoundKind } from "@animus/brain/sound";
+import type { AnimusEvent } from "@animus/core";
+import type { EmotionMessage } from "@animus/core/emotion";
+import type { SoundKind } from "@animus/core/sound";
 
 export type TextStreamOptions = {
   /** Aangeroepen zodra een `sound`-event (zichtbare Stemmingsverandering) voorbijkomt (ticket #40). */
@@ -17,7 +17,7 @@ export type TextStreamOptions = {
 };
 
 /**
- * Zet de `BrainEvent`-stroom van `brain.hear()` om naar enkel de tekst-deltas, zodat de
+ * Zet de `AnimusEvent`-stroom van `animus.hear()` om naar enkel de tekst-deltas, zodat de
  * TTS al kan beginnen terwijl Type2 nog aan het antwoorden is.
  *
  * tool-*-events worden hier genegeerd (ticket #7). `mood`-events roepen `options.onMood`
@@ -26,7 +26,7 @@ export type TextStreamOptions = {
  * Gooit de bron een fout (bv. `hear()` faalt halverwege een beurt), dan wordt dat gelogd en
  * sluit de stream netjes af, zodat één mislukte beurt de sessie niet laat crashen.
  */
-export function textStream(events: AsyncIterable<BrainEvent>, options?: TextStreamOptions): ReadableStream<string> {
+export function textStream(events: AsyncIterable<AnimusEvent>, options?: TextStreamOptions): ReadableStream<string> {
   const it = events[Symbol.asyncIterator]();
   // Eén keer, of de beurt nu normaal afloopt, faalt, of onderbroken wordt (cancel(), barge-in, #105 reviewfix).
   let done = false;
@@ -38,11 +38,11 @@ export function textStream(events: AsyncIterable<BrainEvent>, options?: TextStre
   return new ReadableStream<string>({
     async pull(controller) {
       for (;;) {
-        let result: IteratorResult<BrainEvent>;
+        let result: IteratorResult<AnimusEvent>;
         try {
           result = await it.next();
         } catch (error) {
-          console.error("Brain-stream faalde tijdens een beurt:", error instanceof Error ? error.message : error);
+          console.error("Animus-stream faalde tijdens een beurt:", error instanceof Error ? error.message : error);
           onDone();
           controller.close();
           return;

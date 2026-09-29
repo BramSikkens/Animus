@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import react from "@vitejs/plugin-react";
 import { AccessToken, AgentDispatchClient, RoomServiceClient, TrackSource } from "livekit-server-sdk";
 import { defineConfig, type Plugin } from "vite";
-import { EIGENAAR_PREFIX, livekitEnv } from "@animus/brain/security";
+import { EIGENAAR_PREFIX, livekitEnv } from "@animus/protocol/security";
 
 // Zelfde .env als de andere apps (repo-root).
 try {

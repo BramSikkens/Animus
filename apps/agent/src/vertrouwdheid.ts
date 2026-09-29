@@ -1,4 +1,4 @@
-import type { Vertrouwdheid } from "@animus/brain/kenmerken";
+import type { Vertrouwdheid } from "@animus/protocol/kenmerken";
 import type { Gesprekspartner } from "@animus/brain/perception";
 
 export type VertrouwdheidDeps = {

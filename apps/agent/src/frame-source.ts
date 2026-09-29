@@ -13,7 +13,7 @@ import {
   type VideoFrame,
 } from "@livekit/rtc-node";
 import type { Frame } from "@animus/brain";
-import { isEigenaar } from "@animus/brain/security";
+import { isEigenaar } from "@animus/protocol/security";
 
 const MAX_SIDE = 768;
 const JPEG_QUALITY = 80;

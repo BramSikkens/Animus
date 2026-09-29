@@ -27,6 +27,9 @@ importers:
       '@animus/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@animus/protocol':
+        specifier: workspace:*
+        version: link:../../packages/protocol
       '@livekit/agents':
         specifier: 1.9.0
         version: 1.9.0(@livekit/rtc-node@0.13.35)(@types/node@26.6.2)(typescript@5.9.3)(zod@4.6.5)
@@ -135,6 +138,9 @@ importers:
       '@animus/brain':
         specifier: workspace:*
         version: link:../../packages/brain
+      '@animus/protocol':
+        specifier: workspace:*
+        version: link:../../packages/protocol
       '@livekit/components-react':
         specifier: 2.9.24
         version: 2.9.24(livekit-client@2.22.3(@types/dom-mediacapture-record@1.0.22))(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(tslib@2.8.1)
@@ -259,6 +265,19 @@ importers:
       typescript:
         specifier: 5.9.3
         version: 5.9.3
+
+  packages/protocol:
+    dependencies:
+      '@animus/brain':
+        specifier: workspace:*
+        version: link:../brain
+    devDependencies:
+      typescript:
+        specifier: 5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: 5.0.1
+        version: 5.0.1(@opentelemetry/api@1.9.1)(@types/node@26.6.2)(vite@8.3.0(@types/node@26.6.2)(esbuild@0.28.2)(tsx@4.23.15))
 
 packages:
 

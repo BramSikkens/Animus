@@ -1,5 +1,5 @@
 import type { SpeechProvider } from "@animus/brain/voice";
-import type { VoiceSettings } from "@animus/brain/voice-emotion";
+import type { VoiceSettings } from "./voice-emotion.js";
 
 /** Zet de stem op de gedeelde TTS; elke provider noemt de optie anders. */
 export function applyTtsVoice(provider: SpeechProvider, tts: { updateOptions(opts: never): void }, voice: string): void {

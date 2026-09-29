@@ -11,12 +11,9 @@
     "./emotion": "./src/emotion.ts",
     "./familiarity": "./src/familiarity.ts",
     "./display": "./src/display.ts",
-    "./gallery": "./src/gallery.ts",
     "./jobs": "./src/jobs.ts",
-    "./kenmerken": "./src/kenmerken.ts",
     "./perception": "./src/perception.ts",
     "./personality": "./src/personality.ts",
-    "./security": "./src/security.ts",
     "./drives": "./src/drives.ts",
     "./mood": "./src/mood.ts",
     "./sound": "./src/sound.ts",
@@ -25,8 +22,7 @@
     "./verstand": "./src/verstand.ts",
     "./voice": "./src/voice.ts",
     "./voice-catalog": "./src/voice-catalog.ts",
-    "./voice-design": "./src/voice-design.ts",
-    "./voice-emotion": "./src/voice-emotion.ts"
+    "./voice-design": "./src/voice-design.ts"
   },
   "scripts": {
     "test": "vitest run",

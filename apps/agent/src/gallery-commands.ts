@@ -1,4 +1,4 @@
-import { parseCommand, type GalleryMessage } from "@animus/brain/gallery";
+import { parseCommand, type GalleryMessage } from "@animus/protocol/gallery";
 
 export const MAX_GRAVES = 50;
 

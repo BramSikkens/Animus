@@ -1,5 +1,5 @@
 import { getArchetype } from "@animus/brain/archetypes";
-import type { KenmerkenMessage } from "@animus/brain/kenmerken";
+import type { KenmerkenMessage } from "@animus/protocol/kenmerken";
 import { AXES, AXIS_POLES, type Axis } from "@animus/brain/personality";
 
 export type AsBalk = { axis: Axis; links: string; rechts: string; value: number };

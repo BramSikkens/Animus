@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { KenmerkenMessage } from "@animus/brain/kenmerken";
+import type { KenmerkenMessage } from "@animus/protocol/kenmerken";
 import { kenmerkenPanel } from "./kenmerken-panel.js";
 
 const base: KenmerkenMessage = {

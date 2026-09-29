@@ -10,6 +10,7 @@ Dit is het softwareprototype, dat op je eigen computer draait. Later volgt een p
 |---|---|
 | `packages/brain` | De kern: Type1 (snelle reflex-classificatie) en Type2 (het redenerende LLM-brein, wisselbaar via de Vercel AI SDK), geheugen, karakter, Stemming, Personen |
 | `packages/db` | Drizzle-schema en migraties voor PostgreSQL met pgvector |
+| `packages/protocol` | Berichten tussen agent en gezichtje over LiveKit (topics, berichttypes, validatie) |
 | `apps/agent` | LiveKit-agent: spraak in en uit (VAD, STT, TTS), stem- en gezichtsherkenning, en het brein in-process |
 | `apps/face` | Het gezichtje (Vite + React): ogen, mond en wenkbrauwen, Galerij van Dynimo's, perceptie in de browser (MediaPipe, Human) |
 | `apps/dashboard` | Beheer (Next.js): Dynimo's, Herinneringen, Personen samenvoegen, stemmen |

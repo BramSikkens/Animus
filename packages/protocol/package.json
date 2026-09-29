@@ -1,0 +1,24 @@
+{
+  "name": "@animus/protocol",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./display": "./src/display.ts",
+    "./gallery": "./src/gallery.ts",
+    "./kenmerken": "./src/kenmerken.ts",
+    "./perception": "./src/perception.ts",
+    "./security": "./src/security.ts",
+    "./sound": "./src/sound.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@animus/brain": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3",
+    "vitest": "5.0.1"
+  }
+}

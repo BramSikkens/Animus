@@ -8,10 +8,10 @@ Dit is het softwareprototype, dat op je eigen computer draait. Later volgt een p
 
 | Onderdeel | Wat |
 |---|---|
-| `packages/brain` | De kern: Type1 (snelle reflex-classificatie) en Type2 (het redenerende LLM-brein, wisselbaar via de Vercel AI SDK), geheugen, karakter, Stemming, Personen |
+| `packages/core` | De kern: de Animus (`createAnimus`), die de Dynimo's beheert en de wakkere laat leven; Type1 (snelle reflex-classificatie) en Type2 (het redenerende LLM-brein, wisselbaar via de Vercel AI SDK), geheugen, karakter, Stemming, Personen |
 | `packages/db` | Drizzle-schema en migraties voor PostgreSQL met pgvector |
 | `packages/protocol` | Berichten tussen agent en gezichtje over LiveKit (topics, berichttypes, validatie) |
-| `apps/agent` | LiveKit-agent: spraak in en uit (VAD, STT, TTS), stem- en gezichtsherkenning, en het brein in-process |
+| `apps/agent` | LiveKit-agent: spraak in en uit (VAD, STT, TTS), stem- en gezichtsherkenning, en de Animus in-process |
 | `apps/face` | Het gezichtje (Vite + React): ogen, mond en wenkbrauwen, Galerij van Dynimo's, perceptie in de browser (MediaPipe, Human) |
 | `apps/dashboard` | Beheer (Next.js): Dynimo's, Herinneringen, Personen samenvoegen, stemmen |
 | `apps/worker` | Voert achtergrondtaken uit (BullMQ + Redis, zie [ADR-0022](docs/adr/0022-bullmq-redis-voor-achtergrondtaken.md)) |
@@ -72,7 +72,7 @@ pnpm repl
 pnpm kiosk
 ```
 
-`pnpm test` draait alle tests; de brain-tests maken daarvoor een wegwerp-database `animus_test` aan in de Docker-Postgres. `pnpm repl` praat in de terminal met de wakkere Dynimo, zonder spraak.
+`pnpm test` draait alle tests; de core-tests maken daarvoor een wegwerp-database `animus_test` aan in de Docker-Postgres. `pnpm repl` praat in de terminal met de wakkere Dynimo, zonder spraak.
 
 ## Kiosk
 

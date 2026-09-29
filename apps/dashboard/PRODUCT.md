@@ -17,7 +17,7 @@ Geen generiek admin-paneel. Dit is het venster op het innerlijk leven van één 
 
 ## Operating Context
 - Lokaal, zonder authenticatie, enkel op 127.0.0.1:3001 (Host-controle in `proxy.ts`, #108).
-- Next 16 (App Router, server actions in `app/actions.ts`, formulierfeedback via `action-form.tsx`/ActionState), dezelfde Postgres als de agent, brain via `lib/brain.ts`.
+- Next 16 (App Router, server actions in `app/actions.ts`, formulierfeedback via `action-form.tsx`/ActionState), dezelfde Postgres als de agent, de Animus via `lib/animus.ts`.
 - Wijzigingen bereiken het gezichtje live via NOTIFY op het toestandskanaal.
 - Zware taken (Reflectie, backfill, Herinnering opslaan) lopen via de worker (ADR-0022); dashboard-acties keren meteen terug.
 

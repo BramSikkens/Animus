@@ -1,6 +1,6 @@
 // Browser-veilig: geen node-imports. De agent én de gezichtje-app delen dit contract.
-import { type Axis, AXES } from "@animus/brain/personality";
-import { isEmotion, type Emotion } from "@animus/brain/emotion";
+import { type Axis, AXES } from "@animus/core/personality";
+import { isEmotion, type Emotion } from "@animus/core/emotion";
 
 export const KENMERKEN_TOPIC = "kenmerken";
 

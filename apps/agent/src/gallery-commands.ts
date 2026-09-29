@@ -23,7 +23,7 @@ export function galleryMessageFor(dynimos: { id: number; name: string; awakeSinc
  * Lopende TTS: birth/wake/sleep/kill sturen NOTIFY, waarop de watcher in agent.ts de sessie onderbreekt.
  */
 export function createCommandHandler(options: {
-  brain: {
+  animus: {
     list: () => Promise<{ id: number; awakeSince: Date | null }[]>;
     wake: (id: number) => Promise<unknown>;
     sleep: () => Promise<void>;
@@ -38,15 +38,15 @@ export function createCommandHandler(options: {
     if (!command) return;
     try {
       if (command.type === "birth") {
-        await options.brain.bringToLife();
+        await options.animus.bringToLife();
       } else if (command.type === "wake") {
-        await options.brain.wake(command.id);
+        await options.animus.wake(command.id);
       } else if (command.type === "kill") {
-        await options.brain.kill(command.id, command.name);
+        await options.animus.kill(command.id, command.name);
       } else {
-        // brain.sleep() legt iedereen slapen; enkel als dit echt de wakkere is, anders is de Terug verlopen.
-        const awake = (await options.brain.list()).find((d) => d.awakeSince);
-        if (awake?.id === command.id) await options.brain.sleep();
+        // animus.sleep() legt iedereen slapen; enkel als dit echt de wakkere is, anders is de Terug verlopen.
+        const awake = (await options.animus.list()).find((d) => d.awakeSince);
+        if (awake?.id === command.id) await options.animus.sleep();
       }
       options.publishGallery();
     } catch (error) {

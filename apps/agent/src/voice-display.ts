@@ -1,4 +1,4 @@
-import type { DisplayState } from "@animus/brain/display";
+import type { DisplayState } from "@animus/core/display";
 import type { voice } from "@livekit/agents";
 
 /** LiveKit's AgentState/UserState naar een Weergavetoestand; agent-spreken wint bij overlap (barge-in). */

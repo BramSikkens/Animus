@@ -1,4 +1,4 @@
-import type { Emotion } from "@animus/brain/emotion";
+import type { Emotion } from "@animus/core/emotion";
 
 /** Eén oog. `open` is de ooglid-opening (0 dicht .. 1 volledig open), `scale` de oogomvang (~0.6..1.4). */
 type Eye = { open: number; scale: number; pupilX: number; pupilY: number };

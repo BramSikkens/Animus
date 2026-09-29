@@ -21,9 +21,9 @@ importers:
 
   apps/agent:
     dependencies:
-      '@animus/brain':
+      '@animus/core':
         specifier: workspace:*
-        version: link:../../packages/brain
+        version: link:../../packages/core
       '@animus/db':
         specifier: workspace:*
         version: link:../../packages/db
@@ -76,9 +76,9 @@ importers:
 
   apps/cli:
     dependencies:
-      '@animus/brain':
+      '@animus/core':
         specifier: workspace:*
-        version: link:../../packages/brain
+        version: link:../../packages/core
       '@animus/db':
         specifier: workspace:*
         version: link:../../packages/db
@@ -98,9 +98,9 @@ importers:
 
   apps/dashboard:
     dependencies:
-      '@animus/brain':
+      '@animus/core':
         specifier: workspace:*
-        version: link:../../packages/brain
+        version: link:../../packages/core
       '@animus/db':
         specifier: workspace:*
         version: link:../../packages/db
@@ -135,9 +135,9 @@ importers:
 
   apps/face:
     dependencies:
-      '@animus/brain':
+      '@animus/core':
         specifier: workspace:*
-        version: link:../../packages/brain
+        version: link:../../packages/core
       '@animus/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
@@ -190,9 +190,9 @@ importers:
 
   apps/worker:
     dependencies:
-      '@animus/brain':
+      '@animus/core':
         specifier: workspace:*
-        version: link:../../packages/brain
+        version: link:../../packages/core
       '@animus/db':
         specifier: workspace:*
         version: link:../../packages/db
@@ -207,7 +207,7 @@ importers:
         specifier: 5.9.3
         version: 5.9.3
 
-  packages/brain:
+  packages/core:
     dependencies:
       '@ai-sdk/anthropic':
         specifier: 4.0.61
@@ -268,9 +268,9 @@ importers:
 
   packages/protocol:
     dependencies:
-      '@animus/brain':
+      '@animus/core':
         specifier: workspace:*
-        version: link:../brain
+        version: link:../core
     devDependencies:
       typescript:
         specifier: 5.9.3

@@ -1,5 +1,5 @@
-import type { Emotion } from "@animus/brain/emotion";
-import type { DisplayState } from "@animus/brain/display";
+import type { Emotion } from "@animus/core/emotion";
+import type { DisplayState } from "@animus/core/display";
 import { KEYFRAMES, NEUTRAL, REFLECT, SLEEP, type Keyframe } from "./keyframes.js";
 
 function clamp01(n: number): number {

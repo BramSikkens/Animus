@@ -1,4 +1,4 @@
-import { DEFAULT_FACE_MATCH_DISTANCE } from "@animus/brain/perception";
+import { DEFAULT_FACE_MATCH_DISTANCE } from "@animus/core/perception";
 
 /** Parseert FACE_MATCH_DISTANCE (L2-afstand, > 0); ongeldig geeft een waarschuwing (patroon: parseSpeakerMatchThreshold). */
 export function parseFaceMatchDistance(value: string | undefined): { distance: number; warning?: string } {
@@ -20,7 +20,7 @@ type Entry = { personId: number | null; at: number; aantal: number };
 
 /**
  * Pure module (agent, #93, klok geïnjecteerd): houdt de recent binnengekomen gezicht-Waarnemingen bij (elk al
- * gematcht via brain.recognizeFaces) en leidt daaruit af wie er nu in beeld/aanwezig is, en of er een onbekend
+ * gematcht via animus.recognizeFaces) en leidt daaruit af wie er nu in beeld/aanwezig is, en of er een onbekend
  * gezicht stabiel genoeg in beeld is om de initiatiefcheck "onbekend" uit te lokken (eenmalig per onbekende reeks).
  */
 export function createFaces() {

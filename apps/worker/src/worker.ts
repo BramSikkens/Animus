@@ -5,9 +5,9 @@ try {
   // .env is optioneel: de omgevingsvariabelen kunnen ook al gezet zijn (bv. via shell/CI).
 }
 
-import { createBrain } from "@animus/brain";
-import { EMBEDDING_MODEL, loadType2Config, TYPE1_MODEL, type2Catalog } from "@animus/brain/config";
-import { createJobQueue, scheduleBackfill, startWorker } from "@animus/brain/jobs";
+import { createAnimus } from "@animus/core";
+import { EMBEDDING_MODEL, loadType2Config, TYPE1_MODEL, type2Catalog } from "@animus/core/config";
+import { createJobQueue, scheduleBackfill, startWorker } from "@animus/core/jobs";
 import { createDb, migrate } from "@animus/db";
 
 const redisUrl = process.env.REDIS_URL ?? "redis://localhost:6379";
@@ -17,14 +17,14 @@ const db = createDb(databaseUrl);
 await migrate(db);
 
 // Geen `jobs`-dep hier (#125): de worker voért de reflectie-jobs zelf uit i.p.v. ze in te plannen.
-const brain = createBrain({ db, type1: TYPE1_MODEL, type2: loadType2Config(), type2Catalog: type2Catalog(), embedder: EMBEDDING_MODEL });
+const animus = createAnimus({ db, type1: TYPE1_MODEL, type2: loadType2Config(), type2Catalog: type2Catalog(), embedder: EMBEDDING_MODEL });
 
 const worker = startWorker({
   connection: redisUrl,
   handlers: {
-    reflectie: (payload) => brain.runReflection(payload.dynimoId, payload),
-    herinnering: (payload) => brain.storeMemory(payload),
-    backfill: (payload) => brain.backfillDynimo(payload.dynimoId),
+    reflectie: (payload) => animus.runReflection(payload.dynimoId, payload),
+    herinnering: (payload) => animus.storeMemory(payload),
+    backfill: (payload) => animus.backfillDynimo(payload.dynimoId),
   },
 });
 
@@ -35,7 +35,7 @@ console.log("[worker] klaar");
 // een fout hier mag de worker niet laten stoppen (zelfde afweging als de oude backfill-cli).
 const backfillQueue = createJobQueue({ connection: redisUrl });
 try {
-  await scheduleBackfill(backfillQueue, (await brain.list()).map((dynimo) => dynimo.id));
+  await scheduleBackfill(backfillQueue, (await animus.list()).map((dynimo) => dynimo.id));
 } catch (error) {
   console.warn("Backfill inplannen overgeslagen:", error instanceof Error ? error.message : error);
 }

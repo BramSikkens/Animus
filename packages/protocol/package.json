@@ -15,7 +15,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@animus/brain": "workspace:*"
+    "@animus/core": "workspace:*"
   },
   "devDependencies": {
     "typescript": "5.9.3",

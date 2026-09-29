@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useLocalParticipant } from "@livekit/components-react";
-import { ageLabel } from "@animus/brain/age";
+import { ageLabel } from "@animus/core/age";
 import { COMMAND_TOPIC, type GalleryBeing, type GalleryCommand, type GalleryGrave } from "@animus/protocol/gallery";
 
 // Dev-only, geen auth: de agent valideert het commando zelf.

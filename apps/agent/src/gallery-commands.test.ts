@@ -7,10 +7,10 @@ const rows = [
 ];
 
 function setup(list = rows) {
-  const brain = { list: vi.fn(async () => list), wake: vi.fn(async () => null), sleep: vi.fn(async () => {}), kill: vi.fn(async () => null), bringToLife: vi.fn(async () => ({})) };
+  const animus = { list: vi.fn(async () => list), wake: vi.fn(async () => null), sleep: vi.fn(async () => {}), kill: vi.fn(async () => null), bringToLife: vi.fn(async () => ({})) };
   const publishGallery = vi.fn();
-  const handle = createCommandHandler({ brain, publishGallery, onError: () => {} });
-  return { brain, publishGallery, handle };
+  const handle = createCommandHandler({ animus, publishGallery, onError: () => {} });
+  return { animus, publishGallery, handle };
 }
 
 describe("galleryMessageFor", () => {
@@ -41,53 +41,53 @@ describe("galleryMessageFor", () => {
 
 describe("createCommandHandler", () => {
   it("wekt bij een geldig wake-commando en publiceert daarna de Galerij", async () => {
-    const { brain, publishGallery, handle } = setup();
+    const { animus, publishGallery, handle } = setup();
     await handle({ type: "wake", id: 1 });
-    expect(brain.wake).toHaveBeenCalledWith(1);
+    expect(animus.wake).toHaveBeenCalledWith(1);
     expect(publishGallery).toHaveBeenCalledTimes(1);
   });
 
   it("laat de wakkere Dynimo slapen bij sleep met zijn id", async () => {
-    const { brain, publishGallery, handle } = setup();
+    const { animus, publishGallery, handle } = setup();
     await handle({ type: "sleep", id: 2 });
-    expect(brain.sleep).toHaveBeenCalledTimes(1);
+    expect(animus.sleep).toHaveBeenCalledTimes(1);
     expect(publishGallery).toHaveBeenCalledTimes(1);
   });
 
   it("negeert sleep voor een Dynimo die niet wakker is (een verlopen Terug mag een andere niet slapen leggen)", async () => {
-    const { brain, handle } = setup();
+    const { animus, handle } = setup();
     await handle({ type: "sleep", id: 1 });
-    expect(brain.sleep).not.toHaveBeenCalled();
+    expect(animus.sleep).not.toHaveBeenCalled();
   });
 
   it("doodt bij kill met id en bevestigde naam en publiceert daarna de Galerij", async () => {
-    const { brain, publishGallery, handle } = setup();
+    const { animus, publishGallery, handle } = setup();
     await handle({ type: "kill", id: 1, name: "Anna" });
-    expect(brain.kill).toHaveBeenCalledWith(1, "Anna");
+    expect(animus.kill).toHaveBeenCalledWith(1, "Anna");
     expect(publishGallery).toHaveBeenCalledTimes(1);
   });
 
   it("brengt een nieuwe Dynimo tot leven bij birth en publiceert daarna de Galerij", async () => {
-    const { brain, publishGallery, handle } = setup();
+    const { animus, publishGallery, handle } = setup();
     await handle({ type: "birth" });
-    expect(brain.bringToLife).toHaveBeenCalledTimes(1);
+    expect(animus.bringToLife).toHaveBeenCalledTimes(1);
     expect(publishGallery).toHaveBeenCalledTimes(1);
   });
 
   it("doet niets bij ongeldige commando's", async () => {
-    const { brain, publishGallery, handle } = setup();
+    const { animus, publishGallery, handle } = setup();
     for (const bad of [null, "wake", { type: "kill", id: 1 }, { type: "wake", id: "1" }, { type: "wake", id: 1.5 }, { type: "kill", id: 1, name: 3 }]) await handle(bad);
-    expect(brain.kill).not.toHaveBeenCalled();
-    expect(brain.wake).not.toHaveBeenCalled();
-    expect(brain.sleep).not.toHaveBeenCalled();
+    expect(animus.kill).not.toHaveBeenCalled();
+    expect(animus.wake).not.toHaveBeenCalled();
+    expect(animus.sleep).not.toHaveBeenCalled();
     expect(publishGallery).not.toHaveBeenCalled();
   });
 
-  it("gooit niet als het brein faalt, maar meldt de fout", async () => {
-    const { brain } = setup();
-    brain.wake.mockRejectedValue(new Error("db weg"));
+  it("gooit niet als de Animus faalt, maar meldt de fout", async () => {
+    const { animus } = setup();
+    animus.wake.mockRejectedValue(new Error("db weg"));
     const onError = vi.fn();
-    const handle = createCommandHandler({ brain, publishGallery: () => {}, onError });
+    const handle = createCommandHandler({ animus, publishGallery: () => {}, onError });
     await expect(handle({ type: "wake", id: 1 })).resolves.toBeUndefined();
     expect(onError).toHaveBeenCalled();
   });

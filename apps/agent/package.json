@@ -10,7 +10,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@animus/brain": "workspace:*",
+    "@animus/core": "workspace:*",
     "@animus/db": "workspace:*",
     "@animus/protocol": "workspace:*",
     "@livekit/agents": "1.9.0",

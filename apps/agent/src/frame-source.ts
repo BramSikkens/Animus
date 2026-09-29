@@ -12,7 +12,7 @@ import {
   type TrackPublication,
   type VideoFrame,
 } from "@livekit/rtc-node";
-import type { Frame } from "@animus/brain";
+import type { Frame } from "@animus/core";
 import { isEigenaar } from "@animus/protocol/security";
 
 const MAX_SIDE = 768;

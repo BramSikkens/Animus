@@ -1,6 +1,6 @@
-import { openBrain, openDb, openJobQueue } from "./bootstrap.js";
+import { openAnimus, openDb, openJobQueue } from "./bootstrap.js";
 import { migrate } from "@animus/db";
-import { scheduleBackfill } from "@animus/brain/jobs";
+import { scheduleBackfill } from "@animus/core/jobs";
 
 const direct = process.argv.includes("--direct");
 
@@ -12,12 +12,12 @@ async function main(): Promise<void> {
   const db = openDb();
   try {
     await migrate(db);
-    const brain = openBrain(db);
+    const animus = openAnimus(db);
     if (direct) {
-      console.log(`Backfill: ${await brain.backfill()} Dynimo(s) bijgewerkt.`);
+      console.log(`Backfill: ${await animus.backfill()} Dynimo(s) bijgewerkt.`);
       return;
     }
-    const ids = (await brain.list()).map((dynimo) => dynimo.id);
+    const ids = (await animus.list()).map((dynimo) => dynimo.id);
     const queue = openJobQueue();
     try {
       await scheduleBackfill(queue, ids);

@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { speechProvider, voicesFor } from "@animus/brain/voice";
+import { speechProvider, voicesFor } from "@animus/core/voice";
 import { dynimos } from "@animus/db/schema";
 import { db } from "../../lib/db";
 import { getCatalog, getTier } from "../../lib/voice-catalog";

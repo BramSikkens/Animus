@@ -1,4 +1,4 @@
-import type { SoundKind } from "@animus/brain/sound";
+import type { SoundKind } from "@animus/core/sound";
 
 /** Aantal opgenomen clips per triggersoort (public/sounds/<soort>-1..N.wav). */
 export const CLIPS_PER_KIND = 2;

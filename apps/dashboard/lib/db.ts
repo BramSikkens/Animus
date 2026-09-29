@@ -5,7 +5,7 @@ import * as schema from "@animus/db/schema";
 
 // Enkel het schema importeren (niet createDb/migrate uit @animus/db): zo komt er geen migratiecode in
 // de bundel. Eén client per proces; in dev bewaard op globalThis zodat hot-reload er geen lekt.
-// Het dashboard schrijft via de brain (server actions), dus deze verbinding is niet read-only.
+// Het dashboard schrijft via de Animus (server actions), dus deze verbinding is niet read-only.
 const globalForDb = globalThis as unknown as { animusDb?: Db };
 
 export const db: Db =

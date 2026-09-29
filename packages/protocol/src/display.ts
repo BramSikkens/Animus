@@ -1,5 +1,5 @@
 // Browser-veilig: geen node-imports. De agent én de gezichtje-app delen dit contract.
-import type { DisplayState } from "@animus/brain/display";
+import type { DisplayState } from "@animus/core/display";
 
 /** Bericht op het LiveKit data channel, van agent naar gezichtje. */
 export type DisplayMessage = {

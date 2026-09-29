@@ -1,6 +1,6 @@
 // Browser-veilig: geen node-imports. Pure vertaling van Stemming + expressiviteit naar ElevenLabs voiceSettings.
-import type { Emotion } from "@animus/brain/emotion";
-import { strength, type MoodValues } from "@animus/brain/mood";
+import type { Emotion } from "@animus/core/emotion";
+import { strength, type MoodValues } from "@animus/core/mood";
 
 export type VoiceSettings = { stability: number; style: number; speed: number; similarity_boost: number };
 

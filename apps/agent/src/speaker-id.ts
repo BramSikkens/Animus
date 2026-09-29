@@ -1,6 +1,6 @@
 /**
  * Smalle interface voor stemherkenning (ADR-0020, #92): `identify` per uiting, `enroll` bouwt een profiel op tot
- * "klaar", of geeft het na te veel beurten "opgegeven". Achter deze interface zit nu Eagle (eagle-speaker-id.ts); sherpa-onnx kan haar vervangen.
+ * "klaar", of geeft het na te veel beurten "opgegeven". Achter deze interface zit sherpa-onnx (sherpa-speaker-id.ts).
  */
 export type SpeakerId = {
   identify(pcm: Int16Array): { personId: number; score: number } | null;
@@ -34,7 +34,7 @@ export function bestMatch({
   return best;
 }
 
-export const DEFAULT_SPEAKER_MATCH_THRESHOLD = 0.5;
+export const DEFAULT_SPEAKER_MATCH_THRESHOLD = 0.55;
 
 /** Parseert SPEAKER_MATCH_THRESHOLD (0–1); ongeldig geeft een waarschuwing (patroon: parseInitiativeMinutes). */
 export function parseSpeakerMatchThreshold(value: string | undefined): { threshold: number; warning?: string } {

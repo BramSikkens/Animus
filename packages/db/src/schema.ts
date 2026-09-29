@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm";
 import { boolean, check, customType, date, index, integer, jsonb, pgTable, primaryKey, real, serial, text, timestamp, uniqueIndex, vector } from "drizzle-orm/pg-core";
 
-// Ruwe bytes (Eagle-stemprofiel, nooit audio zelf); drizzle-orm heeft geen ingebouwd bytea-type. Geen Buffer-type
+// Ruwe bytes (sherpa-onnx-embedding als Float32Array-bytes, nooit audio zelf); drizzle-orm heeft geen ingebouwd bytea-type. Geen Buffer-type
 // hier (dit package heeft geen @types/node): de postgres-driver accepteert/levert Uint8Array-compatibele waarden.
 const bytea = customType<{ data: Uint8Array; driverData: Uint8Array }>({
   dataType() {
@@ -100,7 +100,7 @@ export const persons = pgTable(
   (table) => [uniqueIndex("persons_single_owner_idx").on(sql`(true)`).where(sql`${table.owner}`)],
 );
 
-// Stemprofielen (#92): Eagle-profiel per Persoon, hoogstens 5 (oudste wordt vervangen, zie addVoiceProfile).
+// Stemprofielen (#92): sherpa-onnx-embedding per Persoon, hoogstens 5 (oudste wordt vervangen, zie addVoiceProfile).
 // Nooit audio zelf, enkel het geëxporteerde profiel (art. 9 AVG, ADR-0020).
 export const voiceProfiles = pgTable(
   "voice_profiles",

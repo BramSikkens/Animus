@@ -1,7 +1,7 @@
 import { AudioStream, RoomEvent, TrackSource, type RemoteParticipant, type RemoteTrack, type RemoteTrackPublication, type Room } from "@livekit/rtc-node";
 import { createSpeechAudioBuffer } from "./speech-audio-buffer.js";
 
-const SAMPLE_RATE = 16_000; // wat Eagle verwacht (identify/enroll)
+const SAMPLE_RATE = 16_000; // wat sherpa-onnx verwacht (identify/enroll)
 const PREROLL_MS = 500;
 const MAX_BUFFER_MS = 10_000;
 

@@ -6,3 +6,4 @@ dist
 next-env.d.ts
 *.tsbuildinfo
 .playwright-mcp
+apps/agent/models/

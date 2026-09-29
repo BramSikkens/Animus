@@ -1,7 +1,7 @@
 import type { Dynimo } from "@animus/brain";
 import type { EmotionMessage } from "@animus/brain/emotion";
 import { baseEmotionOf, FALLBACK_BASE, faceIntensity } from "@animus/brain/mood";
-import type { KenmerkenMessage, Vertrouwdheid } from "@animus/brain/kenmerken";
+import type { KenmerkenMessage, Vertrouwdheid } from "@animus/protocol/kenmerken";
 
 /** Bericht voor het gezichtje: de Stemming, of bij slapend een reset (geen `values`, dus geen balken). */
 export function emotionMessageFor(mood: EmotionMessage | null): Omit<EmotionMessage, "values"> & Partial<Pick<EmotionMessage, "values">> {

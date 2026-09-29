@@ -16,7 +16,9 @@ import {
 import { and, asc, cosineDistance, desc, eq, gt, gte, inArray, isNotNull, isNull, l2Distance, lte, notInArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { Db } from "@animus/db";
-import { dreams, drives, dynimos, epitaphs, faceEmbeddings, familiarities, memories, persons, voiceProfiles as voiceProfilesTable } from "@animus/db/schema";
+import { dreams, drives, dynimos, epitaphs, faceEmbeddings, familiarities, memories, persons, settings, voiceProfiles as voiceProfilesTable } from "@animus/db/schema";
+import type { Type2Catalog } from "./config.js";
+import type { JobPayloads, JobsDep } from "./jobs.js";
 import { formatAge } from "./age.js";
 import { archetypeOfferText, getArchetype, pickOffer } from "./archetypes.js";
 import { drivesPromptBlock, isActiveDrive, type DriveRow } from "./drives.js";
@@ -121,6 +123,24 @@ export type PersonSummary = { id: number; name: string; owner: boolean; createdA
 export type Type2Models = { light: LanguageModel; heavy: LanguageModel };
 
 export type Brain = {
+  /**
+   * Modelwissel-experiment (#123): provider:model-ids waaruit `setType2Models` mag kiezen. Zonder `type2Catalog`-
+   * dep (geen catalogus meegegeven) altijd leeg — dan is modelwissel niet beschikbaar.
+   */
+  availableModels(): string[];
+  /**
+   * Actief Type2-model (licht + zwaar), zoals de eerstvolgende beurt hem gebruikt. `isDefault` is true als geen
+   * van beide velden expliciet ingesteld is (dan gelden de env-standaarden). Zonder `type2Catalog`-dep: de vaste
+   * modelId's van `deps.type2`, altijd `isDefault: true` (zie createBrain hieronder voor de precieze afweging).
+   */
+  type2Models(): Promise<{ light: string; heavy: string; isDefault: boolean }>;
+  /**
+   * Modelwissel-experiment (#123): zet het globale Type2-model (licht/zwaar apart); null = terug naar de
+   * env-standaard voor dat veld. Gooit bij een id buiten `availableModels()`, of zonder `type2Catalog`-dep.
+   * Geldt meteen voor de eerstvolgende beurt, geen herstart nodig (geen caching, geen NOTIFY: elke Type2-aanroep
+   * leest de instelling zelf opnieuw).
+   */
+  setType2Models(choice: { light: string | null; heavy: string | null }): Promise<void>;
   /** Laat een nieuwe Dynimo geboren worden (genesis); die is meteen Wakker, een eerder wakkere gaat slapen. */
   bringToLife(): Promise<Dynimo>;
   /** Wekt de Dynimo (een eventueel andere wakkere gaat slapen). Null bij een onbekende id. */
@@ -140,12 +160,39 @@ export type Brain = {
    */
   backfill(): Promise<number>;
   /**
+   * Vult alle ontbrekende eigenschappen van één Dynimo aan (#127: door de worker aangeroepen na een `backfill`-job,
+   * buiten deze brain-instantie om ingepland). Probeert bij een fout in een stap tóch de overige stappen — ze zijn
+   * idempotent via `isMissing`, dus een retry pakt gewoon door waar het bleef steken. Meldt "kenmerken:<id>" als er
+   * iets veranderde, óók als een latere stap faalde, en gooit daarna de eerste fout opnieuw zodat BullMQ herkanst.
+   * Geeft terug of er iets veranderd is; false bij een onbekende id.
+   */
+  backfillDynimo(id: number): Promise<boolean>;
+  /**
    * Reflectie van de wakkere Dynimo (bij stilte); hij blijft wakker. `onStart` draait vlak vóór de Type2-call en
    * niet als er niets te reflecteren valt. Geeft true bij een toegepaste Reflectie, anders false; gooit nooit.
    * `aanwezig` (#94): Persoon-ids die tijdens de stilte in beeld waren; hun Vertrouwdheid daalt dan niet mee. Zonder
    * (weggelaten): huidig gedrag, iedereen daalt.
    */
   reflect(hooks?: { onStart?: () => void; aanwezig?: number[] }): Promise<boolean>;
+  /**
+   * Voert de Reflectie van één Dynimo echt uit (#125: door de worker aangeroepen, buiten deze brain-instantie om
+   * ingepland). Meldt "reflectie:start:<id>" op het toestandskanaal vlak vóór de Type2-call, en (enkel als die
+   * start-melding gebeurde) in een finally "reflectie:einde:<id>" — ook als de call faalt. Gooit door bij een fout
+   * (i.t.t. `reflect()`/`reflectAll()`, die nooit gooien): BullMQ moet de job dan als mislukt zien en herkansen.
+   */
+  runReflection(dynimoId: number, options: { sleeping: boolean; aanwezig?: number[] }): Promise<void>;
+  /**
+   * Slaat een Herinnering écht op (#126: door de worker aangeroepen na een `herinnering`-job, buiten deze
+   * brain-instantie om ingepland via remember()). Bevat de FK-terugval van #107. Gooit door bij een andere fout
+   * (bv. embed-fout): BullMQ moet de job dan als mislukt zien en herkansen.
+   */
+  storeMemory(payload: JobPayloads["herinnering"]): Promise<{ id: number }>;
+  /**
+   * Meldt van buitenaf (#125: de agent op basis van een NOTIFY van de worker) dat een Reflectie van deze Dynimo
+   * start (`running: true`) of eindigt (`running: false`). Werkt dezelfde teller bij als reflectDynimo() intern
+   * gebruikt, zodat considerInitiative() ook een Reflectie die in een ander proces (de worker) draait respecteert.
+   */
+  noteReflection(dynimoId: number, running: boolean): void;
   /**
    * Dashboard-override: zet de Stemming van deze Dynimo direct (ook lager dan de huidige); ze dooft daarna
    * gewoon uit, de Basisemotie blijft ongewijzigd. False bij een onbekende id; gooit bij een ongeldige intensiteit.
@@ -157,8 +204,8 @@ export type Brain = {
   setAxes(id: number, axes: Axes): Promise<boolean>;
   /** Dashboard: zet de TTS-stem (null = default van de agent); de agent past die direct toe. False bij een onbekende id. */
   setVoiceProfile(id: number, profile: { voice: string | null; description: string | null }): Promise<boolean>;
-  /** Dashboard-override: zet de Vertrouwdheid van de eigenaar (0–1). False bij een onbekende id. */
-  setFamiliarity(id: number, familiarity: number): Promise<boolean>;
+  /** Dashboard-override: zet de Vertrouwdheid van `personId` (default eigenaar, 0–1). False bij een onbekende id. */
+  setFamiliarity(id: number, familiarity: number, personId?: number): Promise<boolean>;
   /** Dashboard: Vertrouwdheid van `personId` (default eigenaar) met deze Dynimo; 0.2 zonder rij (#91). Leest de eigenaar enkel, maakt hem nooit aan (#111). */
   familiarityOf(dynimoId: number, personId?: number): Promise<number>;
   /** Naam van `personId` (default eigenaar), of null zonder rij; één lichte query, maakt de eigenaar nooit aan (#111). */
@@ -244,18 +291,29 @@ const WAKE_LOCK_KEY = 7_142_001;
 /** Postgres NOTIFY-kanaal voor toestandswijzigingen. De payload stuurt de consument (dynimo-watch.ts `routeNotifyPayload`): STATE_PREFIXES verversen enkel dat deel; elke andere payload (wakker/slapend/gedood/genesis) laat de wakkere Dynimo opnieuw lezen. */
 export const STATE_CHANNEL = "animus_state";
 
+/** Hoe lang een door de worker gemelde Reflectie (#125) het initiatief hoogstens blokkeert zonder "einde"-melding. */
+export const REMOTE_REFLECTION_TTL_MS = 5 * 60_000;
+
 /** Payload-prefixen op STATE_CHANNEL (#111): producer (dit bestand) en consument (dynimo-watch.ts `routeNotifyPayload`) delen deze, i.p.v. losse string-literals. */
 export const STATE_PREFIXES = {
   mood: "mood:",
   voice: "voice:",
   persons: "persons:",
   kenmerken: "kenmerken:",
+  /** Reflectie-voortgang (#125): "reflectie:start:<id>" / "reflectie:einde:<id>", gemeld door de worker (runReflection). */
+  reflectie: "reflectie:",
 } as const;
 
 export function createBrain(deps: {
   db: Db;
   type1: Experimental_EvaluationModel;
   type2: Type2Models;
+  /**
+   * Modelwissel-experiment (#123): curated catalogus + resolver voor het globaal instelbare Type2-model.
+   * Ontbreekt deze: `availableModels()` geeft [], `setType2Models` gooit, `type2Models()` geeft de vaste
+   * modelId's van `type2` terug (altijd `isDefault: true`) — kortom, gedraagt zich als vóór #123.
+   */
+  type2Catalog?: Type2Catalog;
   embedder: EmbeddingModel;
   now?: () => Date;
   random?: () => number;
@@ -265,6 +323,14 @@ export function createBrain(deps: {
   lookFrame?: () => Promise<Frame | null>;
   /** Drempel (L2-afstand, pgvector `<->`) voor een "zekere" gezichtsmatch (#93); default afgeleid, zie DEFAULT_FACE_MATCH_DISTANCE. */
   faceMatchDistance?: number;
+  /**
+   * Achtergrondtaken via de wachtrij (#125, ADR-0022). Aanwezig: reflectAll()/reflect() plannen een reflectie-job
+   * in i.p.v. zelf te reflecteren en wachten er niet op. Ontbreekt deze: exact het huidige gedrag (rechtstreeks
+   * reflecteren) — zo blijven tests en CLI's zonder Redis werken. De worker geeft dit nooit mee: die voert de job
+   * juist zelf uit via runReflection(). Ook remember() plant hiermee een `herinnering`-job in i.p.v. zelf op te
+   * slaan (#126); de worker schrijft via storeMemory(), de producer wacht op de achtergrond op het resultaat.
+   */
+  jobs?: JobsDep;
 }): Brain {
   const now = deps.now ?? (() => new Date());
   const random = deps.random ?? Math.random;
@@ -331,15 +397,67 @@ export function createBrain(deps: {
     pendingWrites.add(promise);
     promise.finally(() => pendingWrites.delete(promise));
   }
+  // Herhalen tot de Set leeg is (#126): remember() met deps.jobs voegt zíjn eigen achtergrondwachter pas tóe
+  // terwijl de buitenste trackBackground al liep — één enkele allSettled() zou die nieuwe wachter missen.
   async function settled(): Promise<void> {
-    await Promise.allSettled(pendingWrites);
+    while (pendingWrites.size > 0) await Promise.allSettled([...pendingWrites]);
+  }
+
+  // Modelwissel-experiment (#123): id van een Type2-model voor op de Herinnering. `deps.type2.light/.heavy` zijn
+  // altijd al opgeloste LanguageModel-instanties (geen catalog); hun `modelId` is dan het enige zinvolle id.
+  function modelIdOf(model: LanguageModel): string {
+    return typeof model === "string" ? model : model.modelId;
+  }
+
+  function availableModels(): string[] {
+    return deps.type2Catalog?.available ?? [];
+  }
+
+  // Enige plek die de settings-rij leest; elke Type2-aanroep (ook hear()) roept dit zelf aan, per aanroep één
+  // kleine select, bewust geen caching/NOTIFY (ticket #123: minder complex, en modelwissel is een laagfrequente
+  // dashboard-actie). Zonder `type2Catalog`-dep helemaal geen select: het gedrag van vóór #123 blijft exact gelijk.
+  async function activeType2(): Promise<{ light: { id: string; model: LanguageModel }; heavy: { id: string; model: LanguageModel } }> {
+    if (!deps.type2Catalog) {
+      return { light: { id: modelIdOf(deps.type2.light), model: deps.type2.light }, heavy: { id: modelIdOf(deps.type2.heavy), model: deps.type2.heavy } };
+    }
+    const catalog = deps.type2Catalog;
+    const [row] = await deps.db.select().from(settings).where(eq(settings.id, 1));
+    const lightId = row?.type2Light ?? catalog.defaults.light;
+    const heavyId = row?.type2Heavy ?? catalog.defaults.heavy;
+    return { light: { id: lightId, model: catalog.resolve(lightId) }, heavy: { id: heavyId, model: catalog.resolve(heavyId) } };
+  }
+
+  async function type2Models(): Promise<{ light: string; heavy: string; isDefault: boolean }> {
+    // Zonder catalog is er niets instelbaars: de vaste modelId's van deps.type2 zijn dan per definitie "de standaard".
+    if (!deps.type2Catalog) return { light: modelIdOf(deps.type2.light), heavy: modelIdOf(deps.type2.heavy), isDefault: true };
+    const catalog = deps.type2Catalog;
+    const [row] = await deps.db.select().from(settings).where(eq(settings.id, 1));
+    return {
+      light: row?.type2Light ?? catalog.defaults.light,
+      heavy: row?.type2Heavy ?? catalog.defaults.heavy,
+      isDefault: (row?.type2Light ?? null) === null && (row?.type2Heavy ?? null) === null,
+    };
+  }
+
+  async function setType2Models(choice: { light: string | null; heavy: string | null }): Promise<void> {
+    if (!deps.type2Catalog) throw new Error("Modelwissel niet beschikbaar: brain is aangemaakt zonder type2Catalog.");
+    const available = deps.type2Catalog.available;
+    for (const [label, id] of [["light", choice.light] as const, ["heavy", choice.heavy] as const]) {
+      if (id !== null && !available.includes(id)) {
+        throw new Error(`Onbekend Type2-model voor ${label}: "${id}". Toegestaan: ${available.join(", ")}`);
+      }
+    }
+    await deps.db
+      .insert(settings)
+      .values({ id: 1, type2Light: choice.light, type2Heavy: choice.heavy })
+      .onConflictDoUpdate({ target: settings.id, set: { type2Light: choice.light, type2Heavy: choice.heavy } });
   }
 
   async function genesis(): Promise<{ dynimo: typeof dynimos.$inferInsert; drives: DrivesOutput; voice: { voice: string; description: string } | null }> {
     const seed = pickSeed(random);
     const offer = pickOffer(random);
     const result = await generateText({
-      model: deps.type2.heavy,
+      model: (await activeType2()).heavy.model,
       instructions: `${GENESIS_INSTRUCTIONS}\n${genesisArchetypeInstructions(archetypeOfferText(offer))}`,
       prompt: seed,
       output: Output.object({ schema: genesisSchema }),
@@ -411,12 +529,14 @@ export function createBrain(deps: {
   }
 
   // Reflectie na de wissel (de wissel zelf is dan al gecommit en genotificeerd). Een fout mag het slapen niet breken.
+  // Met `deps.jobs` (#125): enkel inplannen (dedup per Dynimo), de worker voert 'm uit — hier dus geen Type2-call.
   async function reflectAll(ids: number[]): Promise<void> {
     for (const id of ids) {
       try {
-        await reflectDynimo(id);
+        if (deps.jobs) await deps.jobs.enqueue("reflectie", { dynimoId: id, sleeping: true }, { deduplication: { id: `reflectie:${id}` } });
+        else await reflectDynimo(id);
       } catch (error) {
-        console.warn(`Reflectie faalde voor Dynimo ${id}:`, error instanceof Error ? error.message : error);
+        console.warn(`Reflectie${deps.jobs ? " inplannen" : ""} faalde voor Dynimo ${id}:`, error instanceof Error ? error.message : error);
       }
     }
   }
@@ -426,7 +546,7 @@ export function createBrain(deps: {
   // Lopende Reflecties per Dynimo-id (#114): enkel díe Dynimo neemt tijdens zijn eigen Reflectie geen initiatief,
   // niet de hele instantie (anders blokkeert de slaap-Reflectie van A het initiatief van B).
   const reflecting = new Map<number, number>();
-  async function reflectDynimo(id: number, onStart?: () => void, sleeping = true, aanwezig?: number[]): Promise<boolean> {
+  async function reflectDynimo(id: number, onStart?: () => void | Promise<void>, sleeping = true, aanwezig?: number[]): Promise<boolean> {
     reflecting.set(id, (reflecting.get(id) ?? 0) + 1);
     try {
       return await reflectDynimoInner(id, onStart, sleeping, aanwezig);
@@ -437,7 +557,7 @@ export function createBrain(deps: {
     }
   }
 
-  async function reflectDynimoInner(id: number, onStart: (() => void) | undefined, sleeping: boolean, aanwezig?: number[]): Promise<boolean> {
+  async function reflectDynimoInner(id: number, onStart: (() => void | Promise<void>) | undefined, sleeping: boolean, aanwezig?: number[]): Promise<boolean> {
     const [row] = await deps.db.select().from(dynimos).where(eq(dynimos.id, id));
     if (!row) return false;
     const fresh = await deps.db
@@ -464,9 +584,9 @@ export function createBrain(deps: {
     // De brain dobbelt, het model krijgt enkel de uitkomst. Alleen bij slapen: bij stilte blijft de Dynimo wakker.
     const dreaming = sleeping && random() < DREAM_CHANCE;
 
-    onStart?.();
+    await onStart?.();
     const { output } = await generateText({
-      model: deps.type2.heavy,
+      model: (await activeType2()).heavy.model,
       instructions: REFLECTION_INSTRUCTIONS,
       prompt: `Naam: ${row.name}
 Kern-karakter: ${row.coreCharacter}
@@ -584,14 +704,63 @@ ${fresh.map((memory) => `- (indruk ${memory.impression}) ${memory.text}`).join("
   // Reflectie van de wakkere Dynimo bij stilte: hij blijft wakker (geen wissel), maar meldt "kenmerken:<id>" als
   // assen/Verstand/Vertrouwdheid verschuiven (#111). Gooit nooit.
   // `aanwezig` (#94): Persoon-ids die tijdens de stilte in beeld waren; hun Vertrouwdheid daalt dan niet mee.
+  // Met `deps.jobs` (#125): plant enkel een reflectie-job in (zelfde dedup-id als reflectAll) en geeft meteen true
+  // terug; `hooks.onStart` is dan zinloos (de Type2-call gebeurt pas later, in de worker) en wordt genegeerd.
   async function reflect(hooks: { onStart?: () => void; aanwezig?: number[] } = {}): Promise<boolean> {
     try {
       const [awake] = await deps.db.select({ id: dynimos.id }).from(dynimos).where(isNotNull(dynimos.awakeSince));
-      return awake ? await reflectDynimo(awake.id, hooks.onStart, false, hooks.aanwezig) : false;
+      if (!awake) return false;
+      if (deps.jobs) {
+        await deps.jobs.enqueue(
+          "reflectie",
+          { dynimoId: awake.id, sleeping: false, aanwezig: hooks.aanwezig },
+          { deduplication: { id: `reflectie:${awake.id}` } },
+        );
+        return true;
+      }
+      return await reflectDynimo(awake.id, hooks.onStart, false, hooks.aanwezig);
     } catch (error) {
       console.warn("Reflectie bij stilte faalde:", error instanceof Error ? error.message : error);
       return false;
     }
+  }
+
+  // Voert de Reflectie echt uit (#125): door de worker aangeroepen. Meldt start/einde op het toestandskanaal (de
+  // agent luistert daar al, dynimo-watch.ts `routeNotifyPayload`); "einde" enkel als "start" ook gemeld is (anders
+  // valt er niets te reflecteren, zie reflectDynimoInner). Gooit door bij een fout (i.t.t. reflect()): BullMQ herkanst.
+  async function runReflection(id: number, options: { sleeping: boolean; aanwezig?: number[] }): Promise<void> {
+    let started = false;
+    try {
+      await reflectDynimo(
+        id,
+        async () => {
+          started = true;
+          await notifyStateChange(deps.db, `${STATE_PREFIXES.reflectie}start:${id}`).catch((error) =>
+            console.warn("Reflectie start melden faalde:", error instanceof Error ? error.message : error),
+          );
+        },
+        options.sleeping,
+        options.aanwezig,
+      );
+    } finally {
+      if (started) {
+        await notifyStateChange(deps.db, `${STATE_PREFIXES.reflectie}einde:${id}`).catch((error) =>
+          console.warn("Reflectie einde melden faalde:", error instanceof Error ? error.message : error),
+        );
+      }
+    }
+  }
+
+  // Reflecties in een ander proces (#125: de worker, gemeld via NOTIFY): per Dynimo tot wanneer ze blokkeren. Een
+  // vlag i.p.v. een teller (een herstarte job meldt twee keer "start" maar één keer "einde"), met een vervaltijd
+  // zodat een gecrashte worker of een gemiste "einde"-melding het initiatief niet voorgoed blokkeert.
+  const remoteReflecting = new Map<number, number>();
+  function noteReflection(id: number, running: boolean): void {
+    if (running) remoteReflecting.set(id, now().getTime() + REMOTE_REFLECTION_TTL_MS);
+    else remoteReflecting.delete(id);
+  }
+  function isReflecting(id: number): boolean {
+    return reflecting.has(id) || (remoteReflecting.get(id) ?? 0) > now().getTime();
   }
 
   // Per-Dynimo sessiestaat: mag niet doorsijpelen naar een ander (of nieuw) wezen.
@@ -696,7 +865,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
       isMissing: async (row) => rowAxes(row) === null,
       fill: async (row) => {
         const { output } = await generateText({
-          model: deps.type2.heavy,
+          model: (await activeType2()).heavy.model,
           instructions: BACKFILL_INSTRUCTIONS,
           prompt: backfillPrompt(row, await recentMemoryTexts(row.id)),
           output: Output.object({ schema: z.object({ axes: axesSchema }) }),
@@ -715,7 +884,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
         (await deps.db.select({ id: drives.id }).from(drives).where(eq(drives.dynimoId, row.id)).limit(1)).length === 0,
       fill: async (row) => {
         const { output } = await generateText({
-          model: deps.type2.heavy,
+          model: (await activeType2()).heavy.model,
           instructions: DRIVES_BACKFILL_INSTRUCTIONS,
           prompt: backfillPrompt(row, await recentMemoryTexts(row.id)),
           output: Output.object({ schema: z.object({ drives: drivesSchema }) }),
@@ -735,7 +904,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
       isMissing: async (row) => row.baseEmotion === null,
       fill: async (row) => {
         const { output } = await generateText({
-          model: deps.type2.heavy,
+          model: (await activeType2()).heavy.model,
           instructions: BASE_EMOTION_BACKFILL_INSTRUCTIONS,
           prompt: backfillPrompt(row, await recentMemoryTexts(row.id), await loadDrives(row.id)),
           output: Output.object({ schema: z.object({ baseEmotion: z.enum(EMOTIONS) }) }),
@@ -765,25 +934,42 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     },
   ];
 
+  // Alle stappen voor één Dynimo; een falende stap stopt de overige niet (idempotent via isMissing). Geeft of er
+  // iets veranderde en de eerste fout terug: backfillDynimo gooit die door (retry), backfill() logt hem.
+  async function fillDynimo(id: number): Promise<{ changed: boolean; error: unknown }> {
+    let changed = false;
+    let error: unknown;
+    for (const step of backfillSteps) {
+      try {
+        // Vers lezen vóór elke stap: latere stappen (Drijfveren) gebruiken wat eerdere stappen of een
+        // andere instantie (assen) net aanvulden.
+        const [row] = await deps.db.select().from(dynimos).where(eq(dynimos.id, id));
+        if (!row || !(await step.isMissing(row))) continue;
+        changed = (await step.fill(row)) || changed;
+      } catch (stepError) {
+        error ??= stepError;
+      }
+    }
+    // Assen/Verstand/Basisemotie vullen hierboven de kenmerken aan; het gezichtje ververst ze (#111).
+    if (changed) await notifyStateChange(deps.db, `${STATE_PREFIXES.kenmerken}${id}`);
+    return { changed, error };
+  }
+
+  async function backfillDynimo(id: number): Promise<boolean> {
+    const { changed, error } = await fillDynimo(id);
+    if (error !== undefined) throw error;
+    return changed;
+  }
+
   async function backfill(): Promise<number> {
     let updatedRows = 0;
     for (const listed of await list()) {
-      let changed = false;
-      for (const step of backfillSteps) {
-        try {
-          // Vers lezen vóór elke stap: latere stappen (Drijfveren) gebruiken wat eerdere stappen of een
-          // andere instantie (assen) net aanvulden.
-          const [row] = await deps.db.select().from(dynimos).where(eq(dynimos.id, listed.id));
-          if (!row || !(await step.isMissing(row))) continue;
-          changed = (await step.fill(row)) || changed;
-        } catch (error) {
-          console.warn(`Backfill faalde voor ${listed.name}:`, error instanceof Error ? error.message : error);
-        }
-      }
-      // Assen/Verstand/Basisemotie vullen hierboven de kenmerken aan; het gezichtje ververst ze (#111).
-      if (changed) {
-        updatedRows++;
-        await notifyStateChange(deps.db, `${STATE_PREFIXES.kenmerken}${listed.id}`);
+      try {
+        const { changed, error } = await fillDynimo(listed.id);
+        if (changed) updatedRows++;
+        if (error !== undefined) console.warn(`Backfill faalde voor ${listed.name}:`, error instanceof Error ? error.message : error);
+      } catch (error) {
+        console.warn(`Backfill faalde voor ${listed.name}:`, error instanceof Error ? error.message : error);
       }
     }
     return updatedRows;
@@ -870,13 +1056,32 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     }
   }
 
-  async function insertMemory(memoryText: string, dynimoId: number, impression: number, personId: number | null = null): Promise<number> {
+  // `model` (#123): het Type2-model-id dat deze Herinnering schreef (hear()/onthoud-tool); null bij een
+  // dashboard-Herinnering (addMemory) — die gaat buiten Type2 om.
+  async function insertMemory(memoryText: string, dynimoId: number, impression: number, personId: number | null = null, model: string | null = null): Promise<number> {
     const { embedding } = await embed({ model: deps.embedder, value: memoryText });
     const [row] = await deps.db
       .insert(memories)
-      .values({ dynimoId, personId, text: memoryText, embedding, createdAt: now(), impression })
+      .values({ dynimoId, personId, text: memoryText, embedding, createdAt: now(), impression, model })
       .returning({ id: memories.id });
     return row!.id;
+  }
+
+  // Hoe lang de producer (remember() met deps.jobs) op het job-resultaat wacht (#126) vóór hij opgeeft; ruim boven
+  // de standaard-retrybudget van DEFAULT_JOB_OPTIONS (5 pogingen, exponentiële backoff, samen ca. 30s).
+  const MEMORY_JOB_TTL_MS = 60_000;
+
+  // De echte opslag + FK-terugval van #107 (Persoon intussen verwijderd/samengevoegd → zonder Persoon bewaren);
+  // door remember() gebruikt in-process, en door de worker via storeMemory() (#126, na een `herinnering`-job).
+  // Gooit door bij een andere fout (bv. embed-fout): de aanroeper (remember()) vangt 'm zelf, of BullMQ herkanst.
+  async function storeMemory({ dynimoId, personId, text, impression, model }: JobPayloads["herinnering"]): Promise<{ id: number }> {
+    try {
+      return { id: await insertMemory(text, dynimoId, impression, personId, model) };
+    } catch (error) {
+      if (personId === null || violatedForeignKey(error) !== "memories_person_id_persons_id_fk") throw error;
+      console.warn(`Herinnering zonder Persoon opgeslagen: Persoon ${personId} bestaat niet (meer).`);
+      return { id: await insertMemory(text, dynimoId, impression, null, model) };
+    }
   }
 
   // De expliciete onthoud-tool geeft de neutrale Indruk 0.5; de eindremember van `hear` geeft die van Type1 mee.
@@ -886,19 +1091,39 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
   // mag enkel naar zíjn eigen, mogelijk intussen vervangen sessie schrijven. Verplicht en apart genoemd (niet
   // `session`): anders bindt een vergeten argument stilzwijgend aan de instance-brede `session` en is de bug van
   // punt 1 zo weer terug.
-  async function remember(memoryText: string, dynimoId = current?.id, impression = 0.5, personId: number | null = null, s: Session): Promise<boolean> {
+  // Met `deps.jobs` (#126): plant enkel een `herinnering`-job in en geeft meteen true terug zodra die ingepland is
+  // (de onthoud-tool meldt dan al "onthouden"); op de achtergrond (trackBackground, zodat settled() erop wacht)
+  // wacht de producer met jobs.finished() op de echte id van de worker (storeMemory) en schrijft die pas dán in
+  // `s` — exact dezelfde sessie-bookkeeping als het in-process pad hieronder. Faalt dat wachten (definitief
+  // mislukt of ttl), dan loggen en niets breken: de Herinnering is dan gewoon kwijt, net als een mislukte insert
+  // hieronder. Zonder `deps.jobs`: ongewijzigd gedrag.
+  async function remember(memoryText: string, dynimoId = current?.id, impression = 0.5, personId: number | null = null, s: Session, model: string | null = null): Promise<boolean> {
     if (dynimoId === undefined) return false;
-    try {
-      let id: number;
+    if (deps.jobs) {
+      const jobs = deps.jobs;
       try {
-        id = await insertMemory(memoryText, dynimoId, impression, personId);
+        const job = await jobs.enqueue("herinnering", { dynimoId, personId, text: memoryText, impression, model });
+        trackBackground(
+          jobs
+            .finished(job, MEMORY_JOB_TTL_MS)
+            .then((result) => {
+              const { id } = result as { id: number };
+              s.sessionMemoryIds.push(id);
+              // #92: apart bijgehouden zodat leerKennen precies de onbekende-Herinneringen van déze sessie kan koppelen.
+              if (personId === null) s.unknownSessionMemoryIds.push(id);
+            })
+            .catch((error) => {
+              console.warn("Herinnering opslaan (via job) faalde:", error instanceof Error ? error.message : error);
+            }),
+        );
+        return true;
       } catch (error) {
-        // #107: de Gesprekspartner is intussen verwijderd/samengevoegd; de Herinnering dan zonder Persoon bewaren.
-        // Bewust niet bij unknownSessionMemoryIds: ze hoorde bij een bekende Persoon, niet bij een latere leerKennen.
-        if (personId === null || violatedForeignKey(error) !== "memories_person_id_persons_id_fk") throw error;
-        console.warn(`Herinnering zonder Persoon opgeslagen: Persoon ${personId} bestaat niet (meer).`);
-        id = await insertMemory(memoryText, dynimoId, impression, null);
+        console.warn("Herinnering inplannen faalde:", error instanceof Error ? error.message : error);
+        return false;
       }
+    }
+    try {
+      const { id } = await storeMemory({ dynimoId, personId, text: memoryText, impression, model });
       s.sessionMemoryIds.push(id);
       // #92: apart bijgehouden zodat leerKennen precies de onbekende-Herinneringen van déze sessie kan koppelen.
       if (personId === null) s.unknownSessionMemoryIds.push(id);
@@ -1156,11 +1381,11 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     }
   }
 
-  async function setFamiliarity(id: number, familiarity: number): Promise<boolean> {
+  async function setFamiliarity(id: number, familiarity: number, personId?: number): Promise<boolean> {
     // Geen omliggende transactie: upsertFamiliarity vangt een FK-violation (verwijderde Dynimo) zelf af en
     // geeft dan false terug; in een expliciete transactie zou die afgevangen fout de transactie toch in de
     // aborted-toestand laten (elke volgende statement, ook de notify, zou dan alsnog falen).
-    const ok = await upsertFamiliarity(id, await getOwnerId(), familiarity);
+    const ok = await upsertFamiliarity(id, personId ?? (await getOwnerId()), familiarity);
     // Payload "kenmerken:", zie notifyStateChange.
     if (ok) await notifyStateChange(deps.db, `${STATE_PREFIXES.kenmerken}${id}`);
     return ok;
@@ -1433,6 +1658,9 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     // expliciet "onbekende" Gesprekspartner mag zelf geen eigenaar-fallback triggeren. Stuurt de recall-bonus en
     // de Spontane herinnering.
     const presentIdsPromise = safe(presentPersonIds(gesprekspartner, options.aanwezig, ownerId));
+    // Modelwissel-experiment (#123): welk Type2-model deze beurt gebruikt, staat pas vast ná Intent (hieronder);
+    // het lezen van de instelling zelf hangt daar niet van af, en start dus hier al parallel met Type1 (#109).
+    const type2Promise = safe(activeType2());
 
     const { deltas: type1Deltas, indruk, intent, kijken } = await (options.initiatief
       ? Promise.resolve<Type1Result>({ deltas: {}, indruk: 0.2, intent: "simpel", kijken: initiatiefKijken })
@@ -1574,8 +1802,13 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
           }
         : {};
 
+    // Modelwissel-experiment (#123): licht of zwaar zoals Type1's Intent besliste; de select zelf liep al parallel
+    // met Type1 hierboven (type2Promise), enkel de keuze licht/zwaar hangt van `intent` af.
+    const type2Choice = intent === "complex" ? (await type2Promise).heavy : (await type2Promise).light;
+
     // Tools van deze beurt (#91): de onthoud-tool sluit over de Gesprekspartner van déze beurt, niet over instance-state.
-    const turnTools = createTools({ now, remember: (memoryText: string) => remember(memoryText, being.id, undefined, personId, s) });
+    // `type2Choice.id` (#123): de onthoud-tool schrijft ook een Herinnering, dus ook die krijgt het model van déze beurt.
+    const turnTools = createTools({ now, remember: (memoryText: string) => remember(memoryText, being.id, undefined, personId, s, type2Choice.id) });
 
     // Naam van de Gesprekspartner (#92): bekend (met owner-vlag) of onbekend. Al gestart parallel met Type1 (#109).
     const speakerPerson = await speakerPersonPromise;
@@ -1645,7 +1878,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
       ...noFrameMessage,
     ];
 
-    const model = intent === "complex" ? deps.type2.heavy : deps.type2.light;
+    const model = type2Choice.model;
     // Tweede Anthropic-cachebreakpoint op het laatste geschiedenisbericht: zonder deze marker cachet Anthropic
     // (in tegenstelling tot OpenAI's automatische prefix-cache) alleen wat vóór een expliciete breakpoint staat,
     // dus zonder deze tweede marker blijft enkel `stable` gecached en niet de (groeiende) geschiedenis erna. Kopie
@@ -1763,7 +1996,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
             }
           }
           if (outcome !== "failed" && full.trim()) {
-            await remember(options.initiatief ? `${being.name}: ${full}` : `Gesprekspartner: ${text}\n${being.name}: ${full}`, being.id, indruk, personIdAtEnd, s);
+            await remember(options.initiatief ? `${being.name}: ${full}` : `Gesprekspartner: ${text}\n${being.name}: ${full}`, being.id, indruk, personIdAtEnd, s, type2Choice.id);
           }
         })(),
       );
@@ -1784,7 +2017,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
     // (1) Aparte, finale Type2-call: de laatste woorden, niet een bestaande reflectie.
     // Faalt die, dan wordt er bewust niets verwijderd: geen Grafschrift zonder laatste woorden.
     const { text: farewellReflection } = await generateText({
-      model: deps.type2.heavy,
+      model: (await activeType2()).heavy.model,
       instructions: [
         { role: "system", content: buildStableSystemPrompt(being, await loadDrives(id)) },
         ageMessage(being),
@@ -1819,7 +2052,7 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
   async function considerInitiative(aanleiding?: Aanleiding, options: { aanwezig?: number[] } = {}): Promise<string | null> {
     const [awake] = await deps.db.select().from(dynimos).where(isNotNull(dynimos.awakeSince));
     if (!awake) return null;
-    if (reflecting.has(awake.id)) return null;
+    if (isReflecting(awake.id)) return null;
     adopt(awake); // wisselen wist de pending-ids (en askedName) van de vorige Dynimo vóór we die van deze lezen
     // #114: vastleggen ná adopt() — een wissel die tijdens de (async) Type1-call gebeurt, mag deze check niet meer raken.
     const s = session;
@@ -1905,13 +2138,20 @@ ${recent.map((text) => `- ${text}`).join("\n") || "(nog geen)"}`;
   }
 
   return {
+    availableModels,
+    type2Models,
+    setType2Models,
     bringToLife,
     wake,
     sleep,
     kill,
     list,
     backfill,
+    backfillDynimo,
     reflect,
+    runReflection,
+    storeMemory,
+    noteReflection,
     considerInitiative,
     hear,
     settled,

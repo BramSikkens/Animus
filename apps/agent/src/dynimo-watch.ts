@@ -41,6 +41,8 @@ export type NotifyHandlers = {
   onKenmerken?: () => void;
   /** Elke toestandsmelding behalve Stemming/kenmerken (wakker/slapend/genesis/gedood/stem/personen): ververst bv. de Galerij. */
   onNotify?: () => void;
+  /** Reflectie-voortgang van de worker (#125, payload "reflectie:start:<id>"/"reflectie:einde:<id>"): geen check()/onNotify erbij. */
+  onReflectie?: (phase: "start" | "einde", dynimoId: number) => void;
 };
 
 /**
@@ -50,6 +52,11 @@ export type NotifyHandlers = {
 export function routeNotifyPayload(payload: string, handlers: NotifyHandlers): void {
   // Zoals "mood:": enkel het gezichtje ververst zijn kenmerken, geen wissel of Galerij-update als bijwerking.
   if (payload.startsWith(STATE_PREFIXES.mood)) return void handlers.onMood?.();
+  if (payload.startsWith(STATE_PREFIXES.reflectie)) {
+    const [phase, idText] = payload.slice(STATE_PREFIXES.reflectie.length).split(":");
+    const dynimoId = Number(idText);
+    if ((phase === "start" || phase === "einde") && Number.isFinite(dynimoId)) return void handlers.onReflectie?.(phase, dynimoId);
+  }
   if (payload.startsWith(STATE_PREFIXES.kenmerken)) return void handlers.onKenmerken?.();
   handlers.onNotify?.();
   if (payload.startsWith(STATE_PREFIXES.voice)) return void handlers.onVoice?.();

@@ -153,6 +153,9 @@ export const memories = pgTable(
     impression: real("impression").notNull().default(0.5),
     // Laatst spontaan aangehaald (Spontane herinnering, cooldown); null = nog nooit.
     lastRecalledAt: timestamp("last_recalled_at", { withTimezone: true }),
+    // Modelwissel-experiment (#123): welk Type2-model deze Herinnering schreef (hear()/onthoud-tool). Null bij
+    // een dashboard-Herinnering (addMemory) — die gaat buiten Type2 om.
+    model: text("model"),
   },
   (table) => [
     index("memories_embedding_idx").using("hnsw", table.embedding.op("vector_cosine_ops")),
@@ -243,3 +246,15 @@ export const epitaphs = pgTable("epitaphs", {
   deletedAt: timestamp("deleted_at", { withTimezone: true }).notNull(),
   farewellReflection: text("farewell_reflection").notNull(),
 });
+
+// Modelwissel-experiment (#123): singleton-rij (id vast op 1) met het globaal ingestelde Type2-model; null per
+// veld = env-standaard (TYPE2_LIGHT_MODEL/TYPE2_HEAVY_MODEL). Geen historiek, één actieve keuze per omgeving.
+export const settings = pgTable(
+  "settings",
+  {
+    id: integer("id").primaryKey().default(1),
+    type2Light: text("type2_light"),
+    type2Heavy: text("type2_heavy"),
+  },
+  (table) => [check("settings_single_row", sql`${table.id} = 1`)],
+);

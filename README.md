@@ -10,16 +10,19 @@ Dit is het softwareprototype, dat op je eigen computer draait. Later volgt een p
 |---|---|
 | `packages/brain` | De kern: Type1 (snelle reflex-classificatie) en Type2 (het redenerende LLM-brein, wisselbaar via de Vercel AI SDK), geheugen, karakter, Stemming, Personen |
 | `packages/db` | Drizzle-schema en migraties voor PostgreSQL met pgvector |
+| `packages/protocol` | Berichten tussen agent en gezichtje over LiveKit (topics, berichttypes, validatie) |
 | `apps/agent` | LiveKit-agent: spraak in en uit (VAD, STT, TTS), stem- en gezichtsherkenning, en het brein in-process |
 | `apps/face` | Het gezichtje (Vite + React): ogen, mond en wenkbrauwen, Galerij van Dynimo's, perceptie in de browser (MediaPipe, Human) |
 | `apps/dashboard` | Beheer (Next.js): Dynimo's, Herinneringen, Personen samenvoegen, stemmen |
+| `apps/worker` | Voert achtergrondtaken uit (BullMQ + Redis, zie [ADR-0022](docs/adr/0022-bullmq-redis-voor-achtergrondtaken.md)) |
+| `apps/cli` | Terminal-tools: repl, verwijder, slaap-allen, backfill |
 
 Architectuurbeslissingen staan in [docs/adr](docs/adr).
 
 ## Vereisten
 
 - Node.js 23 of nieuwer en [pnpm](https://pnpm.io) 10
-- Docker (voor PostgreSQL/pgvector en een lokale LiveKit-server)
+- Docker (voor PostgreSQL/pgvector, Redis en een lokale LiveKit-server)
 - API-sleutels: minstens één LLM-provider (OpenAI of Anthropic) en de Vercel AI Gateway voor Type1; optioneel Deepgram (STT), ElevenLabs (TTS) en Picovoice (stemherkenning)
 
 ## Opstarten
@@ -40,7 +43,7 @@ Download eenmalig de modellen voor de turn-detectie van de agent:
 pnpm agent:download
 ```
 
-Start alles (databank en LiveKit via Docker, daarna agent, gezichtje en dashboard):
+Start alles (databank, Redis en LiveKit via Docker, daarna agent, worker, gezichtje en dashboard):
 
 ```bash
 pnpm dev
@@ -65,7 +68,15 @@ pnpm typecheck
 pnpm repl
 ```
 
+```bash
+pnpm kiosk
+```
+
 `pnpm test` draait alle tests; de brain-tests maken daarvoor een wegwerp-database `animus_test` aan in de Docker-Postgres. `pnpm repl` praat in de terminal met de wakkere Dynimo, zonder spraak.
+
+## Kiosk
+
+`pnpm kiosk` opent het gezichtje schermvullend in Chrome of Chromium (kiosk-mode, zonder adresbalk), met camera/microfoon/autoplay al toegestaan. De dev-server moet al draaien (`pnpm dev` of `pnpm face`); zonder draaiende server, of zonder gevonden Chrome/Chromium, stopt het script met een duidelijke melding. Op macOS vraagt het systeem de eerste keer nog één keer toestemming voor camera en microfoon voor Chrome zelf. Afsluiten: Cmd+Q. Toestemmingen en de Galerij-keuze staan in een eigen profielmap (`~/.animus-kiosk`, buiten de repo) — verwijder die map om ze te resetten. Hetzelfde script werkt op Linux (bv. de Pi in fase 4) met Chromium.
 
 ## Beveiliging
 

@@ -70,6 +70,20 @@ button:hover {
   color: #f66;
 }
 
+/* Kiosk-mode (#122): geen scrollbalken/selectie, cursor verdwijnt na stilstand. */
+.kiosk {
+  user-select: none;
+}
+
+.kiosk ::-webkit-scrollbar {
+  display: none;
+}
+
+.kiosk.idle,
+.kiosk.idle * {
+  cursor: none !important;
+}
+
 .debug-panel {
   position: fixed;
   top: 1rem;

@@ -27,5 +27,19 @@ services:
       - "127.0.0.1:7881:7881"
       - "127.0.0.1:7882:7882/udp"
 
+  redis:
+    image: redis:7.4-alpine
+    command: --appendonly yes
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - animus_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
 volumes:
   animus_db_data:
+  animus_redis_data:

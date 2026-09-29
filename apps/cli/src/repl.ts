@@ -1,21 +1,15 @@
+import { openBrain, openDb, openJobQueue } from "./bootstrap.js";
 import { createInterface } from "node:readline/promises";
-import { fileURLToPath } from "node:url";
-import { createDb, migrate } from "@animus/db";
-import { createBrain, formatAge } from "./index.js";
-import { EMBEDDING_MODEL, loadType2Config, TYPE1_MODEL } from "./config.js";
-
-try {
-  process.loadEnvFile(fileURLToPath(new URL("../../../.env", import.meta.url)));
-} catch {
-  // .env is optioneel: de omgevingsvariabelen kunnen ook al gezet zijn (bv. via shell/CI).
-}
+import { migrate } from "@animus/db";
+import { formatAge } from "@animus/brain";
 
 async function main(): Promise<void> {
-  const databaseUrl = process.env.DATABASE_URL ?? "postgres://animus:animus@localhost:5433/animus";
-  const db = createDb(databaseUrl);
+  const db = openDb();
   await migrate(db);
 
-  const brain = createBrain({ db, type1: TYPE1_MODEL, type2: loadType2Config(), embedder: EMBEDDING_MODEL });
+  // Reflectie via de wachtrij (#125): enkel inplannen, de worker voert 'm uit.
+  const jobs = openJobQueue();
+  const brain = openBrain(db, jobs);
   const awake = (await brain.list()).find((dynimo) => dynimo.awakeSince);
 
   if (awake) {
@@ -48,6 +42,8 @@ async function main(): Promise<void> {
     }
     rl.prompt();
   }
+  await brain.settled();
+  await jobs.close();
   await db.$client.end();
 }
 

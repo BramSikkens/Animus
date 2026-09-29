@@ -12,6 +12,7 @@
   "dependencies": {
     "@animus/brain": "workspace:*",
     "@animus/db": "workspace:*",
+    "@animus/protocol": "workspace:*",
     "@livekit/agents": "1.9.0",
     "@livekit/agents-plugin-deepgram": "1.9.0",
     "@livekit/agents-plugin-elevenlabs": "1.9.0",

@@ -12,14 +12,16 @@ import {
   useVoiceAssistant,
 } from "@livekit/components-react";
 import { ConnectionState, type LocalAudioTrack } from "livekit-client";
-import { DISPLAY_STATES, DISPLAY_TOPIC, isDisplayState, type DisplayState } from "@animus/brain/display";
-import { GALLERY_TOPIC, justWoken, parseGalleryMessage, screenFor, selectionLost, type GalleryBeing, type GalleryGrave, type GalleryMessage } from "@animus/brain/gallery";
+import { DISPLAY_STATES, isDisplayState, type DisplayState } from "@animus/brain/display";
+import { DISPLAY_TOPIC } from "@animus/protocol/display";
+import { GALLERY_TOPIC, parseGalleryMessage, type GalleryBeing, type GalleryGrave, type GalleryMessage } from "@animus/protocol/gallery";
+import { justWoken, screenFor, selectionLost } from "./gallery-screen.js";
 import { Gallery, useSendCommand } from "./Gallery.js";
 import { EMOTION_TOPIC, EMOTIONS, isEmotion, type Emotion, type EmotionMessage } from "@animus/brain/emotion";
-import { isKenmerkenMessage, KENMERKEN_TOPIC, type KenmerkenMessage } from "@animus/brain/kenmerken";
+import { isKenmerkenMessage, KENMERKEN_TOPIC, type KenmerkenMessage } from "@animus/protocol/kenmerken";
 import { kenmerkenPanel } from "./kenmerken-panel.js";
 import { doodleActive } from "./face/doodle.js";
-import { isSoundKind, SOUND_TOPIC } from "@animus/brain/sound";
+import { isSoundKind, SOUND_TOPIC } from "@animus/protocol/sound";
 import { clipUrl } from "./sound.js";
 import { Face } from "./face/Face.js";
 import { voiceReaction, type VoiceReaction } from "./face/voice-reaction.js";

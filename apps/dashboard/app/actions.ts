@@ -16,14 +16,15 @@ import { getCatalog } from "../lib/voice-catalog";
 export type ActionState = { error?: string };
 
 // Een string uit `work` is een foutmelding; gooit `work`, dan wordt de fout leesbaar getoond i.p.v. te crashen.
-async function run(work: () => Promise<string | void>, path = "/"): Promise<ActionState> {
+// Revalideert de hele schil (#128): elke pagina (overzicht, Dynimo, Personen, …) toont de wijziging meteen.
+async function run(work: () => Promise<string | void>): Promise<ActionState> {
   try {
     const error = await work();
     if (error) return { error };
   } catch (error) {
     return { error: error instanceof Error ? error.message : String(error) };
   }
-  revalidatePath(path);
+  revalidatePath("/", "layout");
   return {};
 }
 
@@ -102,7 +103,11 @@ export async function setFamiliarity(_prev: ActionState, formData: FormData): Pr
     if (id === null) return INVALID_ID;
     const familiarity = parseFamiliarity((name) => formData.get(name));
     if (familiarity === null) return "Ongeldige vertrouwdheid.";
-    if (!(await getBrain().setFamiliarity(id, familiarity))) return DYNIMO_GONE;
+    // Optioneel: Vertrouwdheid van een specifieke Persoon i.p.v. de eigenaar (Relaties-tabel op de Dynimo-pagina, #129).
+    const rawPersonId = formData.get("personId");
+    const personId = rawPersonId ? Number(rawPersonId) : undefined;
+    if (personId !== undefined && !(Number.isInteger(personId) && personId > 0)) return "Ongeldige Persoon.";
+    if (!(await getBrain().setFamiliarity(id, familiarity, personId))) return DYNIMO_GONE;
   });
 }
 
@@ -176,7 +181,7 @@ export async function renamePerson(_prev: ActionState, formData: FormData): Prom
     if (id === null) return INVALID_PERSON;
     const name = String(formData.get("name") ?? "");
     if (!(await getBrain().renamePerson(id, name))) return "Ongeldige naam (of de Persoon bestaat niet meer).";
-  }, "/personen");
+  });
 }
 
 // Bevestiging zoals bij verwijderen: de exacte naam van de Persoon die verdwijnt (removeId), vóór het samenvoegen.
@@ -190,7 +195,7 @@ export async function mergePersons(_prev: ActionState, formData: FormData): Prom
       return "De naam klopt niet (of de Persoon bestaat niet meer). Er is niets samengevoegd.";
     }
     if (!(await getBrain().mergePersons(keepId, removeId))) return "Kan deze twee Personen niet samenvoegen.";
-  }, "/personen");
+  });
 }
 
 export async function relearnPerson(_prev: ActionState, formData: FormData): Promise<ActionState> {
@@ -198,7 +203,7 @@ export async function relearnPerson(_prev: ActionState, formData: FormData): Pro
     const id = parseId(formData);
     if (id === null) return INVALID_PERSON;
     if (!(await getBrain().relearnPerson(id))) return PERSON_GONE;
-  }, "/personen");
+  });
 }
 
 // Zoals kill(): de exacte naam ter bevestiging; de check gebeurt in de brain.
@@ -210,7 +215,7 @@ export async function deletePerson(_prev: ActionState, formData: FormData): Prom
     if (!(await getBrain().deletePerson(id, name))) {
       return "De naam klopt niet, of dit is de eigenaar (of de Persoon bestaat niet meer). Er is niets verwijderd.";
     }
-  }, "/personen");
+  });
 }
 
 // Stemontwerp (ElevenLabs). De API-key blijft server-side in process.env.
@@ -255,4 +260,16 @@ export async function cloneVoiceAction(_prev: ActionState, formData: FormData): 
     const voice = await cloneVoice(fetch, elevenKey(), { name, files, consent: formData.get("consent") === "on" });
     if (!(await getBrain().setVoiceProfile(id, { voice, description: null }))) return DYNIMO_GONE;
   });
+}
+
+// Modelwissel (#132): globaal Type2-model; een leeg veld = terug naar de standaard uit .env. Geldt vanaf de volgende beurt.
+export async function setType2Models(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  return run(async () => {
+    const field = (name: string) => String(formData.get(name) ?? "").trim() || null;
+    await getBrain().setType2Models({ light: field("light"), heavy: field("heavy") });
+  });
+}
+
+export async function resetType2Models(_prev: ActionState, _formData: FormData): Promise<ActionState> {
+  return run(() => getBrain().setType2Models({ light: null, heavy: null }));
 }

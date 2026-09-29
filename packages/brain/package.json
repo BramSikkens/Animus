@@ -11,11 +11,9 @@
     "./emotion": "./src/emotion.ts",
     "./familiarity": "./src/familiarity.ts",
     "./display": "./src/display.ts",
-    "./gallery": "./src/gallery.ts",
-    "./kenmerken": "./src/kenmerken.ts",
+    "./jobs": "./src/jobs.ts",
     "./perception": "./src/perception.ts",
     "./personality": "./src/personality.ts",
-    "./security": "./src/security.ts",
     "./drives": "./src/drives.ts",
     "./mood": "./src/mood.ts",
     "./sound": "./src/sound.ts",
@@ -24,23 +22,20 @@
     "./verstand": "./src/verstand.ts",
     "./voice": "./src/voice.ts",
     "./voice-catalog": "./src/voice-catalog.ts",
-    "./voice-design": "./src/voice-design.ts",
-    "./voice-emotion": "./src/voice-emotion.ts"
+    "./voice-design": "./src/voice-design.ts"
   },
   "scripts": {
     "test": "vitest run",
-    "typecheck": "tsc --noEmit",
-    "repl": "tsx src/repl.ts",
-    "verwijder": "tsx src/delete-cli.ts",
-    "slaap-allen": "tsx src/sleep-all-cli.ts",
-    "backfill": "tsx src/backfill-cli.ts"
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "4.0.61",
     "@ai-sdk/openai": "4.0.73",
     "@animus/db": "workspace:*",
     "ai": "7.0.112",
+    "bullmq": "5.81.5",
     "drizzle-orm": "0.45.3",
+    "ioredis": "5.11.1",
     "zod": "4.6.5"
   },
   "devDependencies": {

@@ -1,16 +1,19 @@
 import { fileURLToPath } from "node:url";
 import { createBrain, defaultVoiceDeps } from "@animus/brain";
-import { DISPLAY_TOPIC, type DisplayMessage, type DisplayState } from "@animus/brain/display";
-import { COMMAND_TOPIC, GALLERY_TOPIC, type GalleryMessage } from "@animus/brain/gallery";
-import { decodeEmbedding, isWaarneming, PERCEPTION_TOPIC, type Aanleiding, type Gesprekspartner } from "@animus/brain/perception";
+import type { DisplayState } from "@animus/brain/display";
+import { DISPLAY_TOPIC, type DisplayMessage } from "@animus/protocol/display";
+import { COMMAND_TOPIC, GALLERY_TOPIC, type GalleryMessage } from "@animus/protocol/gallery";
+import type { Aanleiding, Gesprekspartner } from "@animus/brain/perception";
+import { decodeEmbedding, isWaarneming, PERCEPTION_TOPIC } from "@animus/protocol/perception";
 import { EMOTION_TOPIC } from "@animus/brain/emotion";
-import { KENMERKEN_TOPIC, type KenmerkenMessage } from "@animus/brain/kenmerken";
+import { KENMERKEN_TOPIC, type KenmerkenMessage } from "@animus/protocol/kenmerken";
 import { initiativeFactor } from "@animus/brain/behavior";
-import { isEigenaar, livekitEnv } from "@animus/brain/security";
+import { isEigenaar, livekitEnv } from "@animus/protocol/security";
 import { moodOfRow } from "@animus/brain/mood";
 import { rowAxes } from "@animus/brain/personality";
 import { resolveVoice, speechProvider } from "@animus/brain/voice";
-import { EMBEDDING_MODEL, loadType2Config, TYPE1_MODEL } from "@animus/brain/config";
+import { EMBEDDING_MODEL, loadType2Config, TYPE1_MODEL, type2Catalog } from "@animus/brain/config";
+import { createJobQueue } from "@animus/brain/jobs";
 import { createDb, migrate } from "@animus/db";
 import { cli, defineAgent, ServerOptions, voice, type JobContext, type JobProcess, type VAD } from "@livekit/agents";
 import * as deepgram from "@livekit/agents-plugin-deepgram";
@@ -32,7 +35,7 @@ import { createEagleSpeakerId } from "./eagle-speaker-id.js";
 import { createFaces, parseFaceMatchDistance } from "./faces.js";
 import { parseSpeakerMatchThreshold, type SpeakerId } from "./speaker-id.js";
 import { createSpeakerAudio } from "./speaker-audio.js";
-import { voiceSettingsFor } from "@animus/brain/voice-emotion";
+import { voiceSettingsFor } from "./voice-emotion.js";
 import { pacingFor, withPacingSpeed } from "@animus/brain/speech-pacing";
 import { applyTtsEmotion, applyTtsVoice } from "./tts-voice.js";
 import { resolveDisplay, voiceDisplay } from "./voice-display.js";
@@ -100,15 +103,20 @@ export default defineAgent<AgentUserData>({
     const faceMatchDistanceConfig = parseFaceMatchDistance(process.env.FACE_MATCH_DISTANCE);
     if (faceMatchDistanceConfig.warning) console.warn(faceMatchDistanceConfig.warning);
 
+    // Reflectie via de wachtrij (#125, ADR-0022): de agent plant enkel in, de worker voert uit.
+    const jobs = createJobQueue({ connection: process.env.REDIS_URL ?? "redis://localhost:6379" });
+
     // In-process (spec: geen aparte brein-API); elke job krijgt zijn eigen brein-instantie.
     // voices: een geboorte vanuit de Galerij kiest net als in het dashboard een stem.
-    const brain = createBrain({ db, type1: TYPE1_MODEL, type2: loadType2Config(), embedder: EMBEDDING_MODEL, voices: defaultVoiceDeps(process.env), lookFrame: () => frames.latest(), faceMatchDistance: faceMatchDistanceConfig.distance });
+    const brain = createBrain({ db, type1: TYPE1_MODEL, type2: loadType2Config(), type2Catalog: type2Catalog(), embedder: EMBEDDING_MODEL, voices: defaultVoiceDeps(process.env), lookFrame: () => frames.latest(), faceMatchDistance: faceMatchDistanceConfig.distance, jobs });
 
     ctx.addShutdownCallback(async () => frames.dispose());
     ctx.addShutdownCallback(async () => {
       // Shutdown-callbacks draaien parallel (Promise.allSettled): settled() moet hier, vóór db.$client.end(),
       // wachten in dezelfde callback — anders gaan Herinneringen die nog op de achtergrond opslaan (#109) verloren.
+      // Idem de wachtrij (#126): settled() wacht op job-resultaten, dus pas daarna de Redis-verbindingen sluiten.
       await brain.settled();
+      await jobs.close();
       await db.$client.end();
     });
 
@@ -259,12 +267,9 @@ export default defineAgent<AgentUserData>({
     if (silenceConfig.warning) console.warn(silenceConfig.warning);
     const silence = createSilenceTimer({
       thresholdMs: silenceConfig.ms,
-      onSilence: () => {
-        const key = watcher.current().key;
-        void brain
-          .reflect({ onStart: () => reflectionDisplay.onStart(key), aanwezig: faces.seenAny() ? faces.present(Date.now()) : undefined })
-          .then(() => reflectionDisplay.onFinish(key));
-      },
+      // De worker voert de Reflectie uit en meldt start/einde zelf op het toestandskanaal (watchDynimos' onReflectie
+      // hieronder); hier enkel nog inplannen.
+      onSilence: () => void brain.reflect({ aanwezig: faces.seenAny() ? faces.present(Date.now()) : undefined }),
     });
     ctx.addShutdownCallback(async () => silence.dispose());
 
@@ -418,6 +423,15 @@ export default defineAgent<AgentUserData>({
         void refreshInitiativeAxes().catch(() => {});
       },
       onNotify: () => void publishGallery(),
+      // Reflectie van de worker (#125): de initiatief-blokkade volgt altijd, het "reflecterend"-gezicht enkel als
+      // het de huidige wakkere Dynimo is (een Reflectie bij slapen/wisselen hoort niet meer bij de huidige generatie).
+      onReflectie: (phase, dynimoId) => {
+        brain.noteReflection(dynimoId, phase === "start");
+        const state = watcher.current();
+        if (state.row?.id !== dynimoId) return;
+        if (phase === "start") reflectionDisplay.onStart(state.key);
+        else reflectionDisplay.onFinish(state.key);
+      },
       onVoice: () =>
         void readState(brain)
           .then((state) => applyVoice(state.voice))

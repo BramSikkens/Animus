@@ -3,7 +3,7 @@ import { MockEmbeddingModelV4, MockLanguageModelV4, Experimental_EvaluationMockM
 import { simulateReadableStream } from "ai";
 import { EMBEDDING_DIMENSIONS, drives, dynimos, memories } from "@animus/db/schema";
 import { eq } from "drizzle-orm";
-import { createBrain, type BrainEvent } from "../src/index.js";
+import { createBrain, REMOTE_REFLECTION_TTL_MS, type BrainEvent } from "../src/index.js";
 import { singleEmotionValues } from "../src/mood.js";
 import { createTestDb, truncateAll } from "./db.js";
 
@@ -273,6 +273,55 @@ describe("considerInitiative(): Reflectie", () => {
 
     release();
     expect(await reflecting).toBe(true);
+  });
+});
+
+describe("noteReflection() (#125): initiatief-blokkade van buitenaf melden, bv. door de worker)", () => {
+  it("blokkeert het initiatief van Dynimo A en heft de blokkade na noteReflection(A, false) weer op", async () => {
+    const dynimoA = await insertDynimo();
+    const type1 = initiativeType1({ spreken: "ja" });
+    const brain = brainWith(type1.model);
+
+    brain.noteReflection(dynimoA.id, true);
+    expect(await brain.considerInitiative()).toBeNull();
+
+    brain.noteReflection(dynimoA.id, false);
+    expect(await brain.considerInitiative()).not.toBeNull();
+  });
+
+  it("blokkeert het initiatief van Dynimo B niet als enkel A genoteerd is", async () => {
+    const dynimoA = await insertDynimo({ awakeSince: null }); // A: slaapt, enkel om zijn id te reserveren
+    const dynimoB = await insertDynimo({ name: "Wies", awakeSince: new Date(bornAt.getTime() + 1000) });
+    const type1 = initiativeType1({ spreken: "ja" });
+    const brain = brainWith(type1.model);
+
+    brain.noteReflection(dynimoA.id, true);
+
+    expect(await brain.considerInitiative()).not.toBeNull(); // B is wakker, A's blokkade raakt B niet
+  });
+
+  it("één einde heft de blokkade op, ook na een dubbele start (herstarte job na een worker-crash)", async () => {
+    const dynimoA = await insertDynimo();
+    const brain = brainWith(initiativeType1({ spreken: "ja" }).model);
+
+    brain.noteReflection(dynimoA.id, true);
+    brain.noteReflection(dynimoA.id, true);
+    brain.noteReflection(dynimoA.id, false);
+
+    expect(await brain.considerInitiative()).not.toBeNull();
+  });
+
+  it("een start zonder einde (worker gecrasht, melding gemist) blokkeert niet langer dan REMOTE_REFLECTION_TTL_MS", async () => {
+    const dynimoA = await insertDynimo();
+    let at = bornAt.getTime();
+    const brain = createBrain({ db, embedder: embedModel(), type1: initiativeType1({ spreken: "ja" }).model, type2: { light: unusedModel(), heavy: unusedModel() }, now: () => new Date(at), random: () => 0 });
+
+    brain.noteReflection(dynimoA.id, true);
+    at += REMOTE_REFLECTION_TTL_MS - 1;
+    expect(await brain.considerInitiative()).toBeNull();
+
+    at += 2;
+    expect(await brain.considerInitiative()).not.toBeNull();
   });
 });
 

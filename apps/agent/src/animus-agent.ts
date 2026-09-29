@@ -1,7 +1,8 @@
 import { ReadableStream } from "node:stream/web";
 import type { Brain } from "@animus/brain";
-import { LOOK_TOPIC, type Gesprekspartner } from "@animus/brain/perception";
-import { SOUND_TOPIC, type SoundMessage } from "@animus/brain/sound";
+import type { Gesprekspartner } from "@animus/brain/perception";
+import { LOOK_TOPIC } from "@animus/protocol/perception";
+import { SOUND_TOPIC, type SoundMessage } from "@animus/protocol/sound";
 import { EMOTION_TOPIC, type EmotionMessage } from "@animus/brain/emotion";
 import { llm, voice, type ChatContext, type ChatMessage, type JobContext, type ToolContext } from "@livekit/agents";
 import { withFaceExpressiveness } from "./state-republish.js";

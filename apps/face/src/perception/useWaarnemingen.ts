@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { FaceDetector, ObjectDetector, FilesetResolver } from "@mediapipe/tasks-vision";
 import { useLocalParticipant } from "@livekit/components-react";
-import { encodeEmbedding, PERCEPTION_TOPIC, type Waarneming } from "@animus/brain/perception";
+import { encodeEmbedding, PERCEPTION_TOPIC, type Waarneming } from "@animus/protocol/perception";
 import { createPresence } from "./presence.js";
 import { createObjectTracker } from "./objects.js";
 import { createFaceSendRule } from "./face-send.js";

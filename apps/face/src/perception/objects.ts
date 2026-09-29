@@ -1,4 +1,4 @@
-import { isWaarneming } from "@animus/brain/perception";
+import { isWaarneming } from "@animus/protocol/perception";
 
 // Hergebruikt de trust-boundary-regex van isWaarneming (OBJECT_PATTERN) i.p.v. die te dupliceren.
 const isValidLabel = (label: string): boolean => isWaarneming({ soort: "nieuw-object", object: label });

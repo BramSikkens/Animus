@@ -5,14 +5,6 @@ import type { Mood } from "./mood.js";
 export const SOUND_KINDS = ["kirren", "zuchten", "brommen"] as const;
 export type SoundKind = (typeof SOUND_KINDS)[number];
 
-export function isSoundKind(value: unknown): value is SoundKind {
-  return typeof value === "string" && (SOUND_KINDS as readonly string[]).includes(value);
-}
-
-/** Bericht op het LiveKit data channel, van agent naar gezichtje. */
-export type SoundMessage = { kind: SoundKind };
-export const SOUND_TOPIC = "sound";
-
 /** Een andere Emotie telt pas als zichtbare verandering vanaf deze intensiteit. */
 export const VISIBLE_EMOTION_MIN_INTENSITY = 0.4;
 /** Dezelfde Emotie telt als zichtbaar veranderd bij minstens dit intensiteitsverschil. */

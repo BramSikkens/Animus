@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useDataChannel } from "@livekit/components-react";
-import { LOOK_TOPIC } from "@animus/brain/perception";
+import { LOOK_TOPIC } from "@animus/protocol/perception";
 import { overlayBoxes } from "./overlay.js";
 import type { VisionSnapshot } from "./useWaarnemingen.js";
 

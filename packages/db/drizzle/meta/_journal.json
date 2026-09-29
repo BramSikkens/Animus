@@ -204,6 +204,13 @@
       "when": 1790421097335,
       "tag": "0028_recall_btree_indexen",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1790440406880,
+      "tag": "0029_settings_type2",
+      "breakpoints": true
     }
   ]
 }

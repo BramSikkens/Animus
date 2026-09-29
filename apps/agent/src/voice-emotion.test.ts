@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { singleEmotionValues } from "../src/mood.js";
-import { voiceSettingsFor } from "../src/voice-emotion.js";
+import { singleEmotionValues } from "@animus/brain/mood";
+import { voiceSettingsFor } from "./voice-emotion.js";
 
 const NEUTRAL = { stability: 0.5, style: 0, speed: 1, similarity_boost: 0.75 };
 

@@ -7,46 +7,56 @@ import { setVoice } from "./actions";
 
 const SHOWN = 30;
 
-// Catalogus per Dynimo: filter/zoek, voorluisteren, kiezen. `hint` en `description` zijn klik-om-te-zoeken suggesties.
-// ponytail: de lijst wordt per Dynimo meegestuurd; één gedeelde client-store als het aantal Dynimo's groeit.
-export function VoiceCatalog({
-  id,
-  voices,
-  current,
-  description,
-  hint,
-}: {
-  id: number;
-  voices: CatalogVoice[];
-  current: string | null;
-  description: string;
-  hint: string;
-}) {
+export type DynimoOption = { id: number; name: string; voiceDescription: string | null };
+
+// Toewijzen van één stem aan een gekozen Dynimo (select), met de huidige beschrijving van die Dynimo als startpunt
+// zodat toewijzen de beschrijving niet onbedoeld wist (setVoice zet een lege beschrijving op null).
+function AssignVoice({ voiceId, dynimos }: { voiceId: string; dynimos: DynimoOption[] }) {
+  const [targetId, setTargetId] = useState(dynimos[0]!.id);
+  const [description, setDescription] = useState(dynimos[0]!.voiceDescription ?? "");
+
+  function onTargetChange(id: number) {
+    setTargetId(id);
+    setDescription(dynimos.find((d) => d.id === id)?.voiceDescription ?? "");
+  }
+
+  return (
+    <ActionForm action={setVoice} label="Toewijzen" pendingLabel="Wijst toe…" stacked>
+      <input type="hidden" name="voice" value={voiceId} />
+      <select name="id" aria-label="Toewijzen aan" value={targetId} onChange={(e) => onTargetChange(Number(e.target.value))}>
+        {dynimos.map((dynimo) => (
+          <option key={dynimo.id} value={dynimo.id}>
+            {dynimo.name}
+          </option>
+        ))}
+      </select>
+      <input
+        name="voiceDescription"
+        aria-label="Stembeschrijving"
+        placeholder="Stembeschrijving"
+        maxLength={500}
+        value={description}
+        onChange={(e) => setDescription(e.target.value)}
+      />
+    </ActionForm>
+  );
+}
+
+// Stemcatalogus (Stemmen-pagina, #131): filter/zoek, voorluisteren, toewijzen aan een gekozen Dynimo.
+export function VoiceCatalog({ voices, dynimos }: { voices: CatalogVoice[]; dynimos: DynimoOption[] }) {
   const [text, setText] = useState("");
   const [gender, setGender] = useState("");
   const [age, setAge] = useState("");
   const [language, setLanguage] = useState("nl");
-  const [selected, setSelected] = useState(current ?? "");
   const found = filterVoices(voices, { text, gender, age, language });
-  const suggestions = [...new Set(`${hint},${description}`.split(/[,;]/).map((part) => part.trim()).filter(Boolean))];
 
   return (
-    <details>
+    <details open>
       <summary>Stemcatalogus ({voices.length} stemmen)</summary>
       <p>
         Zoek een stem die past bij het karakter, &quot;in de geest van&quot; een type (bv. oude man, wijze vrouw). Geen stemmen van bestaande
         personen of filmkarakters.
       </p>
-      {suggestions.length > 0 && (
-        <p>
-          Suggestie:{" "}
-          {suggestions.map((suggestion) => (
-            <button key={suggestion} type="button" onClick={() => setText(suggestion)}>
-              {suggestion}
-            </button>
-          ))}
-        </p>
-      )}
       <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Zoek (naam, beschrijving, accent)" aria-label="Zoek stem" />
       <select value={gender} onChange={(e) => setGender(e.target.value)} aria-label="Geslacht">
         <option value="">geslacht: alle</option>
@@ -74,25 +84,13 @@ export function VoiceCatalog({
             {voice.description && <div>{voice.description}</div>}
             {voice.previewUrl && <audio controls preload="none" src={voice.previewUrl} />}
             {voice.usableOnFree ? (
-              <button type="button" onClick={() => setSelected(voice.id)} aria-pressed={selected === voice.id}>
-                {selected === voice.id ? "Gekozen" : "Kies"}
-              </button>
+              <AssignVoice voiceId={voice.id} dynimos={dynimos} />
             ) : (
               <em>{FREE_TIER_MESSAGE}</em>
             )}
           </li>
         ))}
       </ul>
-      <ActionForm action={setVoice} label="Gekozen stem zetten" pendingLabel="Zet…" id={id}>
-        <input type="hidden" name="voice" value={selected} />
-        <input name="voiceDescription" aria-label="Stembeschrijving" placeholder="Stembeschrijving" maxLength={500} defaultValue={description} />
-        <p>
-          Gekozen: {selected || "standaard"}{" "}
-          <button type="button" onClick={() => setSelected("")}>
-            Standaard
-          </button>
-        </p>
-      </ActionForm>
     </details>
   );
 }

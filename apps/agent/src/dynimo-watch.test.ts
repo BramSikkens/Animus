@@ -44,6 +44,28 @@ describe("routeNotifyPayload", () => {
     expect(check).not.toHaveBeenCalled();
   });
 
+  it("routeert \"reflectie:start:<id>\" naar onReflectie(\"start\", id), zonder check() of onNotify", () => {
+    const check = vi.fn();
+    const onNotify = vi.fn();
+    const onReflectie = vi.fn();
+    routeNotifyPayload("reflectie:start:3", { check, onNotify, onReflectie });
+    expect(onReflectie).toHaveBeenCalledOnce();
+    expect(onReflectie).toHaveBeenCalledWith("start", 3);
+    expect(onNotify).not.toHaveBeenCalled();
+    expect(check).not.toHaveBeenCalled();
+  });
+
+  it("routeert \"reflectie:einde:<id>\" naar onReflectie(\"einde\", id), zonder check() of onNotify", () => {
+    const check = vi.fn();
+    const onNotify = vi.fn();
+    const onReflectie = vi.fn();
+    routeNotifyPayload("reflectie:einde:3", { check, onNotify, onReflectie });
+    expect(onReflectie).toHaveBeenCalledOnce();
+    expect(onReflectie).toHaveBeenCalledWith("einde", 3);
+    expect(onNotify).not.toHaveBeenCalled();
+    expect(check).not.toHaveBeenCalled();
+  });
+
   it("valt terug op check() voor elke andere melding", () => {
     const check = vi.fn();
     const onNotify = vi.fn();

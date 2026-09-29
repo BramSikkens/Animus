@@ -16,7 +16,7 @@ export function createTestDb(): Db {
 }
 
 export async function truncateAll(db: Db): Promise<void> {
-  await db.execute(`TRUNCATE TABLE dynimos, memories, drives, epitaphs, persons, familiarities, voice_profiles, face_embeddings RESTART IDENTITY CASCADE`);
+  await db.execute(`TRUNCATE TABLE dynimos, memories, drives, epitaphs, persons, familiarities, voice_profiles, face_embeddings, settings RESTART IDENTITY CASCADE`);
 }
 
 /** Bestaande eigenaar-rij, of maakt er één aan (gedeeld tussen testbestanden die "zonder aanwezig-signalen" opzetten, #94). */

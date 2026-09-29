@@ -1,0 +1,22 @@
+{
+  "name": "@animus/cli",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "repl": "tsx src/repl.ts",
+    "verwijder": "tsx src/verwijder.ts",
+    "slaap-allen": "tsx src/slaap-allen.ts",
+    "backfill": "tsx src/backfill.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@animus/brain": "workspace:*",
+    "@animus/db": "workspace:*",
+    "drizzle-orm": "0.45.3"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.2",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3"
+  }
+}

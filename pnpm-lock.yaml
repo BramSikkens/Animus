@@ -71,6 +71,28 @@ importers:
         specifier: 5.0.1
         version: 5.0.1(@opentelemetry/api@1.9.1)(@types/node@26.6.2)(vite@8.3.0(@types/node@26.6.2)(esbuild@0.28.2)(tsx@4.23.15))
 
+  apps/cli:
+    dependencies:
+      '@animus/brain':
+        specifier: workspace:*
+        version: link:../../packages/brain
+      '@animus/db':
+        specifier: workspace:*
+        version: link:../../packages/db
+      drizzle-orm:
+        specifier: 0.45.3
+        version: 0.45.3(@opentelemetry/api@1.9.1)(postgres@3.4.9)
+    devDependencies:
+      '@types/node':
+        specifier: 26.6.2
+        version: 26.6.2
+      tsx:
+        specifier: 4.23.15
+        version: 4.23.15
+      typescript:
+        specifier: 5.9.3
+        version: 5.9.3
+
   apps/dashboard:
     dependencies:
       '@animus/brain':

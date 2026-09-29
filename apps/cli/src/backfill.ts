@@ -1,14 +1,6 @@
-import { fileURLToPath } from "node:url";
-import { createDb, migrate } from "@animus/db";
-import { createBrain } from "./index.js";
-import { EMBEDDING_MODEL, loadType2Config, TYPE1_MODEL, type2Catalog } from "./config.js";
-import { createJobQueue, scheduleBackfill } from "./jobs.js";
-
-try {
-  process.loadEnvFile(fileURLToPath(new URL("../../../.env", import.meta.url)));
-} catch {
-  // .env is optioneel: de omgevingsvariabelen kunnen ook al gezet zijn (bv. via shell/CI).
-}
+import { openBrain, openDb, openJobQueue } from "./bootstrap.js";
+import { migrate } from "@animus/db";
+import { scheduleBackfill } from "@animus/brain/jobs";
 
 const direct = process.argv.includes("--direct");
 
@@ -17,16 +9,16 @@ const direct = process.argv.includes("--direct");
 // Bewust niet-fataal: een fout hier (bv. ontbrekende model-env-vars, of geen bereikbare Redis) mag `pnpm dev` niet
 // laten stoppen.
 async function main(): Promise<void> {
-  const db = createDb(process.env.DATABASE_URL ?? "postgres://animus:animus@localhost:5433/animus");
+  const db = openDb();
   try {
     await migrate(db);
-    const brain = createBrain({ db, type1: TYPE1_MODEL, type2: loadType2Config(), type2Catalog: type2Catalog(), embedder: EMBEDDING_MODEL });
+    const brain = openBrain(db);
     if (direct) {
       console.log(`Backfill: ${await brain.backfill()} Dynimo(s) bijgewerkt.`);
       return;
     }
     const ids = (await brain.list()).map((dynimo) => dynimo.id);
-    const queue = createJobQueue({ connection: process.env.REDIS_URL ?? "redis://localhost:6379" });
+    const queue = openJobQueue();
     try {
       await scheduleBackfill(queue, ids);
       console.log(`Backfill: ${ids.length} Dynimo('s) ingepland.`);

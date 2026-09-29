@@ -14,6 +14,7 @@ Dit is het softwareprototype, dat op je eigen computer draait. Later volgt een p
 | `apps/face` | Het gezichtje (Vite + React): ogen, mond en wenkbrauwen, Galerij van Dynimo's, perceptie in de browser (MediaPipe, Human) |
 | `apps/dashboard` | Beheer (Next.js): Dynimo's, Herinneringen, Personen samenvoegen, stemmen |
 | `apps/worker` | Voert achtergrondtaken uit (BullMQ + Redis, zie [ADR-0022](docs/adr/0022-bullmq-redis-voor-achtergrondtaken.md)) |
+| `apps/cli` | Terminal-tools: repl, verwijder, slaap-allen, backfill |
 
 Architectuurbeslissingen staan in [docs/adr](docs/adr).
 

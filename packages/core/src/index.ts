@@ -210,7 +210,7 @@ export type Animus = {
   familiarityOf(dynimoId: number, personId?: number): Promise<number>;
   /** Naam van `personId` (default eigenaar), of null zonder rij; één lichte query, maakt de eigenaar nooit aan (#111). */
   personName(personId?: number): Promise<string | null>;
-  /** Alle Stemprofielen (Eagle-export) van elke Persoon; nooit audio zelf (#92). */
+  /** Alle Stemprofielen (sherpa-onnx-embedding) van elke Persoon; nooit audio zelf (#92). */
   voiceProfiles(): Promise<{ personId: number; profile: Uint8Array }[]>;
   /** Voegt een Stemprofiel toe voor `personId`; houdt er hoogstens 5 (oudste eerst weg), in één transactie (#92). */
   addVoiceProfile(personId: number, profile: Uint8Array): Promise<void>;

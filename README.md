@@ -23,7 +23,7 @@ Architectuurbeslissingen staan in [docs/adr](docs/adr).
 
 - Node.js 23 of nieuwer en [pnpm](https://pnpm.io) 10
 - Docker (voor PostgreSQL/pgvector, Redis en een lokale LiveKit-server)
-- API-sleutels: minstens één LLM-provider (OpenAI of Anthropic) en de Vercel AI Gateway voor Type1; optioneel Deepgram (STT), ElevenLabs (TTS) en Picovoice (stemherkenning)
+- API-sleutels: minstens één LLM-provider (OpenAI of Anthropic) en de Vercel AI Gateway voor Type1; optioneel Deepgram (STT) en ElevenLabs (TTS). Stemherkenning gebruikt sherpa-onnx (lokaal model via `pnpm agent:download`), geen API-sleutel nodig.
 
 ## Opstarten
 

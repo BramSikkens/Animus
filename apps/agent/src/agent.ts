@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createAnimus, defaultVoiceDeps } from "@animus/core";
 import type { DisplayState } from "@animus/core/display";
@@ -31,7 +32,7 @@ import { createInitiativeTimer, initiativeIntervalMs, parseInitiativeMinutes } f
 import { createPerception, parseLookCooldownMinutes, parseReturnAfterMinutes } from "./perception.js";
 import { createReflectionDisplay } from "./reflection-display.js";
 import { createSilenceTimer, parseSilenceMinutes } from "./silence-timer.js";
-import { createEagleSpeakerId } from "./eagle-speaker-id.js";
+import { createSherpaSpeakerId } from "./sherpa-speaker-id.js";
 import { createFaces, parseFaceMatchDistance } from "./faces.js";
 import { parseSpeakerMatchThreshold, type SpeakerId } from "./speaker-id.js";
 import { createSpeakerAudio } from "./speaker-audio.js";
@@ -143,16 +144,17 @@ export default defineAgent<AgentUserData>({
       },
     });
 
-    // Stemherkenning (#92, ADR-0020): enkel aan als de sleutel gezet is én Eagle initialiseert; anders precies het
-    // huidige gedrag (geen gesprekspartner-optie, hear() valt terug op de eigenaar).
+    // Stemherkenning (#92, ADR-0020): enkel aan als het model aanwezig is én sherpa-onnx initialiseert; anders
+    // precies het huidige gedrag (geen gesprekspartner-optie, hear() valt terug op de eigenaar).
     const speakerThreshold = parseSpeakerMatchThreshold(process.env.SPEAKER_MATCH_THRESHOLD);
     if (speakerThreshold.warning) console.warn(speakerThreshold.warning);
+    const speakerModelPath = process.env.SPEAKER_MODEL_PATH || fileURLToPath(new URL("../models/3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced.onnx", import.meta.url));
     let speakerRecognition: { speakerId: SpeakerId; audio: ReturnType<typeof createSpeakerAudio> } | undefined;
-    if (process.env.PICOVOICE_ACCESS_KEY) {
+    if (existsSync(speakerModelPath)) {
       let speakerId: SpeakerId | undefined;
       try {
-        speakerId = createEagleSpeakerId({
-          accessKey: process.env.PICOVOICE_ACCESS_KEY,
+        speakerId = createSherpaSpeakerId({
+          modelPath: speakerModelPath,
           threshold: speakerThreshold.threshold,
           loadProfiles: () => animus.voiceProfiles(),
           saveProfile: (personId, profile) => animus.addVoiceProfile(personId, profile),
@@ -161,10 +163,12 @@ export default defineAgent<AgentUserData>({
         const audio = createSpeakerAudio(ctx.room, () => session.userState === "speaking");
         speakerRecognition = { speakerId, audio };
       } catch (error) {
-        // reload() kan falen ná een geslaagde new Eagle(...): dan wél de native resources weer vrijgeven.
+        // reload() kan falen ná een geslaagde new SpeakerEmbeddingExtractor(...): dan wél opruimen.
         speakerId?.dispose();
-        console.warn("Stemherkenning (Eagle) kon niet starten, blijft uit:", error instanceof Error ? error.message : error);
+        console.warn("Stemherkenning (sherpa-onnx) kon niet starten, blijft uit:", error instanceof Error ? error.message : error);
       }
+    } else {
+      console.warn(`Stemherkenning blijft uit: model niet gevonden op ${speakerModelPath} (draai \`pnpm agent:download\`).`);
     }
     ctx.addShutdownCallback(async () => {
       speakerRecognition?.speakerId.dispose();
